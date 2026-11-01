@@ -247,6 +247,8 @@ export interface DailyDutyLog {
   overallStatus?: string;
   timeSlots: DutyTimeSlot[];
   incidentsNote?: string;
+  academicYear?: string;
+  semester?: string;
   createdAt: string;
 }
 
@@ -732,6 +734,8 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
       overallStatus: summaryText,
       timeSlots: dutyLogForm.timeSlots,
       incidentsNote: dutyLogForm.incidentsNote,
+      academicYear: activeDutyYr,
+      semester: activeDutySem,
       createdAt: new Date().toISOString()
     };
 
@@ -1845,21 +1849,57 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
     return isNaN(d.getTime()) ? 'วันจันทร์' : thaiDays[d.getDay()];
   };
 
-  // 100-day Academic Calendar configuration defined by Admin (same source as Module3)
-  const attendanceConfigsByTerm = useMemo(() => StorageService.getAttendanceConfigsByTerm(), []);
+  // Available Academic Years from Settings
+  const [availableDutyAcademicYears, setAvailableDutyAcademicYears] = useState<string[]>(() => {
+    const stored = StorageService.getAcademicYears();
+    const base = stored && stored.length > 0 ? stored : ['2570', '2569', '2568', '2567'];
+    const current = schoolInfo?.academicYear || '2569';
+    return Array.from(new Set([current, ...base])).sort((a, b) => Number(b) - Number(a));
+  });
+
+  useEffect(() => {
+    return StorageService.subscribe(() => {
+      const stored = StorageService.getAcademicYears();
+      const base = stored && stored.length > 0 ? stored : ['2570', '2569', '2568', '2567'];
+      const current = schoolInfo?.academicYear || '2569';
+      setAvailableDutyAcademicYears(Array.from(new Set([current, ...base])).sort((a, b) => Number(b) - Number(a)));
+    });
+  }, [schoolInfo?.academicYear]);
+
+  // Admin local view-only state for switching Academic Year & Semester in Duty Teacher tab (does not modify schoolInfo or affect members)
+  const [selectedDutyAcademicYear, setSelectedDutyAcademicYear] = useState<string>(
+    schoolInfo?.academicYear || '2569'
+  );
+  const [selectedDutySemester, setSelectedDutySemester] = useState<string>(
+    schoolInfo?.semester || '1'
+  );
+
+  useEffect(() => {
+    if (schoolInfo?.academicYear) setSelectedDutyAcademicYear(schoolInfo.academicYear);
+    if (schoolInfo?.semester) setSelectedDutySemester(schoolInfo.semester);
+  }, [schoolInfo?.academicYear, schoolInfo?.semester]);
+
+  // For Admin: use local dropdown state; For Member: strictly use schoolInfo set by Admin in Settings
+  const activeDutyYr = isAdmin
+    ? selectedDutyAcademicYear
+    : (schoolInfo?.academicYear || '2569');
+  const activeDutySem = isAdmin
+    ? selectedDutySemester
+    : (schoolInfo?.semester || '1');
 
   const activeDutyTermKey = useMemo(() => {
-    return localStorage.getItem('ams_latest_attendance_term') || `${schoolInfo?.semester || '1'}_${schoolInfo?.academicYear || '2569'}`;
-  }, [schoolInfo?.semester, schoolInfo?.academicYear]);
+    return `${activeDutySem}_${activeDutyYr}`;
+  }, [activeDutySem, activeDutyYr]);
 
-  const [activeDutySem, activeDutyYr] = useMemo(() => {
-    const parts = activeDutyTermKey.split('_');
-    return [parts[0] || schoolInfo?.semester || '1', parts[1] || schoolInfo?.academicYear || '2569'];
-  }, [activeDutyTermKey, schoolInfo?.semester, schoolInfo?.academicYear]);
+  // 100-day Academic Calendar configuration defined by Admin (same source as Module3)
+  const attendanceConfigsByTerm = useMemo(
+    () => StorageService.getAttendanceConfigsByTerm(),
+    [studentAttendanceSyncTick, activeDutyTermKey]
+  );
 
-  // Active 100-day config based on what Admin selected
+  // Active 100-day config based on activeDutySem & activeDutyYr
   const activeDutyConfig = useMemo(() => {
-    const cfg = attendanceConfigsByTerm[activeDutyTermKey] || attendanceConfigsByTerm['1_2569'];
+    const cfg = attendanceConfigsByTerm[activeDutyTermKey];
     if (cfg && cfg.schoolDays && cfg.schoolDays.length > 0) {
       return cfg;
     }
@@ -1902,6 +1942,46 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
     return new Set(dutyActiveSchoolDays.map(d => d.date));
   }, [dutyActiveSchoolDays]);
 
+  // Filter duty logs by activeDutyYr & activeDutySem
+  const filteredDutyLogs = useMemo(() => {
+    return dutyLogs.filter(log => {
+      if (log.academicYear && log.semester) {
+        return String(log.academicYear) === String(activeDutyYr) && String(log.semester) === String(activeDutySem);
+      }
+      if (dutyActiveSchoolDayDatesSet.has(log.date)) {
+        return true;
+      }
+      for (const [termKey, cfg] of Object.entries(attendanceConfigsByTerm)) {
+        if (cfg?.schoolDays?.some(d => !d.isHoliday && d.date === log.date)) {
+          const [tSem, tYr] = termKey.split('_');
+          return String(tSem) === String(activeDutySem) && String(tYr) === String(activeDutyYr);
+        }
+      }
+      const parts = (log.date || '').split('-');
+      if (parts.length === 3) {
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10);
+        if (!isNaN(y) && !isNaN(m)) {
+          const beYr = y > 2400 ? y : y + 543;
+          let inferredSem = '1';
+          let inferredYear = String(beYr);
+          if (m >= 5 && m <= 10) {
+            inferredSem = '1';
+            inferredYear = String(beYr);
+          } else if (m >= 11) {
+            inferredSem = '2';
+            inferredYear = String(beYr);
+          } else {
+            inferredSem = '2';
+            inferredYear = String(beYr - 1);
+          }
+          return inferredYear === String(activeDutyYr) && inferredSem === String(activeDutySem);
+        }
+      }
+      return true;
+    });
+  }, [dutyLogs, dutyActiveSchoolDayDatesSet, attendanceConfigsByTerm, activeDutyYr, activeDutySem]);
+
   // Ensure dutyLogForm.date is always restricted to a valid 100-day date
   useEffect(() => {
     if (dutyActiveSchoolDays.length > 0 && !dutyActiveSchoolDayDatesSet.has(dutyLogForm.date)) {
@@ -1927,6 +2007,16 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
     }
     return new Date().getFullYear();
   });
+
+  useEffect(() => {
+    if (dutyActiveSchoolDays.length > 0) {
+      const d = new Date(dutyActiveSchoolDays[0].date);
+      if (!isNaN(d.getTime())) {
+        setDutyCalMonth(d.getMonth());
+        setDutyCalYear(d.getFullYear());
+      }
+    }
+  }, [activeDutyTermKey, dutyActiveSchoolDays]);
 
   const [selectedDutyCalendarDate, setSelectedDutyCalendarDate] = useState<string>(() => {
     const today = new Date().toISOString().split('T')[0];
@@ -6062,31 +6152,55 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                 }`}
               >
                 <FileText className="w-3.5 h-3.5 shrink-0" />
-                <span className="truncate">ประวัติรายงาน ({dutyLogs.length})</span>
+                <span className="truncate">ประวัติรายงาน ({filteredDutyLogs.length})</span>
               </button>
             </div>
 
-            {/* Admin Grade Level Configuration Button (เฉพาะ Admin) */}
-            {isAdmin && (
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsDutyGradesConfigOpen(prev => !prev)}
-                  className={`w-full sm:w-auto h-10 px-3.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2 shadow-2xs border ${
-                    isDutyGradesConfigOpen
-                      ? 'bg-amber-600 text-white border-amber-700 shadow-xs'
-                      : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
-                  }`}
-                  title="ตั้งค่าระดับชั้นที่แสดงในตารางสถิตินักเรียน (เฉพาะ Admin)"
-                >
-                  <Shield className="w-4 h-4 text-amber-600 shrink-0" />
-                  <span>ตั้งค่าระดับชั้นในตาราง ({effectiveDutyReportGrades.length} ชั้น)</span>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold ${isDutyGradesConfigOpen ? 'bg-amber-700 text-white' : 'bg-amber-200/80 text-amber-900'}`}>
-                    เฉพาะ Admin
-                  </span>
-                </button>
-              </div>
-            )}
+            <div className="flex items-center gap-2 flex-wrap shrink-0 self-end sm:self-auto">
+              {isAdmin ? (
+                <>
+                  <select
+                    value={selectedDutyAcademicYear}
+                    onChange={(e) => setSelectedDutyAcademicYear(e.target.value)}
+                    className="px-3 py-2 rounded-xl bg-white hover:bg-blue-50 text-blue-900 border border-blue-300 text-xs font-bold outline-none cursor-pointer shadow-2xs transition-colors"
+                  >
+                    {availableDutyAcademicYears.map(yr => (
+                      <option key={yr} value={yr}>ปีการศึกษา {yr}</option>
+                    ))}
+                  </select>
+
+                  <select
+                    value={selectedDutySemester}
+                    onChange={(e) => setSelectedDutySemester(e.target.value)}
+                    className="px-3 py-2 rounded-xl bg-white hover:bg-blue-50 text-blue-900 border border-blue-300 text-xs font-bold outline-none cursor-pointer shadow-2xs transition-colors"
+                  >
+                    <option value="1">ภาคเรียนที่ 1</option>
+                    <option value="2">ภาคเรียนที่ 2</option>
+                  </select>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsDutyGradesConfigOpen(prev => !prev)}
+                    className={`w-full sm:w-auto h-10 px-3.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2 shadow-2xs border ${
+                      isDutyGradesConfigOpen
+                        ? 'bg-amber-600 text-white border-amber-700 shadow-xs'
+                        : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+                    }`}
+                    title="ตั้งค่าระดับชั้นที่แสดงในตารางสถิตินักเรียน (เฉพาะ Admin)"
+                  >
+                    <Shield className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>ตั้งค่าระดับชั้นในตาราง ({effectiveDutyReportGrades.length} ชั้น)</span>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold ${isDutyGradesConfigOpen ? 'bg-amber-700 text-white' : 'bg-amber-200/80 text-amber-900'}`}>
+                      เฉพาะ Admin
+                    </span>
+                  </button>
+                </>
+              ) : (
+                <div className="px-3 py-2 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold whitespace-nowrap">
+                  ภาคเรียนที่ {activeDutySem} • ปีการศึกษา {activeDutyYr}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* ADMIN GRADE LEVEL CONFIGURATION PANEL (เฉพาะ Admin: ติ๊กเลือก อ.1 - ม.3) */}
@@ -6680,13 +6794,13 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
               <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2">
                 <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
                   <FileText className="w-4 h-4 text-blue-600" />
-                  <span>ประวัติรายงานการปฏิบัติหน้าที่ครูเวรประจำวัน ({dutyLogs.length} รายการ)</span>
+                  <span>ประวัติรายงานการปฏิบัติหน้าที่ครูเวรประจำวัน ({filteredDutyLogs.length} รายการ)</span>
                 </h3>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => {
-                      if (dutyLogs.length === 0) {
+                      if (filteredDutyLogs.length === 0) {
                         onShowToast('warning', 'ไม่มีข้อมูลรายงาน', 'ยังไม่มีประวัติรายงานการปฏิบัติหน้าที่ครูเวรสำหรับดาวน์โหลดทั้งหมด');
                         return;
                       }
@@ -6724,14 +6838,14 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {dutyLogs.length === 0 ? (
+                    {filteredDutyLogs.length === 0 ? (
                       <tr>
                         <td colSpan={5} className="py-8 text-center text-slate-400">
                           ยังไม่มีประวัติการบันทึกสมุดรายงานครูเวร
                         </td>
                       </tr>
                     ) : (
-                      dutyLogs.map((log) => (
+                      filteredDutyLogs.map((log) => (
                         <tr key={log.id} className="hover:bg-blue-50/30 transition-colors">
                           <td className="py-3 px-4 font-bold text-blue-900 whitespace-nowrap">{log.date}</td>
                           <td className="py-3 px-4 font-bold text-slate-800">{log.dutyTeacherName}</td>
@@ -8654,7 +8768,7 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                         <Shield className="w-5 h-5" />
                       </div>
                       <div>
-                        <h3 className="text-sm font-bold text-slate-800">ตัวอย่างรายงานการปฏิบัติหน้าที่ครูเวรทั้งหมด ({dutyLogs.length} รายการ)</h3>
+                        <h3 className="text-sm font-bold text-slate-800">ตัวอย่างรายงานการปฏิบัติหน้าที่ครูเวรทั้งหมด ({filteredDutyLogs.length} รายการ)</h3>
                         <p className="text-xs text-slate-500">ตรวจสอบตัวอย่างก่อนดาวน์โหลดเป็นไฟล์ PDF (รูปแบบ A4 สมบูรณ์ตรงกับหน้าตัวอย่าง 100%)</p>
                       </div>
                     </div>
@@ -8689,7 +8803,7 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                       id="duty-all-official-a4-print"
                       className="w-full space-y-8 print:space-y-0"
                     >
-                      {dutyLogs.map((log, index) => (
+                      {filteredDutyLogs.map((log, index) => (
                         <div
                           key={log.id || index}
                           className="duty-a4-sheet duty-a4-all-sheet bg-white shadow-xl border border-slate-300 text-black font-normal leading-tight text-[12px] flex flex-col justify-between mx-auto print:border-none print:shadow-none shrink-0 box-border"

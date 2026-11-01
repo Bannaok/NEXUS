@@ -34,6 +34,8 @@ interface Module1CommentsEvaluationProps {
   personnel?: Personnel[];
   registeredHomeroomGrades?: GradeLevel[];
   selectedGrade?: string;
+  selectedAcademicYear?: string;
+  selectedSemester?: string;
   onSelectGrade?: (grade: string) => void;
   onShowToast: (type: 'success' | 'warning' | 'error' | 'info', title: string, msg: string) => void;
   onOpenLightbox?: (imageUrl: string, title: string, subtitle?: string) => void;
@@ -65,20 +67,21 @@ export const Module1CommentsEvaluation: React.FC<Module1CommentsEvaluationProps>
   schoolInfo,
   registeredHomeroomGrades = [],
   selectedGrade,
+  selectedAcademicYear,
+  selectedSemester,
   onSelectGrade,
   onShowToast,
   onOpenLightbox
 }) => {
   const isReadOnly = user.role === 'admin';
 
-  // Academic Year & Semester state (Synced with SchoolInfo)
-  const [academicYear, setAcademicYear] = useState<string>(schoolInfo?.academicYear || '2569');
-  const [semester, setSemester] = useState<string>(schoolInfo?.semester || '1');
-
-  useEffect(() => {
-    if (schoolInfo?.academicYear) setAcademicYear(schoolInfo.academicYear);
-    if (schoolInfo?.semester) setSemester(schoolInfo.semester);
-  }, [schoolInfo?.academicYear, schoolInfo?.semester]);
+  // For Admin: follow the dropdown selection from Module1ClassroomAdmin; For Member: strictly follow schoolInfo configured by Admin in Settings
+  const academicYear = user.role === 'admin'
+    ? (selectedAcademicYear || schoolInfo?.academicYear || '2569')
+    : (schoolInfo?.academicYear || '2569');
+  const semester = user.role === 'admin'
+    ? (selectedSemester || schoolInfo?.semester || '1')
+    : (schoolInfo?.semester || '1');
 
   // Stored evaluations: key = `${studentId}_${academicYear}_${semester}`
   const [evaluations, setEvaluations] = useState<Record<string, StudentBehaviorEvaluation>>(() => 
@@ -253,58 +256,13 @@ export const Module1CommentsEvaluation: React.FC<Module1CommentsEvaluationProps>
       {!isReadOnly && (
         <div className="bg-white rounded-2xl p-2.5 sm:p-5 shadow-xs border border-slate-200">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 w-full">
-            {/* Mobile Single-Row Compact Bar (ปี | เทอม | ชั้น) & Desktop Filters */}
-            <div className="grid grid-cols-3 gap-1.5 bg-slate-50 border border-slate-200 p-1.5 rounded-xl w-full sm:w-auto sm:flex sm:items-center sm:gap-3 sm:bg-transparent sm:border-0 sm:p-0">
-              {/* Year Selector */}
-              <div className="flex items-center justify-center sm:justify-start gap-1 bg-white sm:bg-slate-50 border border-slate-200 px-1.5 sm:px-3 py-1.5 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold text-slate-700">
-                <Calendar className="w-3.5 h-3.5 text-indigo-600 shrink-0 hidden sm:block" />
-                <span className="shrink-0 font-bold">ปี:</span>
-                <select
-                  value={academicYear}
-                  onChange={(e) => setAcademicYear(e.target.value)}
-                  disabled={user.role === 'member'}
-                  className="bg-transparent text-slate-800 font-bold outline-none cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed"
-                  title={user.role === 'member' ? 'ปีการศึกษาถูกกำหนดโดย Admin โรงเรียน' : ''}
-                >
-                  <option value="2570">2570</option>
-                  <option value="2569">2569</option>
-                  <option value="2568">2568</option>
-                </select>
-              </div>
-
-              {/* Semester Selector */}
-              <div className="flex items-center justify-center sm:justify-start gap-1 bg-white sm:bg-slate-50 border border-slate-200 px-1.5 sm:px-3 py-1.5 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold text-slate-700">
-                <span className="shrink-0 font-bold">เทอม:</span>
-                <select
-                  value={semester}
-                  onChange={(e) => setSemester(e.target.value)}
-                  disabled={user.role === 'member'}
-                  className="bg-transparent text-slate-800 font-bold outline-none cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed"
-                  title={user.role === 'member' ? 'ภาคเรียนถูกกำหนดโดย Admin โรงเรียน' : ''}
-                >
-                  <option value="1">1</option>
-                  <option value="2">2</option>
-                </select>
-              </div>
-
-              {/* Grade Level Selector */}
-              <div className="flex items-center justify-center sm:justify-start gap-1 bg-white sm:bg-slate-50 border border-slate-200 px-1.5 sm:px-3 py-1.5 rounded-lg sm:rounded-xl text-[11px] sm:text-xs font-bold text-slate-700">
+            {/* Grade Level Filter Display */}
+            <div className="flex items-center gap-3 w-full sm:w-auto">
+              {/* Grade Level Display */}
+              <div className="flex items-center justify-center sm:justify-start gap-1 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl text-xs font-bold text-slate-700 w-full sm:w-auto">
                 <Filter className="w-3.5 h-3.5 text-slate-400 shrink-0 hidden sm:block" />
                 <span className="shrink-0 font-bold">ชั้น:</span>
-                <select
-                  value={gradeFilter}
-                  onChange={(e) => {
-                    if (user.role === 'member') return;
-                    handleGradeChange(e.target.value);
-                  }}
-                  disabled={user.role === 'member'}
-                  className="bg-transparent text-slate-800 font-bold outline-none cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed max-w-[65px] sm:max-w-none truncate"
-                  title={user.role === 'member' ? 'ระดับชั้นถูกกำหนดตามครูประจำชั้น' : ''}
-                >
-                  {availableGradeLevels.map(g => (
-                    <option key={g} value={g}>{g}</option>
-                  ))}
-                </select>
+                <span className="text-slate-900 font-bold truncate">{gradeFilter}</span>
               </div>
             </div>
 

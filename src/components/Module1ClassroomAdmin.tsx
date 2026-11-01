@@ -56,6 +56,8 @@ export interface WeightSession {
   id: string;
   date: string; // YYYY-MM-DD
   createdAt: string;
+  academicYear?: string;
+  semester?: string;
 }
 
 export type ThaiNutritionalStatus = 'ผอม' | 'สมส่วน' | 'ท้วม' | 'เริ่มอ้วน' | 'อ้วน';
@@ -603,7 +605,9 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
     const newSess: WeightSession = {
       id: `sess-${Date.now()}`,
       date: newSessionDate,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      academicYear: effectiveAcademicYear,
+      semester: effectiveSemester
     };
     const updated = [newSess, ...sessions];
     saveSessions(updated);
@@ -686,7 +690,9 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
       const newSess: WeightSession = {
         id: `sess-${Date.now()}`,
         date: dateStr,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        academicYear: effectiveAcademicYear,
+        semester: effectiveSemester
       };
       saveSessions([newSess, ...sessions]);
       setActiveSessionMode({ id: newSess.id, mode: 'edit' });
@@ -735,6 +741,23 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
     return (a.studentCode || '').localeCompare(b.studentCode || '');
   });
 
+  const [availableAcademicYears, setAvailableAcademicYears] = useState<string[]>(() => {
+    const stored = StorageService.getAcademicYears();
+    const base = stored && stored.length > 0 ? stored : ['2570', '2569', '2568', '2567'];
+    const current = schoolInfo?.academicYear || '2569';
+    return Array.from(new Set([current, ...base])).sort((a, b) => Number(b) - Number(a));
+  });
+
+  useEffect(() => {
+    return StorageService.subscribe(() => {
+      const stored = StorageService.getAcademicYears();
+      const base = stored && stored.length > 0 ? stored : ['2570', '2569', '2568', '2567'];
+      const current = schoolInfo?.academicYear || '2569';
+      setAvailableAcademicYears(Array.from(new Set([current, ...base])).sort((a, b) => Number(b) - Number(a)));
+    });
+  }, [schoolInfo?.academicYear]);
+
+  // Admin local view-only state for switching Academic Year & Semester (does not modify schoolInfo or affect members)
   const [selectedAcademicYear, setSelectedAcademicYear] = useState<string>(
     schoolInfo?.academicYear || '2569'
   );
@@ -747,13 +770,82 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
     if (schoolInfo?.semester) setSelectedSemester(schoolInfo.semester);
   }, [schoolInfo?.academicYear, schoolInfo?.semester]);
 
+  // For Admin: use local dropdown state; For Member: strictly use schoolInfo set by Admin in Settings
+  const effectiveAcademicYear = user.role === 'admin'
+    ? selectedAcademicYear
+    : (schoolInfo?.academicYear || '2569');
+  const effectiveSemester = user.role === 'admin'
+    ? selectedSemester
+    : (schoolInfo?.semester || '1');
+
   // 100 School Days for Milk & Teeth Calendar Widget (Requirement 4)
   const schoolDaysList = useMemo(() => {
     return get100SchoolDaysForTerm(
-      selectedAcademicYear,
-      selectedSemester
+      effectiveAcademicYear,
+      effectiveSemester
     );
-  }, [selectedAcademicYear, selectedSemester]);
+  }, [effectiveAcademicYear, effectiveSemester]);
+
+  // Filter Weight & Height sessions by effectiveAcademicYear & effectiveSemester
+  const filteredSessions = useMemo(() => {
+    const schoolDayDatesSet = new Set(schoolDaysList.map(d => d.date));
+    const allTermConfigs = StorageService.getAttendanceConfigsByTerm();
+
+    return sessions.filter(sess => {
+      if (sess.academicYear && sess.semester) {
+        return String(sess.academicYear) === String(effectiveAcademicYear) && String(sess.semester) === String(effectiveSemester);
+      }
+      if (schoolDayDatesSet.has(sess.date)) {
+        return true;
+      }
+      // Check if date explicitly belongs to another configured term's 100 days
+      for (const [termKey, cfg] of Object.entries(allTermConfigs)) {
+        if (cfg?.schoolDays?.some(d => !d.isHoliday && d.date === sess.date)) {
+          const [tSem, tYr] = termKey.split('_');
+          return String(tSem) === String(effectiveSemester) && String(tYr) === String(effectiveAcademicYear);
+        }
+      }
+      // Infer academicYear and semester from session date (YYYY-MM-DD)
+      const parts = (sess.date || '').split('-');
+      if (parts.length === 3) {
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10);
+        if (!isNaN(y) && !isNaN(m)) {
+          const beYr = y > 2400 ? y : y + 543;
+          let inferredSem = '1';
+          let inferredYear = String(beYr);
+          if (m >= 5 && m <= 10) {
+            inferredSem = '1';
+            inferredYear = String(beYr);
+          } else if (m >= 11) {
+            inferredSem = '2';
+            inferredYear = String(beYr);
+          } else {
+            inferredSem = '2';
+            inferredYear = String(beYr - 1);
+          }
+          return inferredYear === String(effectiveAcademicYear) && inferredSem === String(effectiveSemester);
+        }
+      }
+      return true;
+    });
+  }, [sessions, schoolDaysList, effectiveAcademicYear, effectiveSemester]);
+
+  // Keep milkTeethDate aligned with active term's schoolDaysList when year/semester changes
+  useEffect(() => {
+    if (schoolDaysList.length > 0) {
+      const exists = schoolDaysList.some(d => d.date === milkTeethDate);
+      if (!exists) {
+        const todayStr = new Date().toISOString().split('T')[0];
+        const matchToday = schoolDaysList.find(d => d.date === todayStr);
+        setMilkTeethDate(matchToday ? matchToday.date : schoolDaysList[0].date);
+      }
+      setMilkCalMonthIdx(0);
+      setWeightCalMonthIdx(0);
+      setWeightCalendarMonthIdx(0);
+      setPreviewMilkTeethMonthIndex(0);
+    }
+  }, [effectiveAcademicYear, effectiveSemester, schoolDaysList]);
 
   // Group 100 school days by month for calendar display
   const daysGroupedByMonth = useMemo(() => {
@@ -851,18 +943,50 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
           </button>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
-          {/* Single Grade Dropdown Button for Admin (Only Registered Homeroom Teachers' Grades, Zero Extra Text) */}
-          {user.role === 'admin' && registeredHomeroomGrades.length > 0 && (
-            <select
-              value={gradeFilter}
-              onChange={(e) => handleAdminSelectGrade(e.target.value)}
-              className="px-3.5 py-2 rounded-xl bg-white hover:bg-blue-50 text-blue-900 border border-blue-300 text-xs font-bold outline-none cursor-pointer shadow-2xs transition-colors"
-            >
-              {registeredHomeroomGrades.map(g => (
-                <option key={g} value={g}>{g}</option>
-              ))}
-            </select>
+        <div className="flex items-center gap-2 flex-wrap shrink-0 self-end sm:self-auto">
+          {user.role === 'admin' ? (
+            <>
+              <select
+                value={selectedAcademicYear}
+                onChange={(e) => {
+                  setSelectedAcademicYear(e.target.value);
+                  setActiveSessionMode(null);
+                }}
+                className="px-3 py-2 rounded-xl bg-white hover:bg-blue-50 text-blue-900 border border-blue-300 text-xs font-bold outline-none cursor-pointer shadow-2xs transition-colors"
+              >
+                {availableAcademicYears.map(yr => (
+                  <option key={yr} value={yr}>ปีการศึกษา {yr}</option>
+                ))}
+              </select>
+
+              <select
+                value={selectedSemester}
+                onChange={(e) => {
+                  setSelectedSemester(e.target.value);
+                  setActiveSessionMode(null);
+                }}
+                className="px-3 py-2 rounded-xl bg-white hover:bg-blue-50 text-blue-900 border border-blue-300 text-xs font-bold outline-none cursor-pointer shadow-2xs transition-colors"
+              >
+                <option value="1">ภาคเรียนที่ 1</option>
+                <option value="2">ภาคเรียนที่ 2</option>
+              </select>
+
+              {registeredHomeroomGrades.length > 0 && (
+                <select
+                  value={gradeFilter}
+                  onChange={(e) => handleAdminSelectGrade(e.target.value)}
+                  className="px-3.5 py-2 rounded-xl bg-white hover:bg-blue-50 text-blue-900 border border-blue-300 text-xs font-bold outline-none cursor-pointer shadow-2xs transition-colors"
+                >
+                  {registeredHomeroomGrades.map(g => (
+                    <option key={g} value={g}>{g}</option>
+                  ))}
+                </select>
+              )}
+            </>
+          ) : (
+            <div className="px-3 py-2 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold whitespace-nowrap">
+              ภาคเรียนที่ {effectiveSemester} • ปีการศึกษา {effectiveAcademicYear}
+            </div>
           )}
 
           {/* Action Button "+" for creating new weight recording session with Floating Popover Calendar (Member only) */}
@@ -896,7 +1020,7 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
                   <div className="pb-1.5 mb-2 border-b border-slate-100 flex items-center justify-between text-[11px] font-bold text-sky-900 bg-sky-50/80 px-2.5 py-1 rounded-xl">
                     <span>ปฏิทินเวลาเรียน 100 วัน</span>
                     <span className="bg-white px-2 py-0.5 rounded-lg border border-sky-200 text-sky-800 font-mono shadow-2xs">
-                      ภาคเรียนที่ {selectedSemester}/{selectedAcademicYear}
+                      ภาคเรียนที่ {effectiveSemester}/{effectiveAcademicYear}
                     </span>
                   </div>
 
@@ -1092,14 +1216,16 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
                   <div className="p-3.5 bg-slate-50/90 border-b border-slate-200 flex items-center justify-between gap-2 flex-wrap text-xs">
                     <div className="flex items-center gap-2">
                       <Scale className="w-4 h-4 text-blue-600" />
-                      <span className="font-bold text-slate-800">รายการบันทึกน้ำหนักและส่วนสูง</span>
+                      <span className="font-bold text-slate-800">
+                        รายการบันทึกน้ำหนักและส่วนสูง (ภาคเรียนที่ {effectiveSemester} ปีการศึกษา {effectiveAcademicYear})
+                      </span>
                     </div>
                     <div className="px-3 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold shadow-2xs">
                       ชั้น {user.assignedGrade || 'ป.1'} (ครูประจำชั้น)
                     </div>
                   </div>
                 )}
-                {sessions.length === 0 ? (
+                {filteredSessions.length === 0 ? (
                   <div className="py-12 text-center text-slate-400 space-y-3">
                     <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto text-slate-400">
                       <Scale className="w-6 h-6" />
@@ -1123,7 +1249,7 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
                   </div>
                 ) : (
                   <div className="divide-y divide-slate-100">
-                    {sessions.map((sess, idx) => {
+                    {filteredSessions.map((sess, idx) => {
                       const targetStudentsForSess = gradeFilter === 'ALL'
                         ? students
                         : students.filter(s => (s.gradeLevel || '').trim() === gradeFilter);
@@ -1357,7 +1483,7 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
 
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-xs font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200">
-                      รายการที่ {sessions.findIndex(s => s.id === activeSessionMode?.id) + 1}
+                      รายการที่ {Math.max(1, filteredSessions.findIndex(s => s.id === activeSessionMode?.id) + 1)}
                     </span>
                     <h3 className="text-sm sm:text-base font-bold text-slate-900">
                       วันที่ {formatThaiDate(activeSession?.date || '')}
@@ -1570,7 +1696,7 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
                         <div className="pb-1.5 mb-2 border-b border-slate-100 flex items-center justify-between text-[11px] font-bold text-sky-900 bg-sky-50/80 px-2.5 py-1 rounded-xl">
                           <span>ปฏิทินเวลาเรียน 100 วัน</span>
                           <span className="bg-white px-2 py-0.5 rounded-lg border border-sky-200 text-sky-800 font-mono shadow-2xs">
-                            ภาคเรียนที่ {selectedSemester}/{selectedAcademicYear}
+                            ภาคเรียนที่ {effectiveSemester}/{effectiveAcademicYear}
                           </span>
                         </div>
 
@@ -1748,7 +1874,7 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
                         บันทึกดื่มนมและแปรงฟัน (ชั้น {milkTeethGradeFilter === 'ALL' ? 'ทุกระดับชั้น' : milkTeethGradeFilter})
                       </span>
                       <span className="text-xs text-slate-500 ml-2 font-medium">
-                        (ปีการศึกษา {selectedAcademicYear} ภาคเรียนที่ {selectedSemester})
+                        (ปีการศึกษา {effectiveAcademicYear} ภาคเรียนที่ {effectiveSemester})
                       </span>
                     </div>
                   </div>
@@ -1860,6 +1986,8 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
           personnel={personnel}
           registeredHomeroomGrades={registeredHomeroomGrades}
           selectedGrade={gradeFilter}
+          selectedAcademicYear={effectiveAcademicYear}
+          selectedSemester={effectiveSemester}
           onSelectGrade={handleAdminSelectGrade}
           onShowToast={onShowToast}
           onOpenLightbox={onOpenLightbox}
@@ -1887,7 +2015,7 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
               <div className="pb-1.5 mb-1 border-b border-slate-100 flex items-center justify-between text-[11px] font-bold text-sky-900 bg-sky-50/80 px-2.5 py-1.5 rounded-xl">
                 <span>ปฏิทินเวลาเรียน 100 วัน</span>
                 <span className="bg-white px-2 py-0.5 rounded-lg border border-sky-200 text-sky-800 font-mono shadow-2xs">
-                  ภาคเรียนที่ {selectedSemester}/{selectedAcademicYear}
+                  ภาคเรียนที่ {effectiveSemester}/{effectiveAcademicYear}
                 </span>
               </div>
 
@@ -2323,7 +2451,7 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
                     {previewReportType === 'milk' ? 'แบบบันทึกสรุปการดื่มนมโรงเรียน' : 'แบบบันทึกสรุปการแปรงฟันหลังอาหาร'}
                   </h3>
                   <p className="text-xs font-semibold text-black">
-                    {activeMonthGroup?.monthTitle || ''} • ภาคเรียนที่ {selectedSemester} ปีการศึกษา {selectedAcademicYear}
+                    {activeMonthGroup?.monthTitle || ''} • ภาคเรียนที่ {effectiveSemester} ปีการศึกษา {effectiveAcademicYear}
                     {effectiveMilkTeethGrade !== 'ALL' ? ` • ระดับชั้น ${effectiveMilkTeethGrade}` : ' • ระดับชั้นทั้งหมด'}
                   </p>
                 </div>
@@ -2528,7 +2656,7 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
                       รายงานสรุปการเจริญเติบโต น้ำหนัก ส่วนสูง และภาวะโภชนาการนักเรียน
                     </h2>
                     <p className="text-xs text-slate-600 font-semibold">
-                      วันที่ {formatThaiDate(pdfPreviewSession.date)} • ภาคเรียนที่ {selectedSemester} ปีการศึกษา {selectedAcademicYear}
+                      วันที่ {formatThaiDate(pdfPreviewSession.date)} • ภาคเรียนที่ {effectiveSemester} ปีการศึกษา {effectiveAcademicYear}
                     </p>
                   </div>
 

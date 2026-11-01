@@ -176,14 +176,44 @@ export const Module7Reports: React.FC<Module7Props> = ({
   onShowToast,
   onOpenLightbox
 }) => {
-  const [selectedYear, setSelectedYear] = useState<string>(schoolInfo.academicYear || '2569');
-  const [selectedSemester, setSelectedSemester] = useState<string>(schoolInfo.semester || '1');
+  const [availableAcademicYears, setAvailableAcademicYears] = useState<string[]>(() => {
+    const stored = StorageService.getAcademicYears();
+    const base = stored && stored.length > 0 ? stored : ['2570', '2569', '2568', '2567'];
+    const current = schoolInfo?.academicYear || '2569';
+    return Array.from(new Set([current, ...base])).sort((a, b) => Number(b) - Number(a));
+  });
+
+  React.useEffect(() => {
+    return StorageService.subscribe(() => {
+      const stored = StorageService.getAcademicYears();
+      const base = stored && stored.length > 0 ? stored : ['2570', '2569', '2568', '2567'];
+      const current = schoolInfo?.academicYear || '2569';
+      setAvailableAcademicYears(Array.from(new Set([current, ...base])).sort((a, b) => Number(b) - Number(a)));
+    });
+  }, [schoolInfo?.academicYear]);
+
+  // Admin local view-only state for switching Academic Year & Semester (does not modify schoolInfo or affect members)
+  const [adminSelectedYear, setAdminSelectedYear] = useState<string>(schoolInfo?.academicYear || '2569');
+  const [adminSelectedSemester, setAdminSelectedSemester] = useState<string>(schoolInfo?.semester || '1');
+
+  React.useEffect(() => {
+    if (schoolInfo?.academicYear) setAdminSelectedYear(schoolInfo.academicYear);
+    if (schoolInfo?.semester) setAdminSelectedSemester(schoolInfo.semester);
+  }, [schoolInfo?.academicYear, schoolInfo?.semester]);
+
+  // For Admin: use local dropdown state; For Member: strictly use schoolInfo set by Admin in Settings
+  const selectedYear = user.role === 'admin'
+    ? adminSelectedYear
+    : (schoolInfo?.academicYear || '2569');
+  const selectedSemester = user.role === 'admin'
+    ? adminSelectedSemester
+    : (schoolInfo?.semester || '1');
   const [activeLevel, setActiveLevel] = useState<'primary' | 'secondary'>('primary');
   const [selectedGrade, setSelectedGrade] = useState<GradeLevel | null>(null);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [viewingStudent, setViewingStudent] = useState<Student | null>(null);
   const [selectedPhorPhor6Student, setSelectedPhorPhor6Student] = useState<Student | null>(null);
-  const [assessmentViewMode, setAssessmentViewMode] = useState<'score' | 'grade'>('score');
+  const [assessmentViewMode, setAssessmentViewMode] = useState<'score' | 'grade' | 'activity'>('score');
 
   // Attendance Pop-up Modal state
   const [attendancePopupGrade, setAttendancePopupGrade] = useState<GradeLevel | null>(null);
@@ -472,11 +502,12 @@ export const Module7Reports: React.FC<Module7Props> = ({
       : [];
   }, [effectiveStudents, assessmentPopupGrade]);
 
-  // Filter subjects for assessment popup grade: Pull subjects registered by teaching members of that grade
+  // Filter subjects for assessment popup grade: Pull academic subjects (!isActivity) registered by teaching members of that grade
   const assessmentGradeSubjects = useMemo(() => {
     if (!assessmentPopupGrade) return [];
-    // 1. Try matching grade, semester, and academic year
+    // 1. Try matching grade, semester, and academic year (exclude activities)
     let list = effectiveSubjects.filter(s => 
+      !s.isActivity &&
       s.gradeLevel === assessmentPopupGrade && 
       (s.semester === selectedSemester || !s.semester) &&
       (s.academicYear === selectedYear || !s.academicYear)
@@ -484,13 +515,14 @@ export const Module7Reports: React.FC<Module7Props> = ({
     // 2. If empty, try matching grade and semester
     if (list.length === 0) {
       list = effectiveSubjects.filter(s => 
+        !s.isActivity &&
         s.gradeLevel === assessmentPopupGrade && 
         (s.semester === selectedSemester || !s.semester)
       );
     }
     // 3. If still empty, match grade only
     if (list.length === 0) {
-      list = effectiveSubjects.filter(s => s.gradeLevel === assessmentPopupGrade);
+      list = effectiveSubjects.filter(s => !s.isActivity && s.gradeLevel === assessmentPopupGrade);
     }
 
     // Filter subjects where member registered to teach
@@ -508,6 +540,94 @@ export const Module7Reports: React.FC<Module7Props> = ({
       return (a.name || '').localeCompare(b.name || '', 'th');
     });
   }, [effectiveSubjects, assessmentPopupGrade, selectedSemester, selectedYear]);
+
+  // Filter activities (isActivity === true) for assessment popup grade
+  const assessmentGradeActivities = useMemo(() => {
+    if (!assessmentPopupGrade) return [];
+    // 1. Try matching grade, semester, and academic year
+    let list = effectiveSubjects.filter(s => 
+      Boolean(s.isActivity) &&
+      s.gradeLevel === assessmentPopupGrade && 
+      (s.semester === selectedSemester || !s.semester) &&
+      (s.academicYear === selectedYear || !s.academicYear)
+    );
+    // 2. If empty, try matching grade and semester
+    if (list.length === 0) {
+      list = effectiveSubjects.filter(s => 
+        Boolean(s.isActivity) &&
+        s.gradeLevel === assessmentPopupGrade && 
+        (s.semester === selectedSemester || !s.semester)
+      );
+    }
+    // 3. If still empty, match grade only
+    if (list.length === 0) {
+      list = effectiveSubjects.filter(s => Boolean(s.isActivity) && s.gradeLevel === assessmentPopupGrade);
+    }
+
+    // Also include any activity records recorded in effectiveGrades for students of this grade in this semester/year
+    const studentIdsInGrade = new Set(assessmentGradeStudents.map(st => st.id));
+    const extraActivities: Subject[] = [];
+    effectiveGrades.forEach(g => {
+      if (!studentIdsInGrade.has(g.studentId)) return;
+      if (String(g.semester || '').trim() !== String(selectedSemester || '').trim()) return;
+      if (g.academicYear && String(g.academicYear).trim() !== String(selectedYear).trim()) return;
+      const hasActResult = Boolean(g.activityResult && g.activityResult.trim() !== '');
+      const isActId = String(g.subjectId || '').startsWith('act-');
+      if (!hasActResult && !isActId) return;
+
+      const existsInList = list.some(s => 
+        s.id === g.subjectId || 
+        ((s.code || '').trim().toUpperCase() !== '' && (s.code || '').trim().toUpperCase() === (g.subjectCode || '').trim().toUpperCase()) ||
+        ((s.name || '').trim() !== '' && (s.name || '').trim() === (g.subjectName || '').trim())
+      ) || extraActivities.some(s => 
+        s.id === g.subjectId || 
+        ((s.code || '').trim().toUpperCase() !== '' && (s.code || '').trim().toUpperCase() === (g.subjectCode || '').trim().toUpperCase()) ||
+        ((s.name || '').trim() !== '' && (s.name || '').trim() === (g.subjectName || '').trim())
+      );
+
+      if (!existsInList && (g.subjectName || g.subjectCode)) {
+        extraActivities.push({
+          id: g.subjectId || `act-extra-${extraActivities.length}`,
+          code: g.subjectCode || '',
+          name: g.subjectName || g.subjectCode || 'กิจกรรมพัฒนาผู้เรียน',
+          gradeLevel: assessmentPopupGrade,
+          semester: (selectedSemester === '2' ? '2' : '1'),
+          academicYear: selectedYear,
+          hoursPerWeek: 1,
+          totalScore: 0,
+          courseworkScore: 0,
+          examScore: 0,
+          isActivity: true,
+        });
+      }
+    });
+
+    const combined = [...list, ...extraActivities];
+
+    // Deduplicate by code + name, preferring entries with teacher assigned
+    const dedupMap = new Map<string, Subject>();
+    combined.forEach(act => {
+      const key = `${(act.code || '').trim().toUpperCase()}__${(act.name || '').trim()}`;
+      const existing = dedupMap.get(key);
+      if (!existing) {
+        dedupMap.set(key, act);
+      } else {
+        const existingHasTeacher = Boolean(existing.teacherId || existing.teacherName);
+        const currentHasTeacher = Boolean(act.teacherId || act.teacherName);
+        if (!existingHasTeacher && currentHasTeacher) {
+          dedupMap.set(key, act);
+        }
+      }
+    });
+
+    return Array.from(dedupMap.values()).sort((a, b) => {
+      const codeA = a.code || '';
+      const codeB = b.code || '';
+      const cmp = codeA.localeCompare(codeB, 'th');
+      if (cmp !== 0) return cmp;
+      return (a.name || '').localeCompare(b.name || '', 'th');
+    });
+  }, [effectiveSubjects, effectiveGrades, assessmentGradeStudents, assessmentPopupGrade, selectedSemester, selectedYear]);
 
   // Chunk subjects into sets of 5 (5 วิชา ต่อ 1 แผ่น A4 แนวตั้ง)
   const assessmentSubjectChunks = useMemo(() => {
@@ -586,45 +706,162 @@ export const Module7Reports: React.FC<Module7Props> = ({
     };
   };
 
+  // Helper to get activity pass/fail result for student & activity (strictly from the selected semester)
+  const getStudentActivityResult = (studentId: string, activity: Subject): 'ผ่าน' | 'ไม่ผ่าน' | '-' => {
+    const codeUpper = (activity.code || '').trim().toUpperCase();
+    const nameClean = (activity.name || '').trim();
+
+    let rec = effectiveGrades.find(g =>
+      g.studentId === studentId &&
+      g.subjectId === activity.id &&
+      isGradeRecordForSemAndYear(g, selectedSemester, selectedYear) &&
+      Boolean(g.activityResult && g.activityResult.trim() !== '')
+    );
+    if (!rec) {
+      rec = effectiveGrades.find(g =>
+        g.studentId === studentId &&
+        ((codeUpper !== '' && (g.subjectCode || '').trim().toUpperCase() === codeUpper) ||
+          (nameClean !== '' && (g.subjectName || '').trim() === nameClean)) &&
+        isGradeRecordForSemAndYear(g, selectedSemester, selectedYear) &&
+        Boolean(g.activityResult && g.activityResult.trim() !== '')
+      );
+    }
+    if (rec?.activityResult === 'ผ่าน' || rec?.activityResult === 'ไม่ผ่าน') {
+      return rec.activityResult;
+    }
+    return '-';
+  };
+
   // Rule: Can show "เกรด" button
   // For Primary (ประถม อ.1-ป.6): ONLY in Semester 2 (เฉพาะ"เทอม2" เทอม1จะไม่ได้แสดงสำหรับประถมเพราะต้องรวมภาคเรียนที่1)
   // For Secondary (มัธยม ม.1-ม.6): In BOTH Semester 1 and 2 (ในส่วนมัธยมให้มีปุ่มเกรดทั้งเทอม1 และเทอม2)
   const isAssessmentPrimary = assessmentPopupGrade ? PRIMARY_GRADES.includes(assessmentPopupGrade) : false;
+  const isAssessmentP1ToP6 = assessmentPopupGrade
+    ? ['ป.1', 'ป.2', 'ป.3', 'ป.4', 'ป.5', 'ป.6'].includes(assessmentPopupGrade)
+    : false;
   const canShowGradeButton = assessmentPopupGrade 
     ? (isAssessmentPrimary ? selectedSemester === '2' : true)
     : false;
 
+  // Subjects for Grade view: For ป.1-ป.6, combine subjects across Semester 1 and Semester 2 of selectedYear
+  const assessmentGradeModeSubjects = useMemo(() => {
+    if (!assessmentPopupGrade) return [];
+    if (!isAssessmentP1ToP6) return assessmentGradeSubjects;
+
+    let yearList = effectiveSubjects.filter(s =>
+      !s.isActivity &&
+      s.gradeLevel === assessmentPopupGrade &&
+      (s.academicYear === selectedYear || !s.academicYear)
+    );
+    if (yearList.length === 0) {
+      yearList = effectiveSubjects.filter(s => !s.isActivity && s.gradeLevel === assessmentPopupGrade);
+    }
+
+    const registered = yearList.filter(s =>
+      Boolean(s.teacherId && s.teacherId.trim() !== '') ||
+      Boolean(s.teacherName && s.teacherName.trim() !== '')
+    );
+    const pool = registered.length > 0 ? registered : yearList;
+
+    const dedupMap = new Map<string, Subject>();
+    pool.forEach(s => {
+      const codeKey = (s.code || '').trim().toUpperCase();
+      const nameKey = (s.name || '').trim();
+      const key = codeKey || nameKey || s.id;
+      const existing = dedupMap.get(key);
+      if (!existing) {
+        dedupMap.set(key, s);
+      } else {
+        const existingHasTeacher = Boolean(existing.teacherId || existing.teacherName);
+        const currentHasTeacher = Boolean(s.teacherId || s.teacherName);
+        if ((!existingHasTeacher && currentHasTeacher) || (s.semester === '2' && currentHasTeacher)) {
+          dedupMap.set(key, s);
+        }
+      }
+    });
+
+    return Array.from(dedupMap.values()).sort((a, b) => {
+      const codeA = a.code || '';
+      const codeB = b.code || '';
+      const cmp = codeA.localeCompare(codeB, 'th');
+      if (cmp !== 0) return cmp;
+      return (a.name || '').localeCompare(b.name || '', 'th');
+    });
+  }, [effectiveSubjects, assessmentPopupGrade, isAssessmentP1ToP6, selectedYear, assessmentGradeSubjects]);
+
+  const extractRecordNumericScore = (rec?: GradeRecord): number | null => {
+    if (!rec) return null;
+    const cw = typeof rec.courseworkScore === 'number' && !isNaN(rec.courseworkScore) ? rec.courseworkScore : null;
+    const ex = typeof rec.examScore === 'number' && !isNaN(rec.examScore) ? rec.examScore : null;
+    const tot = typeof rec.totalScore === 'number' && !isNaN(rec.totalScore) ? rec.totalScore : null;
+    if (tot !== null && tot > 0) return tot;
+    if (cw !== null || ex !== null) {
+      const sum = (cw || 0) + (ex || 0);
+      if (sum > 0) return sum;
+    }
+    if (tot !== null) return tot;
+    return null;
+  };
+
   // Helper to get student's score for grade computation
+  // For ป.1-ป.6 (and Primary): sums Semester 1 + Semester 2 scores from Module 2 (งานวัดผล)
   const getStudentGradeScore = (studentId: string, subject: Subject): number | null => {
     const codeUpper = (subject.code || '').trim().toUpperCase();
     const nameClean = (subject.name || '').trim();
 
-    if (isAssessmentPrimary && selectedSemester === '2') {
-      const recSem1 = effectiveGrades.find(g => 
-        g.studentId === studentId && 
-        (g.subjectId === subject.id ||
-          (codeUpper !== '' && (g.subjectCode || '').trim().toUpperCase() === codeUpper) ||
-          (nameClean !== '' && (g.subjectName || '').trim() === nameClean)) &&
+    if (isAssessmentP1ToP6 || (isAssessmentPrimary && selectedSemester === '2')) {
+      const matchingSubjs = effectiveSubjects.filter(s =>
+        !s.isActivity &&
+        s.gradeLevel === assessmentPopupGrade &&
+        (s.id === subject.id ||
+          (codeUpper !== '' && (s.code || '').trim().toUpperCase() === codeUpper) ||
+          (nameClean !== '' && (s.name || '').trim() === nameClean))
+      );
+      const sem1SubjIds = new Set(
+        matchingSubjs.filter(s => !s.semester || s.semester === '1').map(s => s.id)
+      );
+      const sem2SubjIds = new Set(
+        matchingSubjs.filter(s => !s.semester || s.semester === '2').map(s => s.id)
+      );
+
+      let recSem1 = effectiveGrades.find(g =>
+        g.studentId === studentId &&
+        (g.subjectId === subject.id || sem1SubjIds.has(g.subjectId)) &&
         isGradeRecordForSemAndYear(g, '1', selectedYear) &&
         hasRecordedScoreValue(g)
       );
-      const recSem2 = effectiveGrades.find(g => 
-        g.studentId === studentId && 
-        (g.subjectId === subject.id ||
-          (codeUpper !== '' && (g.subjectCode || '').trim().toUpperCase() === codeUpper) ||
-          (nameClean !== '' && (g.subjectName || '').trim() === nameClean)) &&
+      if (!recSem1) {
+        recSem1 = effectiveGrades.find(g =>
+          g.studentId === studentId &&
+          ((codeUpper !== '' && (g.subjectCode || '').trim().toUpperCase() === codeUpper) ||
+            (nameClean !== '' && (g.subjectName || '').trim() === nameClean)) &&
+          isGradeRecordForSemAndYear(g, '1', selectedYear) &&
+          hasRecordedScoreValue(g)
+        );
+      }
+
+      let recSem2 = effectiveGrades.find(g =>
+        g.studentId === studentId &&
+        (g.subjectId === subject.id || sem2SubjIds.has(g.subjectId)) &&
         isGradeRecordForSemAndYear(g, '2', selectedYear) &&
         hasRecordedScoreValue(g)
       );
-      const s1 = typeof recSem1?.totalScore === 'number' ? recSem1.totalScore : null;
-      const s2 = typeof recSem2?.totalScore === 'number' ? recSem2.totalScore : null;
-      if (s1 !== null && s2 !== null) {
-        return Math.round((s1 + s2) / 2);
+      if (!recSem2) {
+        recSem2 = effectiveGrades.find(g =>
+          g.studentId === studentId &&
+          ((codeUpper !== '' && (g.subjectCode || '').trim().toUpperCase() === codeUpper) ||
+            (nameClean !== '' && (g.subjectName || '').trim() === nameClean)) &&
+          isGradeRecordForSemAndYear(g, '2', selectedYear) &&
+          hasRecordedScoreValue(g)
+        );
       }
-      if (s2 !== null) return s2;
-      if (s1 !== null) return s1;
-      const current = getStudentScores(studentId, subject);
-      return current.numTotal;
+
+      const s1 = extractRecordNumericScore(recSem1);
+      const s2 = extractRecordNumericScore(recSem2);
+      if (s1 !== null || s2 !== null) {
+        return Math.round(((s1 ?? 0) + (s2 ?? 0)) * 100) / 100;
+      }
+      return null;
     }
     const current = getStudentScores(studentId, subject);
     return current.numTotal;
@@ -802,13 +1039,16 @@ export const Module7Reports: React.FC<Module7Props> = ({
 
   const handleDownloadAssessmentPDF = async () => {
     if (isDownloadingPdf || !assessmentPopupGrade) return;
-    if (assessmentGradeStudents.length === 0 || assessmentGradeSubjects.length === 0) {
-      onShowToast('warning', 'ไม่มีข้อมูล', 'ยังไม่มีข้อมูลนักเรียนหรือรายวิชาสำหรับดาวน์โหลด PDF');
+    const isActivityMode = assessmentViewMode === 'activity';
+    if (assessmentGradeStudents.length === 0 || (isActivityMode ? assessmentGradeActivities.length === 0 : assessmentGradeSubjects.length === 0)) {
+      onShowToast('warning', 'ไม่มีข้อมูล', isActivityMode ? 'ยังไม่มีข้อมูลนักเรียนหรือกิจกรรมสำหรับดาวน์โหลด PDF' : 'ยังไม่มีข้อมูลนักเรียนหรือรายวิชาสำหรับดาวน์โหลด PDF');
       return;
     }
     setIsDownloadingPdf(true);
     try {
-      const modeLabel = assessmentViewMode === 'grade' && canShowGradeButton ? 'เกรด' : 'คะแนนวัดผล';
+      const modeLabel = isActivityMode
+        ? 'ผลประเมินกิจกรรม'
+        : (assessmentViewMode === 'grade' && canShowGradeButton ? 'เกรด' : 'คะแนนวัดผล');
       const filename = `รายงาน_${modeLabel}_${assessmentPopupGrade}_เทอม${selectedSemester}_${selectedYear}.pdf`;
       const ok = await exportSheetsToPdf({
         container: assessmentContainerRef.current,
@@ -1028,38 +1268,33 @@ export const Module7Reports: React.FC<Module7Props> = ({
         </div>
 
         {/* Right Side: Academic Year, Semester, and Adjacent Primary/Secondary Toggle */}
-        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-          {/* ปีการศึกษา */}
-          <div className="flex items-center gap-1.5">
-            <label className="text-xs font-semibold text-slate-600 whitespace-nowrap">
-              ปีการศึกษา:
-            </label>
-            <select
-              value={selectedYear}
-              onChange={(e) => setSelectedYear(e.target.value)}
-              className="text-xs px-2.5 py-1.5 rounded-xl border border-slate-200 font-semibold bg-slate-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-500/20"
-            >
-              <option value="2569">2569</option>
-              <option value="2568">2568</option>
-              <option value="2567">2567</option>
-              <option value="2566">2566</option>
-            </select>
-          </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          {user.role === 'admin' ? (
+            <>
+              <select
+                value={adminSelectedYear}
+                onChange={(e) => setAdminSelectedYear(e.target.value)}
+                className="px-3 py-2 rounded-xl bg-white hover:bg-blue-50 text-blue-900 border border-blue-300 text-xs font-bold outline-none cursor-pointer shadow-2xs transition-colors"
+              >
+                {availableAcademicYears.map(yr => (
+                  <option key={yr} value={yr}>ปีการศึกษา {yr}</option>
+                ))}
+              </select>
 
-          {/* ภาคเรียน */}
-          <div className="flex items-center gap-1.5">
-            <label className="text-xs font-semibold text-slate-600 whitespace-nowrap">
-              ภาคเรียน:
-            </label>
-            <select
-              value={selectedSemester}
-              onChange={(e) => setSelectedSemester(e.target.value)}
-              className="text-xs px-2.5 py-1.5 rounded-xl border border-slate-200 font-semibold bg-slate-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-500/20"
-            >
-              <option value="1">ภาคเรียนที่ 1</option>
-              <option value="2">ภาคเรียนที่ 2</option>
-            </select>
-          </div>
+              <select
+                value={adminSelectedSemester}
+                onChange={(e) => setAdminSelectedSemester(e.target.value)}
+                className="px-3 py-2 rounded-xl bg-white hover:bg-blue-50 text-blue-900 border border-blue-300 text-xs font-bold outline-none cursor-pointer shadow-2xs transition-colors"
+              >
+                <option value="1">ภาคเรียนที่ 1</option>
+                <option value="2">ภาคเรียนที่ 2</option>
+              </select>
+            </>
+          ) : (
+            <div className="px-3 py-2 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold whitespace-nowrap">
+              ภาคเรียนที่ {selectedSemester} • ปีการศึกษา {selectedYear}
+            </div>
+          )}
 
           {/* ประถม & มัธยม ชิดกันเลย */}
           <div className="inline-flex rounded-xl p-0.5 bg-slate-100 border border-slate-200 shrink-0">
@@ -1938,29 +2173,29 @@ export const Module7Reports: React.FC<Module7Props> = ({
                       </div>
 
                       {/* Signatures */}
-                      <div className="mt-6 grid grid-cols-3 gap-2 text-center text-[10px]">
-                        <div className="space-y-0.5">
+                      <div className="grid grid-cols-3 gap-2 text-center text-[11.5px] text-black" style={{ marginTop: '2.1cm' }}>
+                        <div className="space-y-1">
                           <p className="text-black">ลงชื่อ ..................................................</p>
                           <p className="font-normal text-black">
                             ({selectedAdvisor ? `${selectedAdvisor.prefix || ''}${selectedAdvisor.firstName || ''} ${selectedAdvisor.lastName || ''}`.trim() : '................................................'})
                           </p>
-                          <p className="text-black text-[9px]">ครูประจำชั้น</p>
+                          <p className="text-black text-[10.5px]">ครูประจำชั้น</p>
                         </div>
 
-                        <div className="space-y-0.5">
+                        <div className="space-y-1">
                           <p className="text-black">ลงชื่อ ..................................................</p>
                           <p className="font-normal text-black">
                             ({selectedAcademicHead ? `${selectedAcademicHead.prefix}${selectedAcademicHead.firstName} ${selectedAcademicHead.lastName}` : '................................................'})
                           </p>
-                          <p className="text-black text-[9px]">หัวหน้าฝ่ายวิชาการ</p>
+                          <p className="text-black text-[10.5px]">หัวหน้าฝ่ายวิชาการ</p>
                         </div>
 
-                        <div className="space-y-0.5">
+                        <div className="space-y-1">
                           <p className="text-black">ลงชื่อ ..................................................</p>
                           <p className="font-normal text-black">
                             ({directorDisplayName})
                           </p>
-                          <p className="text-black text-[9px]">{directorPosition}</p>
+                          <p className="text-black text-[10.5px]">{directorPosition}</p>
                         </div>
                       </div>
 
@@ -2053,15 +2288,23 @@ export const Module7Reports: React.FC<Module7Props> = ({
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                    <span>ตาราง{assessmentViewMode === 'grade' && canShowGradeButton ? 'ระดับผลการเรียน (เกรด)' : 'คะแนนวัดผล'} {getGradeCleanName(assessmentPopupGrade)}</span>
+                    <span>
+                      ตาราง{assessmentViewMode === 'activity'
+                        ? 'ผลการประเมินกิจกรรมพัฒนาผู้เรียน (ผ่าน/ไม่ผ่าน)'
+                        : assessmentViewMode === 'grade' && canShowGradeButton
+                        ? 'ระดับผลการเรียน (เกรด)'
+                        : 'คะแนนวัดผล'} {getGradeCleanName(assessmentPopupGrade)}
+                    </span>
                     <span className="text-xs bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full font-semibold border border-indigo-200">
-                      {assessmentViewMode === 'grade' && canShowGradeButton 
+                      {assessmentViewMode === 'activity'
+                        ? 'พรีวิวผลการประเมินกิจกรรม (ผ่าน/ไม่ผ่าน)'
+                        : assessmentViewMode === 'grade' && canShowGradeButton 
                         ? 'พรีวิวระดับผลการเรียน (เกรดทุกรายวิชา)' 
                         : `พรีวิว A4 ${reportOrientation === 'landscape' ? 'แนวนอน' : 'แนวตั้ง'} (5 วิชา/แผ่น)`}
                     </span>
                   </h3>
                   <p className="text-[11px] text-slate-500">
-                    ภาคเรียนที่ {selectedSemester}/{selectedYear} | นักเรียน {assessmentGradeStudents.length} คน | รายวิชาทั้งหมด {assessmentGradeSubjects.length} วิชา
+                    ภาคเรียนที่ {selectedSemester}/{selectedYear} | นักเรียน {assessmentGradeStudents.length} คน | {assessmentViewMode === 'activity' ? `กิจกรรมทั้งหมด ${assessmentGradeActivities.length} กิจกรรม` : `รายวิชาทั้งหมด ${assessmentGradeSubjects.length} วิชา`}
                   </p>
                 </div>
               </div>
@@ -2112,7 +2355,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
             {/* Dedicated Personnel Selectors & View Mode Bar (No-Print) */}
             <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs no-print">
               <div className="flex items-center gap-3 flex-wrap">
-                {/* 2 Buttons: คะแนน vs เกรด */}
+                {/* 3 Buttons: คะแนน vs เกรด vs กิจกรรม */}
                 <div className="flex items-center bg-slate-200/80 p-0.5 rounded-xl border border-slate-300">
                   <button
                     type="button"
@@ -2141,6 +2384,19 @@ export const Module7Reports: React.FC<Module7Props> = ({
                       <span>เกรด</span>
                     </button>
                   )}
+
+                  <button
+                    type="button"
+                    onClick={() => setAssessmentViewMode('activity')}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      assessmentViewMode === 'activity'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-slate-700 hover:text-slate-900'
+                    }`}
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>กิจกรรม</span>
+                  </button>
                 </div>
 
                 <div className="flex items-center gap-1.5">
@@ -2192,7 +2448,225 @@ export const Module7Reports: React.FC<Module7Props> = ({
                     กรุณาเพิ่มข้อมูลนักเรียนในระบบก่อนพิมพ์แบบรายงานผลการเรียน
                   </p>
                 </div>
-              ) : assessmentGradeSubjects.length === 0 ? (
+              ) : assessmentViewMode === 'activity' ? (
+                assessmentGradeActivities.length === 0 ? (
+                  <div className="py-20 text-center text-slate-400 bg-white rounded-2xl border border-slate-200 p-8 space-y-2 max-w-[210mm] mx-auto">
+                    <CheckCircle2 className="w-12 h-12 mx-auto text-slate-300" />
+                    <p className="text-sm font-semibold text-slate-700">
+                      ยังไม่มีข้อมูลกิจกรรมพัฒนาผู้เรียนในชั้น {getGradeCleanName(assessmentPopupGrade)} ในภาคเรียนที่ {selectedSemester}/{selectedYear}
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      กรุณาเพิ่มโครงสร้างกิจกรรมและบันทึกผลการประเมิน (ผ่าน/ไม่ผ่าน) ในเมนูงานวัดผล (Module 2)
+                    </p>
+                  </div>
+                ) : (
+                  /* ACTIVITY VIEW: PASS/FAIL EVALUATION TABLE FOR ALL ACTIVITIES IN THIS GRADE & SEMESTER */
+                  <div 
+                    className={`${
+                      reportOrientation === 'landscape'
+                        ? 'a4-landscape-paper min-h-[210mm]'
+                        : 'a4-portrait-paper min-h-[297mm]'
+                    } bg-white border border-slate-300 shadow-xl rounded-sm py-4 sm:py-5 mx-auto text-slate-900 relative transition-all`}
+                    style={{
+                      width: reportOrientation === 'landscape' ? '297mm' : '210mm',
+                      maxWidth: reportOrientation === 'landscape' ? '297mm' : '210mm',
+                      paddingLeft: '20mm',
+                      paddingRight: '10mm',
+                    }}
+                  >
+                    {/* A4 Sheet Header */}
+                    <div className="mb-3 text-center">
+                      <div className="flex justify-center mb-2">
+                        {schoolInfo.logoUrl ? (
+                          <img 
+                            src={schoolInfo.logoUrl} 
+                            alt="School Logo" 
+                            className="w-20 h-20 sm:w-24 sm:h-24 object-contain mx-auto" 
+                          />
+                        ) : (
+                          <div className="w-16 h-16 rounded-2xl bg-indigo-50 border border-indigo-200 flex items-center justify-center text-2xl mx-auto">
+                            🏫
+                          </div>
+                        )}
+                      </div>
+                      <h1 className="text-sm font-bold text-black tracking-tight">
+                        แบบรายงานผลการประเมินกิจกรรมพัฒนาผู้เรียน
+                      </h1>
+                      <div className="text-[11px] font-semibold text-black mt-0.5">
+                        โรงเรียน{schoolInfo.schoolName ? schoolInfo.schoolName.replace(/^โรงเรียน\s*/, '') : '...................................................'} {schoolInfo.affiliation ? `สังกัด${schoolInfo.affiliation}` : ''}
+                      </div>
+                      <div className="text-[11px] font-bold text-black mt-0.5">
+                        ปีการศึกษา {selectedYear}&nbsp;&nbsp;&nbsp;&nbsp;ภาคเรียนที่ {selectedSemester}&nbsp;&nbsp;&nbsp;&nbsp;{getGradeCleanName(assessmentPopupGrade)}
+                      </div>
+                    </div>
+
+                    {/* Activities Pass/Fail Table (แสดงเป็นสีขาว-ดำเพื่อความเป็นทางการ) */}
+                    <div className="border border-slate-800 bg-white">
+                      <table className="w-full text-left text-[10px] border-collapse bg-white">
+                        <thead>
+                          <tr className="bg-white text-black font-bold border-b border-slate-800 text-center leading-normal">
+                            <th className="py-2 px-1 border-r border-slate-800 w-8 shrink-0 font-mono text-[9px] align-middle text-black">
+                              ที่
+                            </th>
+                            <th className="py-2 px-1 border-r border-slate-800 w-20 shrink-0 font-mono text-[9px] align-middle text-black">
+                              รหัสประจำตัว
+                            </th>
+                            <th className="py-2 px-2 border-r border-slate-800 w-40 shrink-0 text-center text-[10px] align-middle text-black">
+                              ชื่อ - นามสกุล
+                            </th>
+                            {assessmentGradeActivities.map((act) => (
+                              <th 
+                                key={act.id}
+                                className="py-1.5 px-1.5 border-r border-slate-800 text-center bg-white text-black font-bold align-middle"
+                              >
+                                <div className="font-bold text-[9.5px] leading-snug mx-auto text-black">
+                                  {act.code ? `${act.code} ` : ''}{act.name}
+                                </div>
+                              </th>
+                            ))}
+                            <th className="py-1.5 px-1.5 text-center bg-white text-black font-bold align-middle w-20 shrink-0">
+                              <div className="font-bold text-[9.5px] leading-snug mx-auto text-black">
+                                สรุปผลกิจกรรม
+                              </div>
+                            </th>
+                          </tr>
+                        </thead>
+
+                        <tbody className="bg-white text-black">
+                          {assessmentGradeStudents.map((s, sIdx) => {
+                            let evaluatedCount = 0;
+                            let failCount = 0;
+
+                            const actCols = assessmentGradeActivities.map((act) => {
+                              const res = getStudentActivityResult(s.id, act);
+                              if (res === 'ผ่าน' || res === 'ไม่ผ่าน') {
+                                evaluatedCount++;
+                                if (res === 'ไม่ผ่าน') failCount++;
+                              }
+                              return (
+                                <td 
+                                  key={act.id}
+                                  className="py-1.5 px-1 border-r border-b border-slate-800 text-center font-bold text-[9.5px] align-middle bg-white text-black"
+                                >
+                                  <span className="font-bold text-black leading-normal">
+                                    {res}
+                                  </span>
+                                </td>
+                              );
+                            });
+
+                            const summaryResult = evaluatedCount === 0
+                              ? '-'
+                              : failCount > 0
+                              ? 'ไม่ผ่าน'
+                              : evaluatedCount === assessmentGradeActivities.length
+                              ? 'ผ่าน'
+                              : 'ผ่าน';
+
+                            return (
+                              <tr key={s.id} className="bg-white leading-normal">
+                                <td className="py-1.5 px-0.5 border-r border-b border-slate-800 text-center font-mono tabular-nums text-black text-[9px] align-middle">
+                                  {s.rollNumber || sIdx + 1}
+                                </td>
+                                <td className="py-1.5 px-1 border-r border-b border-slate-800 text-center font-mono tabular-nums text-black text-[9px] align-middle">
+                                  {s.studentCode || '-'}
+                                </td>
+                                <td className="py-1.5 px-2 border-r border-b border-slate-800 font-medium text-black whitespace-nowrap text-[10px] align-middle">
+                                  {s.prefix}{s.firstName} {s.lastName}
+                                </td>
+                                {actCols}
+                                <td className="py-1.5 px-1 border-b border-slate-800 text-center font-bold text-[9.5px] align-middle bg-white text-black">
+                                  {summaryResult}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+
+                        {/* Footer: Summary of Pass / Fail counts per activity */}
+                        <tfoot>
+                          <tr className="bg-white font-bold border-t border-slate-800 text-black text-[9px]">
+                            <td colSpan={3} className="py-1.5 px-2 border-r border-slate-800 text-center align-middle font-bold text-black">
+                              สรุปจำนวน (ผ่าน / ไม่ผ่าน):
+                            </td>
+                            {assessmentGradeActivities.map((act) => {
+                              let passCnt = 0;
+                              let failCnt = 0;
+                              assessmentGradeStudents.forEach(s => {
+                                const r = getStudentActivityResult(s.id, act);
+                                if (r === 'ผ่าน') passCnt++;
+                                else if (r === 'ไม่ผ่าน') failCnt++;
+                              });
+                              return (
+                                <td key={act.id} className="py-1 px-1 border-r border-slate-800 text-center align-middle font-mono text-[8.5px] text-black font-bold bg-white">
+                                  ผ่าน {passCnt} / ไม่ผ่าน {failCnt}
+                                </td>
+                              );
+                            })}
+                            {(() => {
+                              let totalAllPass = 0;
+                              let totalAnyFail = 0;
+                              assessmentGradeStudents.forEach(s => {
+                                let ev = 0;
+                                let fl = 0;
+                                assessmentGradeActivities.forEach(act => {
+                                  const r = getStudentActivityResult(s.id, act);
+                                  if (r === 'ผ่าน' || r === 'ไม่ผ่าน') {
+                                    ev++;
+                                    if (r === 'ไม่ผ่าน') fl++;
+                                  }
+                                });
+                                if (ev > 0) {
+                                  if (fl > 0) totalAnyFail++;
+                                  else totalAllPass++;
+                                }
+                              });
+                              return (
+                                <td className="py-1 px-1 border-slate-800 text-center align-middle font-mono text-[8.5px] text-black font-bold bg-white">
+                                  ผ่าน {totalAllPass} / ไม่ผ่าน {totalAnyFail}
+                                </td>
+                              );
+                            })()}
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+
+                    {/* Signatures */}
+                    <div className="grid grid-cols-3 gap-2 text-center text-[11.5px] text-black" style={{ marginTop: '2.1cm' }}>
+                      <div className="space-y-1">
+                        <p className="text-black">ลงชื่อ ..................................................</p>
+                        <p className="font-normal text-black">
+                          ({selectedAdvisor ? `${selectedAdvisor.prefix || ''}${selectedAdvisor.firstName || ''} ${selectedAdvisor.lastName || ''}`.trim() : '................................................'})
+                        </p>
+                        <p className="text-black text-[10.5px]">ครูประจำชั้น</p>
+                      </div>
+
+                      <div className="space-y-1">
+                        <p className="text-black">ลงชื่อ ..................................................</p>
+                        <p className="font-normal text-black">
+                          ({selectedAcademicHead ? `${selectedAcademicHead.prefix || ''}${selectedAcademicHead.firstName || ''} ${selectedAcademicHead.lastName || ''}`.trim() : '................................................'})
+                        </p>
+                        <p className="text-black text-[10.5px]">หัวหน้าฝ่ายวิชาการ</p>
+                      </div>
+
+                      <div className="space-y-1">
+                        <p className="text-black">ลงชื่อ ..................................................</p>
+                        <p className="font-normal text-black">
+                          ({directorDisplayName})
+                        </p>
+                        <p className="text-black text-[10.5px]">{directorPosition}</p>
+                      </div>
+                    </div>
+
+                    {/* Visual A4 Page Boundary Line Indicator (On screen only) */}
+                    <div className="a4-page-limit-line mt-6 pt-2 border-t-2 border-dashed border-indigo-400 text-center text-[10px] font-bold text-indigo-700 no-print flex items-center justify-center gap-2 bg-indigo-50/60 py-1 rounded">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600" />
+                      <span>--- สิ้นสุดความยาวกระดาษ A4 รายงานผลการประเมินกิจกรรมพัฒนาผู้เรียน ---</span>
+                    </div>
+                  </div>
+                )
+              ) : (assessmentViewMode === 'grade' ? assessmentGradeModeSubjects.length === 0 : assessmentGradeSubjects.length === 0) ? (
                 <div className="py-20 text-center text-slate-400 bg-white rounded-2xl border border-slate-200 p-8 space-y-2 max-w-[210mm] mx-auto">
                   <BookOpen className="w-12 h-12 mx-auto text-slate-300" />
                   <p className="text-sm font-semibold text-slate-700">
@@ -2232,14 +2706,18 @@ export const Module7Reports: React.FC<Module7Props> = ({
                         </div>
                       )}
                     </div>
-                    <h1 className="text-sm font-bold text-slate-900 tracking-tight">
+                    <h1 className="text-sm font-bold text-black tracking-tight">
                       แบบรายงานระดับผลการเรียน (เกรด)
                     </h1>
-                    <div className="text-[11px] font-semibold text-slate-800 mt-0.5">
+                    <div className="text-[11px] font-semibold text-black mt-0.5">
                       โรงเรียน{schoolInfo.schoolName ? schoolInfo.schoolName.replace(/^โรงเรียน\s*/, '') : '...................................................'} {schoolInfo.affiliation ? `สังกัด${schoolInfo.affiliation}` : ''}
                     </div>
-                    <div className="text-[11px] font-bold text-slate-800 mt-0.5">
-                      ปีการศึกษา {selectedYear}&nbsp;&nbsp;&nbsp;&nbsp;ภาคเรียนที่ {selectedSemester}&nbsp;&nbsp;&nbsp;&nbsp;{getGradeCleanName(assessmentPopupGrade)} {isAssessmentPrimary ? '(สรุปผลรวมตลอดปีการศึกษา)' : ''}
+                    <div className="text-[11px] font-bold text-black mt-0.5">
+                      {isAssessmentP1ToP6 ? (
+                        <>ปีการศึกษา {selectedYear}&nbsp;&nbsp;&nbsp;&nbsp;{getGradeCleanName(assessmentPopupGrade)}</>
+                      ) : (
+                        <>ปีการศึกษา {selectedYear}&nbsp;&nbsp;&nbsp;&nbsp;ภาคเรียนที่ {selectedSemester}&nbsp;&nbsp;&nbsp;&nbsp;{getGradeCleanName(assessmentPopupGrade)}</>
+                      )}
                     </div>
                   </div>
 
@@ -2257,8 +2735,8 @@ export const Module7Reports: React.FC<Module7Props> = ({
                           <th className="py-2 px-2 border-r border-slate-800 w-36 shrink-0 text-center text-[10px] align-middle text-black">
                             ชื่อ - นามสกุล
                           </th>
-                          {assessmentGradeSubjects.map((subj, subjIdx) => {
-                            const isLastSubj = subjIdx === assessmentGradeSubjects.length - 1;
+                          {assessmentGradeModeSubjects.map((subj, subjIdx) => {
+                            const isLastSubj = subjIdx === assessmentGradeModeSubjects.length - 1;
                             return (
                               <th 
                                 key={subj.id}
@@ -2281,8 +2759,8 @@ export const Module7Reports: React.FC<Module7Props> = ({
                           let totalPoints = 0;
                           let totalCredits = 0;
 
-                          const subjGradeCols = assessmentGradeSubjects.map((subj, subjIdx) => {
-                            const isLastSubj = subjIdx === assessmentGradeSubjects.length - 1;
+                          const subjGradeCols = assessmentGradeModeSubjects.map((subj, subjIdx) => {
+                            const isLastSubj = subjIdx === assessmentGradeModeSubjects.length - 1;
                             const rawScore = getStudentGradeScore(s.id, subj);
                             const gradeStr = calculateThaiGrade(rawScore);
                             const weight = subj.hoursPerWeek ? subj.hoursPerWeek / 2 : 1;
@@ -2336,11 +2814,11 @@ export const Module7Reports: React.FC<Module7Props> = ({
                       {/* Footer */}
                       <tfoot>
                         <tr className="bg-white font-bold border-t border-slate-800 text-black text-[9px]">
-                          <td colSpan={3} className="py-1.5 px-2 border-r border-slate-800 text-right font-bold text-black">
-                            เกรดเฉลี่ยรายวิชา:
+                          <td colSpan={3} className="py-1.5 px-2 border-r border-slate-800 text-center align-middle font-bold text-black">
+                            เกรดเฉลี่ยรายวิชา
                           </td>
-                          {assessmentGradeSubjects.map((subj, subjIdx) => {
-                            const isLastSubj = subjIdx === assessmentGradeSubjects.length - 1;
+                          {assessmentGradeModeSubjects.map((subj, subjIdx) => {
+                            const isLastSubj = subjIdx === assessmentGradeModeSubjects.length - 1;
                             let totalPts = 0;
                             let countPts = 0;
                             assessmentGradeStudents.forEach(s => {
@@ -2359,7 +2837,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
                             });
                             const avgPt = countPts > 0 ? (totalPts / countPts).toFixed(2) : '-';
                             return (
-                              <td key={subj.id} className={`py-1 px-0.5 ${isLastSubj ? '' : 'border-r'} border-slate-800 text-center font-mono text-[9px] text-black font-bold bg-white`}>
+                              <td key={subj.id} className={`py-1 px-0.5 ${isLastSubj ? '' : 'border-r'} border-slate-800 text-center align-middle font-mono text-[9px] text-black font-bold bg-white`}>
                                 {avgPt}
                               </td>
                             );
@@ -2370,29 +2848,29 @@ export const Module7Reports: React.FC<Module7Props> = ({
                   </div>
 
                   {/* Signatures */}
-                  <div className="mt-6 grid grid-cols-3 gap-2 text-center text-[10px]">
-                    <div className="space-y-0.5">
-                      <p className="text-slate-600">ลงชื่อ ..................................................</p>
-                      <p className="font-normal text-slate-800">
+                  <div className="grid grid-cols-3 gap-2 text-center text-[11.5px] text-black" style={{ marginTop: '2.1cm' }}>
+                    <div className="space-y-1">
+                      <p className="text-black">ลงชื่อ ..................................................</p>
+                      <p className="font-normal text-black">
                         ({selectedAdvisor ? `${selectedAdvisor.prefix || ''}${selectedAdvisor.firstName || ''} ${selectedAdvisor.lastName || ''}`.trim() : '................................................'})
                       </p>
-                      <p className="text-slate-500 text-[9px]">ครูประจำชั้น</p>
+                      <p className="text-black text-[10.5px]">ครูประจำชั้น</p>
                     </div>
 
-                    <div className="space-y-0.5">
-                      <p className="text-slate-600">ลงชื่อ ..................................................</p>
-                      <p className="font-normal text-slate-800">
+                    <div className="space-y-1">
+                      <p className="text-black">ลงชื่อ ..................................................</p>
+                      <p className="font-normal text-black">
                         ({selectedAcademicHead ? `${selectedAcademicHead.prefix || ''}${selectedAcademicHead.firstName || ''} ${selectedAcademicHead.lastName || ''}`.trim() : '................................................'})
                       </p>
-                      <p className="text-slate-500 text-[9px]">หัวหน้าฝ่ายวิชาการ</p>
+                      <p className="text-black text-[10.5px]">หัวหน้าฝ่ายวิชาการ</p>
                     </div>
 
-                    <div className="space-y-0.5">
-                      <p className="text-slate-600">ลงชื่อ ..................................................</p>
-                      <p className="font-normal text-slate-800">
+                    <div className="space-y-1">
+                      <p className="text-black">ลงชื่อ ..................................................</p>
+                      <p className="font-normal text-black">
                         ({directorDisplayName})
                       </p>
-                      <p className="text-slate-500 text-[9px]">{directorPosition}</p>
+                      <p className="text-black text-[10.5px]">{directorPosition}</p>
                     </div>
                   </div>
 
@@ -2540,73 +3018,33 @@ export const Module7Reports: React.FC<Module7Props> = ({
                               );
                             })}
                           </tbody>
-
-                          {/* Footer with Class Average */}
-                          <tfoot>
-                            <tr className="bg-white font-bold border-t border-slate-800 text-black text-[9px]">
-                              <td colSpan={3} className="py-1 px-2 border-r border-slate-800 text-right font-bold text-black">
-                                คะแนนเฉลี่ย:
-                              </td>
-                              {chunk.map((subj, cIdx) => {
-                                const isLastSubj = cIdx === chunk.length - 1;
-                                let totalCw = 0, countCw = 0;
-                                let totalEx = 0, countEx = 0;
-                                let totalTt = 0, countTt = 0;
-
-                                assessmentGradeStudents.forEach(s => {
-                                  const sc = getStudentScores(s.id, subj);
-                                  if (sc.numCoursework !== null) { totalCw += sc.numCoursework; countCw++; }
-                                  if (sc.numExam !== null) { totalEx += sc.numExam; countEx++; }
-                                  if (sc.numTotal !== null) { totalTt += sc.numTotal; countTt++; }
-                                });
-
-                                const avgCw = countCw > 0 ? (totalCw / countCw).toFixed(1) : '-';
-                                const avgEx = countEx > 0 ? (totalEx / countEx).toFixed(1) : '-';
-                                const avgTt = countTt > 0 ? (totalTt / countTt).toFixed(1) : '-';
-
-                                return (
-                                  <React.Fragment key={subj.id}>
-                                    <td className="py-1 px-0.5 border-r border-slate-800 text-center font-mono font-medium text-black bg-white">
-                                      {avgCw}
-                                    </td>
-                                    <td className="py-1 px-0.5 border-r border-slate-800 text-center font-mono font-medium text-black bg-white">
-                                      {avgEx}
-                                    </td>
-                                    <td className={`py-1 px-0.5 ${isLastSubj ? '' : 'border-r'} border-slate-800 text-center font-mono font-bold bg-white text-black`}>
-                                      {avgTt}
-                                    </td>
-                                  </React.Fragment>
-                                );
-                              })}
-                            </tr>
-                          </tfoot>
                         </table>
                       </div>
 
                       {/* Signatures */}
-                      <div className="mt-6 grid grid-cols-3 gap-2 text-center text-[10px]">
-                        <div className="space-y-0.5">
-                          <p className="text-slate-600">ลงชื่อ ..................................................</p>
-                          <p className="font-normal text-slate-800">
+                      <div className="grid grid-cols-3 gap-2 text-center text-[11.5px] text-black" style={{ marginTop: '2.1cm' }}>
+                        <div className="space-y-1">
+                          <p className="text-black">ลงชื่อ ..................................................</p>
+                          <p className="font-normal text-black">
                             ({selectedAdvisor ? `${selectedAdvisor.prefix || ''}${selectedAdvisor.firstName || ''} ${selectedAdvisor.lastName || ''}`.trim() : '................................................'})
                           </p>
-                          <p className="text-slate-500 text-[9px]">ครูประจำชั้น</p>
+                          <p className="text-black text-[10.5px]">ครูประจำชั้น</p>
                         </div>
 
-                        <div className="space-y-0.5">
-                          <p className="text-slate-600">ลงชื่อ ..................................................</p>
-                          <p className="font-normal text-slate-800">
+                        <div className="space-y-1">
+                          <p className="text-black">ลงชื่อ ..................................................</p>
+                          <p className="font-normal text-black">
                             ({selectedAcademicHead ? `${selectedAcademicHead.prefix}${selectedAcademicHead.firstName} ${selectedAcademicHead.lastName}` : '................................................'})
                           </p>
-                          <p className="text-slate-500 text-[9px]">หัวหน้าฝ่ายวิชาการ</p>
+                          <p className="text-black text-[10.5px]">หัวหน้าฝ่ายวิชาการ</p>
                         </div>
 
-                        <div className="space-y-0.5">
-                          <p className="text-slate-600">ลงชื่อ ..................................................</p>
-                          <p className="font-normal text-slate-800">
+                        <div className="space-y-1">
+                          <p className="text-black">ลงชื่อ ..................................................</p>
+                          <p className="font-normal text-black">
                             ({directorDisplayName})
                           </p>
-                          <p className="text-slate-500 text-[9px]">{directorPosition}</p>
+                          <p className="text-black text-[10.5px]">{directorPosition}</p>
                         </div>
                       </div>
 
@@ -2990,29 +3428,29 @@ export const Module7Reports: React.FC<Module7Props> = ({
                       </div>
 
                       {/* Official Signatures Section (Matching Attendance standard) */}
-                      <div className="mt-5 grid grid-cols-3 gap-2 text-center text-[10px] text-black">
-                        <div className="space-y-0.5">
+                      <div className="grid grid-cols-3 gap-2 text-center text-[11.5px] text-black" style={{ marginTop: '2.1cm' }}>
+                        <div className="space-y-1">
                           <p className="text-black">ลงชื่อ ..................................................</p>
                           <p className="font-normal text-black">
                             ({selectedAdvisor ? `${selectedAdvisor.prefix || ''}${selectedAdvisor.firstName || ''} ${selectedAdvisor.lastName || ''}`.trim() : '................................................'})
                           </p>
-                          <p className="text-black text-[9px]">ครูประจำชั้น</p>
+                          <p className="text-black text-[10.5px]">ครูประจำชั้น</p>
                         </div>
 
-                        <div className="space-y-0.5">
+                        <div className="space-y-1">
                           <p className="text-black">ลงชื่อ ..................................................</p>
                           <p className="font-normal text-black">
                             ({selectedAcademicHead ? `${selectedAcademicHead.prefix || ''}${selectedAcademicHead.firstName || ''} ${selectedAcademicHead.lastName || ''}`.trim() : '................................................'})
                           </p>
-                          <p className="text-black text-[9px]">หัวหน้าฝ่ายวิชาการ</p>
+                          <p className="text-black text-[10.5px]">หัวหน้าฝ่ายวิชาการ</p>
                         </div>
 
-                        <div className="space-y-0.5">
+                        <div className="space-y-1">
                           <p className="text-black">ลงชื่อ ..................................................</p>
                           <p className="font-normal text-black">
                             ({directorDisplayName})
                           </p>
-                          <p className="text-black text-[9px]">{directorPosition}</p>
+                          <p className="text-black text-[10.5px]">{directorPosition}</p>
                         </div>
                       </div>
 

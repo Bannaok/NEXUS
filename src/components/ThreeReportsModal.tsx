@@ -414,29 +414,29 @@ export const ThreeReportsModal: React.FC<ThreeReportsModalProps> = ({
 
   // Signatures Component for A4 Pages
   const renderSignatures = () => (
-    <div className="mt-6 grid grid-cols-3 gap-2 text-center text-[10px] text-black">
-      <div className="space-y-0.5">
+    <div className="grid grid-cols-3 gap-2 text-center text-[11.5px] text-black" style={{ marginTop: '2.1cm' }}>
+      <div className="space-y-1">
         <p className="text-black">ลงชื่อ ..................................................</p>
         <p className="font-normal text-black">
           ({selectedAdvisor ? `${selectedAdvisor.prefix || ''}${selectedAdvisor.firstName || ''} ${selectedAdvisor.lastName || ''}`.trim() : '................................................'})
         </p>
-        <p className="text-black text-[9px]">ครูประจำชั้น</p>
+        <p className="text-black text-[10.5px]">ครูประจำชั้น</p>
       </div>
 
-      <div className="space-y-0.5">
+      <div className="space-y-1">
         <p className="text-black">ลงชื่อ ..................................................</p>
         <p className="font-normal text-black">
           ({selectedAcademicHead ? `${selectedAcademicHead.prefix || ''}${selectedAcademicHead.firstName || ''} ${selectedAcademicHead.lastName || ''}`.trim() : '................................................'})
         </p>
-        <p className="text-black text-[9px]">หัวหน้าฝ่ายวิชาการ</p>
+        <p className="text-black text-[10.5px]">หัวหน้าฝ่ายวิชาการ</p>
       </div>
 
-      <div className="space-y-0.5">
+      <div className="space-y-1">
         <p className="text-black">ลงชื่อ ..................................................</p>
         <p className="font-normal text-black">
           ({directorDisplayName})
         </p>
-        <p className="text-black text-[9px]">{directorPosition || 'ผู้อำนวยการโรงเรียนบ้านนาออก'}</p>
+        <p className="text-black text-[10.5px]">{directorPosition || 'ผู้อำนวยการโรงเรียนบ้านนาออก'}</p>
       </div>
     </div>
   );
@@ -1008,7 +1008,7 @@ export const ThreeReportsModal: React.FC<ThreeReportsModalProps> = ({
                 </div>
 
                 {/* Groups 5 to 8 Table */}
-                <div className="border border-slate-800 mb-6 bg-white">
+                <div className="border border-slate-800 bg-white">
                   <table className="w-full text-left text-xs border-collapse text-black bg-white">
                     <thead className="bg-amber-300" style={{ backgroundColor: '#fcd34d' }}>
                       <tr className="bg-amber-300 text-black font-bold border-b border-slate-800 text-xs leading-normal" style={{ backgroundColor: '#fcd34d' }}>

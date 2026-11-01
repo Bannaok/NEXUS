@@ -499,10 +499,17 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
     return attendanceConfig.academicYear || '2568';
   });
 
+  const activeSemester: '1' | '2' = user.role === 'admin'
+    ? (selectedSemester || ((schoolInfo?.semester === '2' ? '2' : '1') as '1' | '2'))
+    : ((schoolInfo?.semester === '2' ? '2' : '1') as '1' | '2');
+  const activeAcademicYear: string = user.role === 'admin'
+    ? (selectedAcademicYear || schoolInfo?.academicYear || '2569')
+    : (schoolInfo?.academicYear || '2569');
+
   // Helper to generate or get default school days list (all calendar days including Sat-Sun between start and end date)
   const defaultSchoolDays = useMemo(() => {
-    const yr = selectedAcademicYear || schoolInfo?.academicYear || '2568';
-    const sem = selectedSemester || (schoolInfo?.semester as '1' | '2') || '1';
+    const yr = activeAcademicYear;
+    const sem = activeSemester;
     const termDefaults = getTermDefaultDates(yr, sem);
 
     const startStr = termDefaults.startDate;
@@ -535,7 +542,7 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
       curr.setDate(curr.getDate() + 1);
     }
     return days;
-  }, [selectedAcademicYear, selectedSemester, schoolInfo?.academicYear, schoolInfo?.semester]);
+  }, [activeAcademicYear, activeSemester]);
 
   // Latest created 100-day structure term key (e.g. '1_2568', '2_2568')
   const [latestAttendanceTermKey, setLatestAttendanceTermKey] = useState<string>(() => {
@@ -550,15 +557,11 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
   const [summarySemester, setSummarySemester] = useState<'1' | '2'>((schoolInfo?.semester as '1'|'2') || '1');
   const [summaryAcademicYear, setSummaryAcademicYear] = useState<string>(schoolInfo?.academicYear || '2568');
 
-  // Resolved active 100 days structure selected by Admin (for Calendar in เช็กเวลา&เงินฝาก)
+  // Resolved active 100 days structure (for Admin: selected term; for Member: Admin settings term)
   const latestCreatedConfig = useMemo(() => {
-    const adminYr = schoolInfo?.academicYear || '2568';
-    const adminSem = schoolInfo?.semester || '1';
-    const activeKey = latestAttendanceTermKey || `${adminSem}_${adminYr}`;
-
-    const [selSem, selYr] = activeKey.split('_');
-    const activeSem = (selSem as '1' | '2') || adminSem;
-    const activeYr = selYr || adminYr;
+    const activeSem = activeSemester;
+    const activeYr = activeAcademicYear;
+    const activeKey = `${activeSem}_${activeYr}`;
 
     if (configsByTerm[activeKey]) {
       const cfg = configsByTerm[activeKey];
@@ -579,12 +582,9 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
       targetDays: 100,
       schoolDays: defaultSchoolDays
     };
-  }, [schoolInfo?.academicYear, schoolInfo?.semester, latestAttendanceTermKey, configsByTerm, defaultSchoolDays]);
+  }, [activeSemester, activeAcademicYear, configsByTerm, defaultSchoolDays]);
 
-  const activeSemester: '1' | '2' = (latestCreatedConfig?.semester as any) || (schoolInfo?.semester as '1'|'2') || '1';
-  const activeAcademicYear: string = latestCreatedConfig?.academicYear || schoolInfo?.academicYear || '2568';
-
-  // Auto-sync active attendance term & calendar view with Admin schoolInfo settings
+  // Sync local selection when Admin updates schoolInfo in Settings
   useEffect(() => {
     if (schoolInfo?.academicYear && schoolInfo?.semester) {
       const sem = (schoolInfo.semester === '2' ? '2' : '1') as '1' | '2';
@@ -596,35 +596,44 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
       setSelectedSemester(sem);
       setSummaryAcademicYear(yr);
       setSummarySemester(sem);
-
-      // Jump calendar view & selectedDate to valid school days of Admin configured term
-      const targetConfig = configsByTerm[termKey];
-      const validDays = (targetConfig?.schoolDays || defaultSchoolDays).filter(d => !d.isHoliday);
-
-      if (validDays.length > 0) {
-        const today = new Date().toISOString().split('T')[0];
-        const match = validDays.find(d => d.date === today);
-        const targetDate = match ? match.date : validDays[0].date;
-        setSelectedDate(targetDate);
-        const parts = targetDate.split('-');
-        if (parts.length === 3) {
-          setCalViewYear(Number(parts[0]));
-          setCalViewMonth(Number(parts[1]) - 1);
-        }
-      } else {
-        const defaults = getTermDefaultDates(yr, sem);
-        setSelectedDate(defaults.startDate);
-        setCalViewYear(defaults.startForcedYear);
-        setCalViewMonth(defaults.startForcedMonth);
-      }
     }
   }, [schoolInfo?.academicYear, schoolInfo?.semester]);
+
+  // Jump calendar view & selectedDate when activeSemester or activeAcademicYear changes
+  useEffect(() => {
+    const termKey = `${activeSemester}_${activeAcademicYear}`;
+    setSummaryAcademicYear(activeAcademicYear);
+    setSummarySemester(activeSemester);
+
+    const targetConfig = configsByTerm[termKey];
+    const validDays = (targetConfig?.schoolDays || defaultSchoolDays).filter(d => !d.isHoliday);
+
+    if (validDays.length > 0) {
+      const today = new Date().toISOString().split('T')[0];
+      const match = validDays.find(d => d.date === today);
+      const targetDate = match ? match.date : validDays[0].date;
+      setSelectedDate(targetDate);
+      const parts = targetDate.split('-');
+      if (parts.length === 3) {
+        setCalViewYear(Number(parts[0]));
+        setCalViewMonth(Number(parts[1]) - 1);
+      }
+    } else {
+      const defaults = getTermDefaultDates(activeAcademicYear, activeSemester);
+      setSelectedDate(defaults.startDate);
+      setCalViewYear(defaults.startForcedYear);
+      setCalViewMonth(defaults.startForcedMonth);
+    }
+  }, [activeSemester, activeAcademicYear, configsByTerm, defaultSchoolDays]);
 
   // Available Academic Years (sorted descending, e.g. 2569, 2568)
   const [availableAcademicYears, setAvailableAcademicYears] = useState<string[]>(() => {
     const list = StorageService.getAcademicYears();
     if (!list.includes('2569')) list.push('2569');
     if (!list.includes('2568')) list.push('2568');
+    if (schoolInfo?.academicYear && !list.includes(schoolInfo.academicYear)) {
+      list.push(schoolInfo.academicYear);
+    }
     if (attendanceConfig.academicYear && !list.includes(attendanceConfig.academicYear)) {
       list.push(attendanceConfig.academicYear);
     }
@@ -636,16 +645,15 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
     return StorageService.subscribe(() => {
       const latestConfigs = StorageService.getAttendanceConfigsByTerm();
       setConfigsByTerm(latestConfigs);
-      const latestTerm = localStorage.getItem('ams_latest_attendance_term');
-      if (latestTerm) {
-        setLatestAttendanceTermKey(latestTerm);
-      }
       const list = StorageService.getAcademicYears();
       if (!list.includes('2569')) list.push('2569');
       if (!list.includes('2568')) list.push('2568');
+      if (schoolInfo?.academicYear && !list.includes(schoolInfo.academicYear)) {
+        list.push(schoolInfo.academicYear);
+      }
       setAvailableAcademicYears(Array.from(new Set(list)).sort((a, b) => b.localeCompare(a)));
     });
-  }, []);
+  }, [schoolInfo?.academicYear]);
 
   // Modal to add new academic year
   const [isAddYearModalOpen, setIsAddYearModalOpen] = useState(false);
@@ -655,7 +663,7 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
   const [submissionStatusModalDate, setSubmissionStatusModalDate] = useState<string | null>(null);
 
   // Term schedule resolution: only show table if created with "+"
-  const currentTermKey = `${selectedSemester}_${selectedAcademicYear}`;
+  const currentTermKey = `${activeSemester}_${activeAcademicYear}`;
   const currentTermConfig = configsByTerm[currentTermKey];
   const hasTermSchedule = Boolean(currentTermConfig && currentTermConfig.schoolDays && currentTermConfig.schoolDays.length > 0);
 
@@ -2009,26 +2017,55 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
           </button>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          {user.role === 'admin' && activeTab === 'main' && registeredHomeroomGrades.length > 0 && (
-            <select
-              value={selectedGrade}
-              onChange={(e) => setSelectedGrade(e.target.value as GradeLevel)}
-              className="px-3 py-2 rounded-xl bg-white hover:bg-emerald-50 text-emerald-900 border border-emerald-300 text-xs font-bold outline-none cursor-pointer shadow-2xs transition-colors"
-            >
-              {registeredHomeroomGrades.map(grade => (
-                <option key={grade} value={grade}>
-                  {grade}
-                </option>
-              ))}
-            </select>
-          )}
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
+          {user.role === 'admin' ? (
+            <>
+              <select
+                value={selectedAcademicYear}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === 'add_new') {
+                    setIsAddYearModalOpen(true);
+                  } else {
+                    setSelectedAcademicYear(val);
+                  }
+                }}
+                className="px-3 py-2 rounded-xl bg-white hover:bg-emerald-50 text-emerald-900 border border-emerald-300 text-xs font-bold outline-none cursor-pointer shadow-2xs transition-colors"
+              >
+                {availableAcademicYears.map(yr => (
+                  <option key={yr} value={yr}>ปีการศึกษา {yr}</option>
+                ))}
+                <option value="add_new">+ เพิ่มปีการศึกษา...</option>
+              </select>
 
-          {/* Display academic year and semester text */}
-          <div className="hidden sm:flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-xl border border-emerald-200 text-xs font-bold text-slate-800 shadow-2xs">
-            <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-            <span>ปีการศึกษา {activeAcademicYear} ภาค {activeSemester}</span>
-          </div>
+              <select
+                value={selectedSemester}
+                onChange={(e) => setSelectedSemester(e.target.value as '1' | '2')}
+                className="px-3 py-2 rounded-xl bg-white hover:bg-emerald-50 text-emerald-900 border border-emerald-300 text-xs font-bold outline-none cursor-pointer shadow-2xs transition-colors"
+              >
+                <option value="1">ภาคเรียนที่ 1</option>
+                <option value="2">ภาคเรียนที่ 2</option>
+              </select>
+
+              {activeTab === 'main' && registeredHomeroomGrades.length > 0 && (
+                <select
+                  value={selectedGrade}
+                  onChange={(e) => setSelectedGrade(e.target.value as GradeLevel)}
+                  className="px-3 py-2 rounded-xl bg-white hover:bg-emerald-50 text-emerald-900 border border-emerald-300 text-xs font-bold outline-none cursor-pointer shadow-2xs transition-colors"
+                >
+                  {registeredHomeroomGrades.map(grade => (
+                    <option key={grade} value={grade}>
+                      {grade}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </>
+          ) : (
+            <div className="px-3 py-2 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold whitespace-nowrap">
+              ภาคเรียนที่ {activeSemester} • ปีการศึกษา {activeAcademicYear}
+            </div>
+          )}
         </div>
       </div>
 
@@ -2818,80 +2855,10 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
       {/* ======================================================== */}
       {activeTab === 'school_days' && (
         <div className="space-y-3">
-          {/* Controls Bar: แถบสีขาว วันเรียน, ภาค, ปี, ลบรายการทั้งหมด, สร้างวัน, เพิ่มวัน */}
-          <div className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-xs space-y-3 sm:space-y-0 sm:flex sm:items-center sm:justify-between sm:gap-3">
-            {/* Left side: Selectors for ภาคเรียน และ ปีการศึกษา */}
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1.5 bg-slate-50 p-1.5 rounded-xl border border-slate-200/80 shadow-2xs w-full sm:w-auto justify-between sm:justify-start">
-                <div className="flex flex-col gap-0.5 flex-1 sm:flex-initial">
-                  <span className="text-[10px] font-bold text-slate-500 px-0.5 leading-tight flex items-center gap-1">
-                    {user.role !== 'admin' && <Lock className="w-2.5 h-2.5 text-slate-400" />}
-                    <span>ภาคเรียน</span>
-                  </span>
-                  <select
-                    value={selectedSemester}
-                    disabled={user.role !== 'admin'}
-                    onChange={(e: any) => setSelectedSemester(e.target.value)}
-                    className={`text-xs py-1 px-2 font-bold rounded-lg border shadow-2xs ${
-                      user.role !== 'admin'
-                        ? 'bg-slate-100 text-slate-600 border-slate-200 cursor-not-allowed'
-                        : 'bg-white text-slate-800 border-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer'
-                    }`}
-                  >
-                    <option value="1">ภาคเรียนที่ 1</option>
-                    <option value="2">ภาคเรียนที่ 2</option>
-                  </select>
-                </div>
-
-                <div className="flex flex-col gap-0.5 flex-1 sm:flex-initial">
-                  {user.role === 'admin' ? (
-                    <button
-                      type="button"
-                      onClick={() => setIsAddYearModalOpen(true)}
-                      className="text-[10px] font-bold text-emerald-700 hover:text-emerald-800 hover:underline flex items-center gap-0.5 cursor-pointer leading-tight px-0.5"
-                      title="คลิกเพื่อเพิ่มปีการศึกษาใหม่"
-                    >
-                      <Plus className="w-2.5 h-2.5" />
-                      <span>เพิ่มปีการศึกษา</span>
-                    </button>
-                  ) : (
-                    <span className="text-[10px] font-bold text-slate-500 px-0.5 leading-tight flex items-center gap-1">
-                      <Lock className="w-2.5 h-2.5 text-slate-400" />
-                      <span>ปีการศึกษา</span>
-                    </span>
-                  )}
-                  <select
-                    value={selectedAcademicYear}
-                    disabled={user.role !== 'admin'}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      if (val === 'add_new') {
-                        if (user.role === 'admin') setIsAddYearModalOpen(true);
-                      } else {
-                        setSelectedAcademicYear(val);
-                      }
-                    }}
-                    className={`text-xs py-1 px-2 font-bold rounded-lg border shadow-2xs ${
-                      user.role !== 'admin'
-                        ? 'bg-slate-100 text-slate-600 border-slate-200 cursor-not-allowed'
-                        : 'bg-white text-slate-800 border-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer'
-                    }`}
-                  >
-                    {user.role === 'admin' && (
-                      <option value="add_new" className="text-emerald-600 font-bold">+ เพิ่มปีการศึกษา...</option>
-                    )}
-                    {availableAcademicYears.map(yr => (
-                      <option key={yr} value={yr}>
-                        {yr}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
-
-            {/* Admin Action Buttons: 4 Equal Grid Columns on Mobile */}
-            {user.role === 'admin' && (
+          {/* Controls Bar: Admin Action Buttons */}
+          {user.role === 'admin' && (
+            <div className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-xs flex items-center justify-end gap-2">
+              {/* Admin Action Buttons: 4 Equal Grid Columns on Mobile */}
               <div className="grid grid-cols-4 gap-1.5 sm:flex sm:items-center sm:gap-2 w-full sm:w-auto">
                 {/* 1. ปุ่ม "เลือก" / "เลือกแล้ว" */}
                 <button
@@ -2965,8 +2932,8 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
                   <span className="whitespace-nowrap">เพิ่มวัน</span>
                 </button>
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
           {/* School Days Table: Only shown if the term has been created with 'สร้างวัน' */}
           {!hasTermSchedule ? (
@@ -2985,7 +2952,7 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
                 <div className="font-bold flex items-center gap-2 text-slate-800">
                   <CalendarDays className="w-4 h-4 text-emerald-600" />
                   <span>
-                    ตารางวันเรียน ภาคเรียนที่ {selectedSemester} ปีการศึกษา {selectedAcademicYear}
+                    ตารางวันเรียน ภาคเรียนที่ {activeSemester} ปีการศึกษา {activeAcademicYear}
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -4213,32 +4180,32 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
 
             {/* Selectors Bar: ภาคเรียน และ ปีการศึกษา */}
             <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200/80 flex flex-wrap items-center justify-between gap-3 shrink-0">
-              <div className="flex flex-wrap items-center gap-2.5">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-bold text-slate-700">ภาคเรียน:</span>
-                  <select
-                    value={summarySemester}
-                    onChange={(e) => setSummarySemester(e.target.value as '1' | '2')}
-                    className="text-xs font-bold px-3 py-1.5 rounded-xl border border-slate-200 bg-white shadow-2xs focus:outline-none focus:ring-1 focus:ring-sky-500 cursor-pointer"
-                  >
-                    <option value="1">ภาคเรียนที่ 1</option>
-                    <option value="2">ภาคเรียนที่ 2</option>
-                  </select>
-                </div>
-
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-bold text-slate-700">ปีการศึกษา:</span>
+              {user.role === 'admin' ? (
+                <div className="flex flex-wrap items-center gap-2">
                   <select
                     value={summaryAcademicYear}
                     onChange={(e) => setSummaryAcademicYear(e.target.value)}
-                    className="text-xs font-bold px-3 py-1.5 rounded-xl border border-slate-200 bg-white shadow-2xs focus:outline-none focus:ring-1 focus:ring-sky-500 cursor-pointer"
+                    className="px-3 py-2 rounded-xl bg-white hover:bg-sky-50 text-sky-900 border border-sky-300 text-xs font-bold outline-none cursor-pointer shadow-2xs transition-colors"
                   >
                     {availableAcademicYears.map(yr => (
                       <option key={yr} value={yr}>ปีการศึกษา {yr}</option>
                     ))}
                   </select>
+
+                  <select
+                    value={summarySemester}
+                    onChange={(e) => setSummarySemester(e.target.value as '1' | '2')}
+                    className="px-3 py-2 rounded-xl bg-white hover:bg-sky-50 text-sky-900 border border-sky-300 text-xs font-bold outline-none cursor-pointer shadow-2xs transition-colors"
+                  >
+                    <option value="1">ภาคเรียนที่ 1</option>
+                    <option value="2">ภาคเรียนที่ 2</option>
+                  </select>
                 </div>
-              </div>
+              ) : (
+                <div className="px-3 py-2 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold whitespace-nowrap">
+                  ภาคเรียนที่ {activeSemester} • ปีการศึกษา {activeAcademicYear}
+                </div>
+              )}
             </div>
 
             {/* Content area: Table only if created, else message */}

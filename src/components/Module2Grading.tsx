@@ -32,7 +32,6 @@ import {
   Check,
   X,
   UserMinus,
-  Lock,
   Unlock,
   Calendar,
   AlertCircle,
@@ -102,10 +101,34 @@ export const Module2Grading: React.FC<Module2Props> = ({
     }
   }, [user.role, activeTab]);
 
-  // ปีการศึกษาและภาคเรียน (ล็อกตามค่าที่ Admin กำหนดจากตั้งค่าโรงเรียน)
-  const currentAcademicYear = academicYear || '2568';
-  const currentSemester = (semester === '2' ? '2' : '1');
-  const [academicYears, setAcademicYears] = useState<string[]>(() => StorageService.getAcademicYears());
+  // สำหรับ Admin: เลือกปีการศึกษาและภาคเรียนเพื่อดูข้อมูล (ไม่กระทบสมาชิก)
+  // สำหรับ สมาชิก: แสดงเฉพาะภาคเรียนและปีการศึกษาที่ Admin กำหนดในหน้าตั้งค่าเท่านั้น
+  const [selectedAcademicYear, setSelectedAcademicYear] = useState<string>(() => academicYear || '2569');
+  const [selectedSemester, setSelectedSemester] = useState<'1' | '2'>(() => (semester === '2' ? '2' : '1'));
+
+  React.useEffect(() => {
+    if (academicYear) {
+      setSelectedAcademicYear(academicYear);
+    }
+    if (semester) {
+      setSelectedSemester(semester === '2' ? '2' : '1');
+    }
+  }, [academicYear, semester]);
+
+  const currentAcademicYear = user.role === 'admin'
+    ? (selectedAcademicYear || academicYear || '2569')
+    : (academicYear || '2569');
+  const currentSemester: '1' | '2' = user.role === 'admin'
+    ? (selectedSemester || (semester === '2' ? '2' : '1'))
+    : (semester === '2' ? '2' : '1');
+
+  const [academicYears, setAcademicYears] = useState<string[]>(() => {
+    const list = StorageService.getAcademicYears();
+    if (!list.includes('2569')) list.push('2569');
+    if (!list.includes('2568')) list.push('2568');
+    if (academicYear && !list.includes(academicYear)) list.push(academicYear);
+    return Array.from(new Set(list)).sort((a, b) => b.localeCompare(a));
+  });
 
   // Locked semesters map (Admin can lock semester to prevent members from entering scores in wrong semester)
   const [lockedSemesters, setLockedSemesters] = useState<Record<string, boolean>>(() => 
@@ -114,10 +137,14 @@ export const Module2Grading: React.FC<Module2Props> = ({
 
   React.useEffect(() => {
     return StorageService.subscribe(() => {
-      setAcademicYears(StorageService.getAcademicYears());
+      const list = StorageService.getAcademicYears();
+      if (!list.includes('2569')) list.push('2569');
+      if (!list.includes('2568')) list.push('2568');
+      if (academicYear && !list.includes(academicYear)) list.push(academicYear);
+      setAcademicYears(Array.from(new Set(list)).sort((a, b) => b.localeCompare(a)));
       setLockedSemesters(StorageService.getLockedSemesters());
     });
-  }, []);
+  }, [academicYear]);
 
   const isCurrentSemLocked = Boolean(lockedSemesters[`${currentAcademicYear}_${currentSemester}`]);
   const isSem1Locked = Boolean(lockedSemesters[`${currentAcademicYear}_1`]);
@@ -556,7 +583,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
   const [isCopyAssignmentModalOpen, setIsCopyAssignmentModalOpen] = useState(false);
   const [selectedTemplateSubject, setSelectedTemplateSubject] = useState<Subject | null>(null);
   const [copyTemplateSourceYear, setCopyTemplateSourceYear] = useState<string>('');
-  const [selectedGradeFilter, setSelectedGradeFilter] = useState<string>('all');
+  const [selectedGradeFilter, setSelectedGradeFilter] = useState<string>('ป.1');
   const [unregisteredGradeFilter, setUnregisteredGradeFilter] = useState<GradeLevel>('ป.1');
 
   // Learning Units state (หน่วยการเรียนรู้ 1, 2, 3...)
@@ -1600,7 +1627,8 @@ export const Module2Grading: React.FC<Module2Props> = ({
       const existing = grades.find(g => 
         g.studentId === s.id && 
         g.subjectId === selectedSubject.id && 
-        g.semester === currentSemester
+        g.semester === currentSemester &&
+        (!g.academicYear || g.academicYear === currentAcademicYear)
       );
 
       const asgScores = existing?.assignmentScores ? { ...existing.assignmentScores } : {};
@@ -1628,7 +1656,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
     });
 
     setScoreRows(initialRows);
-  }, [selectedSubjectId, currentSemester, grades]);
+  }, [selectedSubjectId, currentSemester, currentAcademicYear, grades]);
 
   // When students list changes (e.g. Admin adds or updates student later), auto-add into scoreRows
   React.useEffect(() => {
@@ -1644,7 +1672,8 @@ export const Module2Grading: React.FC<Module2Props> = ({
           const existing = grades.find(g => 
             g.studentId === s.id && 
             g.subjectId === selectedSubject.id && 
-            g.semester === currentSemester
+            g.semester === currentSemester &&
+            (!g.academicYear || g.academicYear === currentAcademicYear)
           );
           const asgScores = existing?.assignmentScores ? { ...existing.assignmentScores } : {};
           let cw = existing ? existing.courseworkScore : 0;
@@ -1665,7 +1694,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
       });
       return hasChange ? next : prev;
     });
-  }, [students, selectedSubjectId, currentSemester]);
+  }, [students, selectedSubjectId, currentSemester, currentAcademicYear]);
 
   // Auto-save grades helper without noisy toast popups (จำกัดคะแนนระหว่างภาคไม่ให้เกินคะแนนเต็มระหว่างภาค)
   const autoSaveGrades = (updatedRows: Record<string, any>) => {
@@ -2447,9 +2476,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
       onShowToast('success', `เพิ่มปีการศึกษา ${trimmed} สำเร็จ`, `สร้างปีการศึกษา ${trimmed} เรียบร้อยแล้ว`);
     }
 
-    if (onAcademicYearChange) {
-      onAcademicYearChange(trimmed);
-    }
+    setSelectedAcademicYear(trimmed);
     setIsAddYearModalOpen(false);
     setNewYearInput('');
   };
@@ -2482,9 +2509,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
 
     const nextActiveYear = res.years[res.years.length - 1] || '2568';
     if (currentAcademicYear === deletingYear) {
-      if (onAcademicYearChange) {
-        onAcademicYearChange(nextActiveYear);
-      }
+      setSelectedAcademicYear(nextActiveYear);
     }
 
     onShowToast('success', 'ลบปีการศึกษาสำเร็จ', `ลบปีการศึกษา ${deletingYear} และรายวิชาที่เกี่ยวข้องเรียบร้อยแล้ว`);
@@ -2691,14 +2716,12 @@ export const Module2Grading: React.FC<Module2Props> = ({
     const nameVal = String(formData.get('name') || '').trim();
 
     // Ensure grade filter shows the newly created/edited subject's grade level
-    if (selectedGradeFilter !== 'all') {
-      const matchesFilter =
-        (selectedGradeFilter === 'มัธยม' && gradeLevel.startsWith('ม.')) ||
-        (selectedGradeFilter === 'อนุบาล' && gradeLevel.startsWith('อ.')) ||
-        selectedGradeFilter === gradeLevel;
-      if (!matchesFilter) {
-        setSelectedGradeFilter('all');
-      }
+    const matchesFilter =
+      (selectedGradeFilter === 'มัธยม' && gradeLevel.startsWith('ม.')) ||
+      (selectedGradeFilter === 'อนุบาล' && gradeLevel.startsWith('อ.')) ||
+      selectedGradeFilter === gradeLevel;
+    if (!matchesFilter) {
+      setSelectedGradeFilter(gradeLevel);
     }
 
     const defaultHours = isActivityMode ? 1 : 2;
@@ -2845,11 +2868,42 @@ export const Module2Grading: React.FC<Module2Props> = ({
             <span className="truncate">ประเมิน 3 เล่ม</span>
           </button>
 
-          {/* ปีการศึกษา & ภาคเรียน (แสดงผลตาม Admin กำหนด ไม่มีปุ่มเลือก) */}
-          <div className="col-span-2 h-10 bg-white px-3 rounded-xl border border-amber-200/90 shadow-xs flex items-center justify-center gap-2">
-            <Sparkles className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-            <span className="text-xs font-bold text-slate-800">ปีการศึกษา {currentAcademicYear} ภาค {currentSemester}</span>
-          </div>
+          {/* ปีการศึกษา & ภาคเรียน */}
+          {user.role === 'admin' ? (
+            <>
+              <select
+                value={selectedAcademicYear}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === 'add_new') {
+                    setSourceYearToCopy(currentAcademicYear);
+                    setIsAddYearModalOpen(true);
+                  } else {
+                    setSelectedAcademicYear(val);
+                  }
+                }}
+                className="w-full h-10 px-3 rounded-xl bg-white hover:bg-amber-50 text-amber-900 border border-amber-300 text-xs font-bold outline-none cursor-pointer shadow-2xs transition-colors"
+              >
+                {academicYears.map(yr => (
+                  <option key={yr} value={yr}>ปีการศึกษา {yr}</option>
+                ))}
+                <option value="add_new">+ เพิ่มปีการศึกษา...</option>
+              </select>
+
+              <select
+                value={selectedSemester}
+                onChange={(e) => setSelectedSemester(e.target.value as '1' | '2')}
+                className="w-full h-10 px-3 rounded-xl bg-white hover:bg-amber-50 text-amber-900 border border-amber-300 text-xs font-bold outline-none cursor-pointer shadow-2xs transition-colors"
+              >
+                <option value="1">ภาคเรียนที่ 1</option>
+                <option value="2">ภาคเรียนที่ 2</option>
+              </select>
+            </>
+          ) : (
+            <div className="col-span-2 px-3 py-2 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold whitespace-nowrap flex items-center justify-center">
+              ภาคเรียนที่ {currentSemester} • ปีการศึกษา {currentAcademicYear}
+            </div>
+          )}
         </div>
 
         {/* Mobile Extra Controls Row (รายวิชา / ลบAll / ล็อก) */}
@@ -2898,13 +2952,12 @@ export const Module2Grading: React.FC<Module2Props> = ({
                     : 'bg-white text-slate-700 border-slate-200/90'
                 }`}
               >
-                {isCurrentSemLocked ? <Lock className="w-3.5 h-3.5 text-rose-600" /> : <Unlock className="w-3.5 h-3.5 text-emerald-600" />}
+                {isCurrentSemLocked ? null : <Unlock className="w-3.5 h-3.5 text-emerald-600" />}
                 <span>{isCurrentSemLocked ? 'ล็อก' : 'ปกติ'}</span>
               </button>
             ) : (
               isCurrentSemLocked && (
                 <div className="h-9 px-2.5 rounded-xl bg-amber-50 text-amber-900 border border-amber-200 shadow-xs flex items-center gap-1 text-xs font-bold">
-                  <Lock className="w-3.5 h-3.5 text-amber-600" />
                   <span>ล็อก</span>
                 </div>
               )
@@ -2963,11 +3016,41 @@ export const Module2Grading: React.FC<Module2Props> = ({
 
           {/* Right side controls: ปีการศึกษา & ภาค อยู่ติดกัน -> ลบAll -> ล็อก */}
           <div className="flex items-center justify-end gap-2 shrink-0">
-            {/* ปีการศึกษา & ภาคเรียน (แสดงผลตาม Admin กำหนด ไม่มีปุ่มเลือก) */}
-            <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-amber-200/90 shadow-2xs shrink-0">
-              <Sparkles className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-              <span className="text-xs font-bold text-slate-800">ปีการศึกษา {currentAcademicYear} ภาค {currentSemester}</span>
-            </div>
+            {user.role === 'admin' ? (
+              <>
+                <select
+                  value={selectedAcademicYear}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === 'add_new') {
+                      setSourceYearToCopy(currentAcademicYear);
+                      setIsAddYearModalOpen(true);
+                    } else {
+                      setSelectedAcademicYear(val);
+                    }
+                  }}
+                  className="px-3 py-2 rounded-xl bg-white hover:bg-amber-50 text-amber-900 border border-amber-300 text-xs font-bold outline-none cursor-pointer shadow-2xs transition-colors"
+                >
+                  {academicYears.map(yr => (
+                    <option key={yr} value={yr}>ปีการศึกษา {yr}</option>
+                  ))}
+                  <option value="add_new">+ เพิ่มปีการศึกษา...</option>
+                </select>
+
+                <select
+                  value={selectedSemester}
+                  onChange={(e) => setSelectedSemester(e.target.value as '1' | '2')}
+                  className="px-3 py-2 rounded-xl bg-white hover:bg-amber-50 text-amber-900 border border-amber-300 text-xs font-bold outline-none cursor-pointer shadow-2xs transition-colors"
+                >
+                  <option value="1">ภาคเรียนที่ 1</option>
+                  <option value="2">ภาคเรียนที่ 2</option>
+                </select>
+              </>
+            ) : (
+              <div className="px-3 py-2 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold whitespace-nowrap">
+                ภาคเรียนที่ {currentSemester} • ปีการศึกษา {currentAcademicYear}
+              </div>
+            )}
 
             <div className="flex items-center gap-1.5 shrink-0">
               {/* ปุ่มลบปีการศึกษา (เปลี่ยนชื่อเป็น ลบAll) */}
@@ -2999,15 +3082,15 @@ export const Module2Grading: React.FC<Module2Props> = ({
                   title={isCurrentSemLocked ? `ปลดล็อกภาคเรียนที่ ${currentSemester}` : `ล็อกภาคเรียนที่ ${currentSemester}`}
                 >
                   {isCurrentSemLocked ? (
-                    <Lock className="w-4 h-4 text-rose-600 shrink-0" />
+                    <span className="text-[11px] font-bold text-rose-700 px-1">ล็อก</span>
                   ) : (
                     <Unlock className="w-4 h-4 text-emerald-600 shrink-0" />
                   )}
                 </button>
               ) : (
                 isCurrentSemLocked && (
-                  <div className="p-1.5 sm:p-2 rounded-xl bg-amber-50 text-amber-900 border border-amber-200 shadow-2xs shrink-0" title="ภาคเรียนนี้ถูกล็อก (ปิดรับการกรอกคะแนน)">
-                    <Lock className="w-4 h-4 text-amber-600 shrink-0" />
+                  <div className="p-1.5 sm:p-2 rounded-xl bg-amber-50 text-amber-900 border border-amber-200 shadow-2xs shrink-0 text-xs font-bold" title="ภาคเรียนนี้ถูกล็อก (ปิดรับการกรอกคะแนน)">
+                    <span>ล็อก</span>
                   </div>
                 )
               )}
@@ -3024,7 +3107,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
             <div className="bg-amber-50/90 border border-amber-200/90 text-amber-900 px-4 py-3 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-2xs">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 bg-amber-100 rounded-xl text-amber-700 shrink-0">
-                  <Lock className="w-4 h-4" />
+                  <AlertCircle className="w-4 h-4" />
                 </div>
                 <div>
                   <div className="font-bold text-amber-950 flex items-center gap-2">
@@ -3511,7 +3594,6 @@ export const Module2Grading: React.FC<Module2Props> = ({
 
                   {isMemberLockedReadOnly && (
                     <div className="px-3 py-1 bg-amber-50 text-amber-900 border border-amber-200 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs">
-                      <Lock className="w-4 h-4 text-amber-600" />
                       <span>ภาคเรียนถูกล็อก</span>
                     </div>
                   )}
@@ -4164,7 +4246,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
                                 }`}
                                 title={isCourseworkInputUnlocked ? "ล็อกช่องระหว่างภาค" : "ปลดล็อกพิมพ์คะแนนระหว่างภาค"}
                               >
-                                {isCourseworkInputUnlocked ? <Unlock className="w-2.5 h-2.5" /> : <Lock className="w-2.5 h-2.5 text-slate-400" />}
+                                {isCourseworkInputUnlocked ? <Unlock className="w-2.5 h-2.5" /> : null}
                                 <span>{isCourseworkInputUnlocked ? 'กรอกได้' : 'กดกรอก'}</span>
                               </button>
                             )}
@@ -4268,7 +4350,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
                                     <span>{row.coursework ? row.coursework : '-'}</span>
                                     {!isCourseworkInputUnlocked && canGradeSubject && !isAdminReadOnly && (
                                       <span className="text-[8px] text-slate-400 flex items-center gap-0.5 mt-0.5" title="กดปุ่ม 'กดกรอก' ที่หัวตารางเพื่อพิมพ์คะแนน">
-                                        <Lock className="w-2.5 h-2.5 text-slate-400" /> ล็อก
+                                        ล็อก
                                       </span>
                                     )}
                                   </div>
@@ -4823,7 +4905,6 @@ export const Module2Grading: React.FC<Module2Props> = ({
                               </>
                             ) : (
                               <>
-                                <Lock className="w-3 h-3 text-slate-400" />
                                 <span>กดกรอก</span>
                               </>
                             )}
@@ -5067,7 +5148,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
                                 )}
                                 {!isCourseworkInputUnlocked && canGradeSubject && !isAdminReadOnly && (
                                   <span className="text-[8px] text-slate-400 flex items-center gap-0.5 mt-0.5" title="กดปุ่ม 'กดกรอก' ที่หัวตารางเพื่อพิมพ์คะแนน">
-                                    <Lock className="w-2.5 h-2.5 text-slate-400" /> ล็อก
+                                    ล็อก
                                   </span>
                                 )}
                               </div>
@@ -5265,7 +5346,6 @@ export const Module2Grading: React.FC<Module2Props> = ({
                             </button>
                           ) : (
                             <span className="text-[11px] text-slate-500 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200 font-medium flex items-center gap-1">
-                              <Lock className="w-3.5 h-3.5 text-slate-400" />
                               <span>รอครูลงทะเบียน</span>
                             </span>
                           )}
@@ -5348,30 +5428,106 @@ export const Module2Grading: React.FC<Module2Props> = ({
           <div className="flex items-center justify-between gap-2 overflow-x-auto pb-1 text-xs">
             <div className="flex items-center gap-1.5 overflow-x-auto">
               <span className="text-[11px] font-bold text-slate-500 mr-1 shrink-0">กรองระดับชั้น:</span>
-              {[
-                { id: 'all', label: 'ทั้งหมด' },
-                { id: 'ป.1', label: 'ป.1' },
-                { id: 'ป.2', label: 'ป.2' },
-                { id: 'ป.3', label: 'ป.3' },
-                { id: 'ป.4', label: 'ป.4' },
-                { id: 'ป.5', label: 'ป.5' },
-                { id: 'ป.6', label: 'ป.6' },
-                { id: 'มัธยม', label: 'มัธยมศึกษา' },
-                { id: 'อนุบาล', label: 'อนุบาล' }
-              ].map(tab => (
+
+              {/* ป.1 - ป.6 */}
+              {(['ป.1', 'ป.2', 'ป.3', 'ป.4', 'ป.5', 'ป.6'] as const).map(grade => (
                 <button
-                  key={tab.id}
+                  key={grade}
                   type="button"
-                  onClick={() => setSelectedGradeFilter(tab.id)}
+                  onClick={() => setSelectedGradeFilter(grade)}
                   className={`px-2.5 py-1 rounded-lg font-semibold shrink-0 transition-colors cursor-pointer ${
-                    selectedGradeFilter === tab.id
+                    selectedGradeFilter === grade
                       ? 'bg-slate-900 text-white shadow-2xs'
                       : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200/80'
                   }`}
                 >
-                  {tab.label}
+                  {grade}
                 </button>
               ))}
+
+              {/* มัธยมศึกษา */}
+              {(() => {
+                const isSecondary = selectedGradeFilter === 'มัธยม' || ['ม.1', 'ม.2', 'ม.3'].includes(selectedGradeFilter);
+                return (
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!['ม.1', 'ม.2', 'ม.3'].includes(selectedGradeFilter)) {
+                          setSelectedGradeFilter('ม.1');
+                        }
+                      }}
+                      className={`px-2.5 py-1 rounded-lg font-semibold shrink-0 transition-colors cursor-pointer ${
+                        isSecondary
+                          ? 'bg-indigo-700 text-white shadow-2xs'
+                          : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200/80'
+                      }`}
+                    >
+                      มัธยมศึกษา
+                    </button>
+                    {isSecondary && (
+                      <div className="flex items-center gap-1 bg-indigo-50/90 border border-indigo-200/80 p-0.5 rounded-lg shrink-0 animate-in fade-in zoom-in-95 duration-150">
+                        {(['ม.1', 'ม.2', 'ม.3'] as const).map(g => (
+                          <button
+                            key={g}
+                            type="button"
+                            onClick={() => setSelectedGradeFilter(g)}
+                            className={`px-2 py-0.5 rounded-md font-bold text-xs shrink-0 transition-all cursor-pointer ${
+                              selectedGradeFilter === g
+                                ? 'bg-indigo-600 text-white shadow-2xs'
+                                : 'bg-white text-indigo-700 hover:bg-indigo-100/70 border border-indigo-200/60'
+                            }`}
+                          >
+                            {g}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* อนุบาล */}
+              {(() => {
+                const isKindergarten = selectedGradeFilter === 'อนุบาล' || ['อ.1', 'อ.2', 'อ.3'].includes(selectedGradeFilter);
+                return (
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!['อ.1', 'อ.2', 'อ.3'].includes(selectedGradeFilter)) {
+                          setSelectedGradeFilter('อ.1');
+                        }
+                      }}
+                      className={`px-2.5 py-1 rounded-lg font-semibold shrink-0 transition-colors cursor-pointer ${
+                        isKindergarten
+                          ? 'bg-amber-600 text-white shadow-2xs'
+                          : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200/80'
+                      }`}
+                    >
+                      อนุบาล
+                    </button>
+                    {isKindergarten && (
+                      <div className="flex items-center gap-1 bg-amber-50/90 border border-amber-200/80 p-0.5 rounded-lg shrink-0 animate-in fade-in zoom-in-95 duration-150">
+                        {(['อ.1', 'อ.2', 'อ.3'] as const).map(g => (
+                          <button
+                            key={g}
+                            type="button"
+                            onClick={() => setSelectedGradeFilter(g)}
+                            className={`px-2 py-0.5 rounded-md font-bold text-xs shrink-0 transition-all cursor-pointer ${
+                              selectedGradeFilter === g
+                                ? 'bg-amber-600 text-white shadow-2xs'
+                                : 'bg-white text-amber-800 hover:bg-amber-100/70 border border-amber-200/60'
+                            }`}
+                          >
+                            {g}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             <div className="shrink-0">
@@ -5399,7 +5555,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
                 return (
                   <div className="py-12 text-center text-xs text-slate-400 space-y-2">
                     <BookOpen className="w-8 h-8 mx-auto text-slate-300" />
-                    <div>ไม่พบรายวิชาในภาคเรียนที่ {currentSemester} ปีการศึกษา {currentAcademicYear} {selectedGradeFilter !== 'all' ? `(ระดับชั้น ${selectedGradeFilter})` : ''}</div>
+                    <div>ไม่พบรายวิชาในภาคเรียนที่ {currentSemester} ปีการศึกษา {currentAcademicYear} (ระดับชั้น {selectedGradeFilter})</div>
                     <div className="text-[11px] text-slate-400">
                       คุณสามารถกดปุ่ม "+ เพิ่มรายวิชา" หรือ "คัดลอกวิชาจากปีก่อน" ด้านบน
                     </div>
@@ -5461,7 +5617,6 @@ export const Module2Grading: React.FC<Module2Props> = ({
                       </span>
                     ) : (
                       <span className="text-xs text-amber-700 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-200 flex items-center gap-1.5 font-medium">
-                        <Lock className="w-3 h-3 text-amber-500" />
                         <span>ยังไม่มีผู้สอน (รอสมาชิกลงทะเบียน)</span>
                       </span>
                     )}
@@ -6949,7 +7104,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
                 onClick={handleDeleteAcademicYearConfirm}
                 className="px-5 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
               >
-                <Lock className="w-4 h-4" />
+                <Trash2 className="w-4 h-4" />
                 <span>ยืนยันลบปีการศึกษา</span>
               </button>
             </div>
@@ -7918,7 +8073,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
             <div className="p-3.5 sm:p-4 overflow-y-auto space-y-4 flex-1">
               {(!canGradeSubject || isMemberLockedReadOnly || isAdminReadOnly) && (
                 <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center gap-2">
-                  <Lock className="w-4 h-4 text-amber-600 shrink-0" />
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
                   <span>
                     {isMemberLockedReadOnly ? 'ภาคเรียนนี้ถูกล็อกการลงคะแนนโดยผู้ดูแลระบบ' :
                      isAdminReadOnly ? 'โหมดดูคะแนนเท่านั้น (ครูผู้สอนเป็นผู้ลงคะแนน)' :
