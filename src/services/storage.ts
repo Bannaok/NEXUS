@@ -2903,12 +2903,26 @@ export const StorageService = {
 
   // Grades
   getGrades(): GradeRecord[] {
-    return getLocal<GradeRecord[]>(KEYS.GRADES, INITIAL_GRADES);
+    const raw = getLocal<GradeRecord[]>(KEYS.GRADES, INITIAL_GRADES);
+    if (!Array.isArray(raw)) return [];
+    const legacyDemoIds = new Set(['grd-001', 'grd-002', 'grd-003']);
+    const cleaned = raw.filter(g => g && !legacyDemoIds.has(g.id));
+    if (cleaned.length !== raw.length) {
+      setLocal(KEYS.GRADES, cleaned, false);
+    }
+    return cleaned;
   },
 
   saveGrade(grade: GradeRecord): GradeRecord[] {
     const list = this.getGrades();
-    const idx = list.findIndex(g => g.id === grade.id || (g.studentId === grade.studentId && g.subjectId === grade.subjectId && g.semester === grade.semester));
+    const idx = list.findIndex(
+      g =>
+        g.id === grade.id ||
+        (g.studentId === grade.studentId &&
+          g.subjectId === grade.subjectId &&
+          String(g.semester) === String(grade.semester) &&
+          String(g.academicYear || '') === String(grade.academicYear || ''))
+    );
     let updated: GradeRecord[];
     if (idx >= 0) {
       updated = [...list];
@@ -2924,8 +2938,8 @@ export const StorageService = {
   saveBulkGrades(grades: GradeRecord[]): GradeRecord[] {
     const current = this.getGrades();
     const map = new Map<string, GradeRecord>();
-    current.forEach(g => map.set(`${g.studentId}_${g.subjectId}_${g.semester}`, g));
-    grades.forEach(g => map.set(`${g.studentId}_${g.subjectId}_${g.semester}`, g));
+    current.forEach(g => map.set(`${g.studentId}_${g.subjectId}_${g.semester}_${g.academicYear || ''}`, g));
+    grades.forEach(g => map.set(`${g.studentId}_${g.subjectId}_${g.semester}_${g.academicYear || ''}`, g));
     const updated = Array.from(map.values());
     setLocal(KEYS.GRADES, updated);
     this.syncPostToGoogle('saveGrades', { grades });

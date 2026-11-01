@@ -716,77 +716,7 @@ export function buildDefaultPrimarySubjectsForYears(years: string[] = ["2568", "
 export const INITIAL_SUBJECTS: Subject[] = buildDefaultPrimarySubjectsForYears(["2568", "2569"]);
 
 
-export const INITIAL_GRADES: GradeRecord[] = [
-  {
-    id: "grd-001",
-    studentId: "std-001",
-    studentName: "เด็กชายกิตติพงษ์ เจริญสุข",
-    gradeLevel: "ป.1",
-    subjectId: "sub-001",
-    subjectCode: "ท11101",
-    subjectName: "ภาษาไทย",
-    semester: "1",
-    academicYear: "2569",
-    assignmentScores: {
-      "asg-01": 5,
-      "asg-02": 4,
-      "asg-03": 4
-    },
-    courseworkScore: 31,
-    examScore: 13,
-    totalScore: 44,
-    gradeGpa: 4.0,
-    readingWritingScore: 3,
-    desiredCharacteristicsScore: 3,
-    competencyScore: 3
-  },
-  {
-    id: "grd-002",
-    studentId: "std-002",
-    studentName: "เด็กหญิงพิมพ์ชนก แก้วมณี",
-    gradeLevel: "ป.1",
-    subjectId: "sub-001",
-    subjectCode: "ท11101",
-    subjectName: "ภาษาไทย",
-    semester: "1",
-    academicYear: "2569",
-    assignmentScores: {
-      "asg-01": 5,
-      "asg-02": 5,
-      "asg-03": 5
-    },
-    courseworkScore: 35,
-    examScore: 14,
-    totalScore: 49,
-    gradeGpa: 4.0,
-    readingWritingScore: 3,
-    desiredCharacteristicsScore: 3,
-    competencyScore: 3
-  },
-  {
-    id: "grd-003",
-    studentId: "std-003",
-    studentName: "เด็กชายธนวัฒน์ ปัญญาวงศ์",
-    gradeLevel: "ป.1",
-    subjectId: "sub-001",
-    subjectCode: "ท11101",
-    subjectName: "ภาษาไทย",
-    semester: "1",
-    academicYear: "2569",
-    assignmentScores: {
-      "asg-01": 3,
-      "asg-02": 4,
-      "asg-03": 3
-    },
-    courseworkScore: 24,
-    examScore: 10,
-    totalScore: 34,
-    gradeGpa: 2.5,
-    readingWritingScore: 2,
-    desiredCharacteristicsScore: 3,
-    competencyScore: 2
-  }
-];
+export const INITIAL_GRADES: GradeRecord[] = [];
 
 export const INITIAL_ATTENDANCE_CONFIG: AttendanceDayConfig = {
   academicYear: "2569",

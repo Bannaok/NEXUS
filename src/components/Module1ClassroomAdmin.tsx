@@ -338,7 +338,7 @@ export const get100SchoolDaysForTerm = (
     if (cfg && Array.isArray(cfg.schoolDays) && cfg.schoolDays.length > 0) {
       const activeDays = cfg.schoolDays.filter(d => !d.isHoliday);
       if (activeDays.length > 0) {
-        return activeDays.slice(0, 100).map((d, idx) => {
+        return activeDays.map((d, idx) => {
           const parts = d.date.split('-');
           const m = parseInt(parts[1] || '5', 10);
           const day = parseInt(parts[2] || '1', 10);
@@ -355,39 +355,44 @@ export const get100SchoolDaysForTerm = (
       }
     }
 
-    // Default fallback if no admin config set: Generate 100 Mon-Fri days per semester
+    // Default fallback if no admin config set: Generate Mon-Fri school days between startDate and endDate (103 days)
     const numYr = parseInt((academicYear || '').trim(), 10);
     const adYr = !isNaN(numYr) ? (numYr > 2400 ? numYr - 543 : numYr) : 2026;
     const defaultStartStr = String(semester) === '2' ? `${adYr}-11-02` : `${adYr}-05-18`;
+    const defaultEndStr = String(semester) === '2' ? `${adYr + 1}-03-24` : `${adYr}-10-07`;
     const startStr = cfg?.startDate && cfg.startDate !== '' ? cfg.startDate : defaultStartStr;
+    const endStr = cfg?.endDate && cfg.endDate !== '' ? cfg.endDate : defaultEndStr;
     const start = new Date(startStr + 'T00:00:00');
+    const end = new Date(endStr + 'T00:00:00');
     const days: { date: string; dayNumber: number; label: string }[] = [];
     const shortThaiMonths = [
       'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
       'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'
     ];
 
-    let curr = new Date(start);
+    const curr = new Date(start);
     let dayNum = 1;
-    while (days.length < 100) {
-      const dayOfWeekNum = curr.getDay();
-      if (dayOfWeekNum !== 0 && dayOfWeekNum !== 6) { // Skip Sat-Sun
-        const yyyy = curr.getFullYear();
-        const mm = String(curr.getMonth() + 1).padStart(2, '0');
-        const dd = String(curr.getDate()).padStart(2, '0');
-        const dateStr = `${yyyy}-${mm}-${dd}`;
-        days.push({
-          date: dateStr,
-          dayNumber: dayNum,
-          label: `${curr.getDate()} ${shortThaiMonths[curr.getMonth()]}`
-        });
-        dayNum++;
+    if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && start <= end) {
+      while (curr <= end) {
+        const dayOfWeekNum = curr.getDay();
+        if (dayOfWeekNum !== 0 && dayOfWeekNum !== 6) { // Skip Sat-Sun
+          const yyyy = curr.getFullYear();
+          const mm = String(curr.getMonth() + 1).padStart(2, '0');
+          const dd = String(curr.getDate()).padStart(2, '0');
+          const dateStr = `${yyyy}-${mm}-${dd}`;
+          days.push({
+            date: dateStr,
+            dayNumber: dayNum,
+            label: `${curr.getDate()} ${shortThaiMonths[curr.getMonth()]}`
+          });
+          dayNum++;
+        }
+        curr.setDate(curr.getDate() + 1);
       }
-      curr.setDate(curr.getDate() + 1);
     }
     return days;
   } catch (e) {
-    console.error('Failed to get 100 school days for term', e);
+    console.error('Failed to get school days for term', e);
     return [];
   }
 };

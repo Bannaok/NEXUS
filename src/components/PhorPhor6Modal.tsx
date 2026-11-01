@@ -555,14 +555,16 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
       : effectiveSubjects.filter(s => (s.gradeLevel || '').trim() === studentGrade);
 
     // Strictly match the student's grade level and current semester
-    let matched = basePool.filter(s => !s.semester || String(s.semester) === String(semester));
+    const exactSemMatched = basePool.filter(s => String(s.semester) === String(semester));
+    const fallbackSemMatched = basePool.filter(s => !s.semester);
+    let matched = [...exactSemMatched, ...fallbackSemMatched];
 
-    // Fallback: If no subjects explicitly matched this semester, match this student's grade level only
+    // Fallback: If no subjects matched this semester, match this student's grade level only
     if (matched.length === 0) {
       matched = basePool;
     }
 
-    // Deduplicate by subject code or name to ensure each subject is shown only once
+    // Deduplicate by subject code or name to ensure each subject is shown only once (prefer exact semester match)
     const seen = new Set<string>();
     const unique: Subject[] = [];
     matched.forEach(s => {
@@ -581,31 +583,58 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
     });
   }, [effectiveSubjects, student.gradeLevel, grade, semester, academicYear]);
 
+  // Strict helpers to ensure grade records only show in the exact semester they were recorded
+  const isGradeRecordForSemester = (g: GradeRecord, targetSem: string, targetYear: string): boolean => {
+    if (!g) return false;
+    if (['grd-001', 'grd-002', 'grd-003'].includes(g.id)) return false;
+    const recSem = String(g.semester || '').trim();
+    const tSem = String(targetSem || '').trim();
+    if (recSem !== tSem) return false;
+    const subId = String(g.subjectId || '');
+    if (subId.includes('-sem1') && tSem !== '1') return false;
+    if (subId.includes('-sem2') && tSem !== '2') return false;
+    if (g.academicYear && String(g.academicYear).trim() !== String(targetYear).trim()) return false;
+    return true;
+  };
+
+  const hasRecordedGradeScore = (g?: GradeRecord): boolean => {
+    if (!g) return false;
+    const cw = Number(g.courseworkScore) || 0;
+    const ex = Number(g.examScore) || 0;
+    const tot = Number(g.totalScore) || 0;
+    const hasAsg = g.assignmentScores
+      ? Object.values(g.assignmentScores).some(v => typeof v === 'number' && !isNaN(v) && v > 0)
+      : false;
+    const hasAct = Boolean(g.activityResult && g.activityResult.trim() !== '');
+    return cw > 0 || ex > 0 || tot > 0 || hasAsg || hasAct;
+  };
+
   // Subject evaluation rows: pulls directly from "รายงานวัดผล" (StorageService.getGrades())
+  // Strictly displays scores ONLY in the semester where they were entered
   const academicResults = useMemo(() => {
     let totalCredits = 0;
     let totalPoints = 0;
 
     const rows = studentSubjects.map(subj => {
-      let rec = effectiveGrades.find(g => 
+      const codeUpper = (subj.code || '').trim().toUpperCase();
+      const nameClean = (subj.name || '').trim();
+
+      // 1. Exact subjectId match in the target semester & academicYear
+      let rec = effectiveGrades.find(g =>
         g.studentId === student.id &&
-        (g.subjectId === subj.id || (subj.code && g.subjectCode === subj.code)) &&
-        (g.semester === semester || !g.semester) &&
-        (g.academicYear === academicYear || !g.academicYear)
+        g.subjectId === subj.id &&
+        isGradeRecordForSemester(g, semester, academicYear) &&
+        hasRecordedGradeScore(g)
       );
 
+      // 2. Same subject code or subject name strictly within the SAME semester & academicYear
       if (!rec) {
-        rec = effectiveGrades.find(g => 
-          g.studentId === student.id && 
-          (g.subjectId === subj.id || (subj.code && g.subjectCode === subj.code)) &&
-          (g.semester === semester || !g.semester)
-        );
-      }
-
-      if (!rec) {
-        rec = effectiveGrades.find(g => 
-          g.studentId === student.id && 
-          (g.subjectId === subj.id || (subj.code && g.subjectCode === subj.code))
+        rec = effectiveGrades.find(g =>
+          g.studentId === student.id &&
+          ((codeUpper !== '' && (g.subjectCode || '').trim().toUpperCase() === codeUpper) ||
+            (nameClean !== '' && (g.subjectName || '').trim() === nameClean)) &&
+          isGradeRecordForSemester(g, semester, academicYear) &&
+          hasRecordedGradeScore(g)
         );
       }
 
@@ -703,44 +732,31 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
       grp: { primary: Subject; sem1Subj?: Subject; sem2Subj?: Subject },
       targetSem: '1' | '2'
     ): GradeRecord | undefined => {
-      const targetSubj = targetSem === '1' ? (grp.sem1Subj || grp.primary) : (grp.sem2Subj || grp.primary);
+      const targetSubj = targetSem === '1' ? grp.sem1Subj : grp.sem2Subj;
       const codeUpper = (grp.primary.code || '').trim().toUpperCase();
       const nameClean = (grp.primary.name || '').trim();
 
-      const matchesSubj = (g: GradeRecord) =>
-        g.subjectId === targetSubj.id ||
-        g.subjectId === grp.primary.id ||
-        (grp.sem1Subj && g.subjectId === grp.sem1Subj.id) ||
-        (grp.sem2Subj && g.subjectId === grp.sem2Subj.id) ||
-        (codeUpper !== '' && (g.subjectCode || '').trim().toUpperCase() === codeUpper) ||
-        (nameClean !== '' && (g.subjectName || '').trim() === nameClean);
-
-      // 1. Exact match on student + subject + semester + academicYear
-      let found = effectiveGrades.find(
-        g =>
-          g.studentId === student.id &&
-          matchesSubj(g) &&
-          String(g.semester) === targetSem &&
-          (g.academicYear === academicYear || !g.academicYear)
-      );
-      if (found) return found;
-
-      // 2. Match on student + subject + semester (any year)
-      found = effectiveGrades.find(
-        g =>
-          g.studentId === student.id &&
-          matchesSubj(g) &&
-          String(g.semester) === targetSem
-      );
-      if (found) return found;
-
-      // 3. Legacy record without semester field (only fallback if targetSem matches current semester or '1')
-      if (targetSem === semester || targetSem === '1') {
-        found = effectiveGrades.find(
-          g => g.studentId === student.id && matchesSubj(g) && !g.semester
+      // 1. Exact subjectId match for this term's subject in targetSem & academicYear
+      if (targetSubj) {
+        const exactFound = effectiveGrades.find(
+          g =>
+            g.studentId === student.id &&
+            g.subjectId === targetSubj.id &&
+            isGradeRecordForSemester(g, targetSem, academicYear) &&
+            hasRecordedGradeScore(g)
         );
+        if (exactFound) return exactFound;
       }
-      return found;
+
+      // 2. Match by subject code or name strictly in targetSem & academicYear
+      return effectiveGrades.find(
+        g =>
+          g.studentId === student.id &&
+          ((codeUpper !== '' && (g.subjectCode || '').trim().toUpperCase() === codeUpper) ||
+            (nameClean !== '' && (g.subjectName || '').trim() === nameClean)) &&
+          isGradeRecordForSemester(g, targetSem, academicYear) &&
+          hasRecordedGradeScore(g)
+      );
     };
 
     const getNumericTotal = (rec?: GradeRecord): number | null => {
@@ -1067,6 +1083,9 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
     };
 
     return (targetSem: '1' | '2') => {
+      const termSchoolDays = get100SchoolDaysForTerm(academicYear, targetSem);
+      const totalSchoolDays = termSchoolDays.length > 0 ? termSchoolDays.length : 103;
+
       const studentTermRecords = dailyTracking.filter(
         d => d.studentId === student.id && getDateTerm(d.date) === targetSem
       );
@@ -1119,13 +1138,15 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
         else if (d.toothBrushStatus === 'ยังไม่ได้แปรง') teethNone++;
       });
 
-      const milkTotal = milkFull + milkNone + milkAllergic;
-      const hasMilkRecorded = milkTotal > 0;
-      const milkRate = hasMilkRecorded ? ((milkFull / milkTotal) * 100).toFixed(1) : '-';
+      const milkRecordedCount = milkFull + milkNone + milkAllergic;
+      const hasMilkRecorded = milkRecordedCount > 0;
+      const milkTotal = totalSchoolDays;
+      const milkRate = hasMilkRecorded && milkTotal > 0 ? ((milkFull / milkTotal) * 100).toFixed(1) : '-';
 
-      const teethTotal = teethClean + teethNone;
-      const hasTeethRecorded = teethTotal > 0;
-      const teethRate = hasTeethRecorded ? ((teethClean / teethTotal) * 100).toFixed(1) : '-';
+      const teethRecordedCount = teethClean + teethNone;
+      const hasTeethRecorded = teethRecordedCount > 0;
+      const teethTotal = totalSchoolDays;
+      const teethRate = hasTeethRecorded && teethTotal > 0 ? ((teethClean / teethTotal) * 100).toFixed(1) : '-';
 
       return {
         weightHeightRows,
@@ -1134,10 +1155,10 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
         hasTeethRecorded,
         hasMilkTeethRecorded: hasMilkRecorded || hasTeethRecorded,
         milkFull: hasMilkRecorded ? String(milkFull) : '-',
-        milkTotal: hasMilkRecorded ? String(milkTotal) : '-',
+        milkTotal: String(milkTotal),
         milkRate: hasMilkRecorded ? `${milkRate}%` : '-',
         teethClean: hasTeethRecorded ? String(teethClean) : '-',
-        teethTotal: hasTeethRecorded ? String(teethTotal) : '-',
+        teethTotal: String(teethTotal),
         teethRate: hasTeethRecorded ? `${teethRate}%` : '-',
         rawMilkFull: milkFull,
         rawMilkTotal: milkTotal,
@@ -1522,23 +1543,10 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
               style={{ width: '210mm', maxWidth: '210mm', paddingLeft: '20mm', paddingRight: '15mm' }}
             >
               <div>
-                {/* Top Section: Logo in Center, Photo on Right */}
-                <div className="relative flex items-start justify-between mb-4">
-                  <div className="w-[3.2cm]" /> {/* Spacer balancing the photo */}
-
-                  {/* School Emblem / Logo */}
-                  <div className="text-center mx-auto">
-                    {schoolInfo.logoUrl ? (
-                      <img src={schoolInfo.logoUrl} alt="School Logo" className="w-28 h-28 sm:w-32 sm:h-32 object-contain mx-auto" />
-                    ) : (
-                      <div className="w-28 h-28 sm:w-32 sm:h-32 rounded-2xl bg-indigo-50 border border-indigo-200 flex items-center justify-center text-4xl mx-auto">
-                        🏫
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Student Photo Frame */}
-                  <div className="w-[3.2cm] h-[4.2cm] border-2 border-slate-800 p-0.5 bg-white shrink-0 overflow-hidden text-center flex flex-col items-center justify-center shadow-2xs">
+                {/* Top Section: Logo in Center, Photo on Right, Title Block centered under Logo */}
+                <div className="relative mb-5">
+                  {/* Student Photo Frame (Fixed to Top-Right of Page Content) */}
+                  <div className="absolute right-0 top-0 w-[3.2cm] h-[4.2cm] border-2 border-slate-800 p-0.5 bg-white shrink-0 overflow-hidden text-center flex flex-col items-center justify-center shadow-2xs z-10">
                     {student.photoUrl ? (
                       <img 
                         src={student.photoUrl} 
@@ -1553,21 +1561,35 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
                       </div>
                     )}
                   </div>
-                </div>
 
-                {/* Title Block */}
-                <div className="text-center space-y-1 mb-5">
-                  <h1 className="text-xl font-bold text-slate-900 tracking-wide font-['Sarabun','TH_Sarabun_New',sans-serif]">
-                    สมุดรายงาน
-                  </h1>
-                  <h2 className="text-lg font-bold text-slate-900 font-['Sarabun','TH_Sarabun_New',sans-serif]">
-                    ผลการพัฒนาคุณภาพผู้เรียนรายบุคคล
-                  </h2>
-                  <p className="text-sm font-bold text-slate-800 font-['Sarabun','TH_Sarabun_New',sans-serif]">
-                    {grade.startsWith('อ.') ? 'ระดับปฐมวัย (อ.1 - อ.3)' : 
-                     grade.startsWith('ม.4') || grade.startsWith('ม.5') || grade.startsWith('ม.6') ? 'ระดับมัธยมศึกษาตอนปลาย (ม.4 - ม.6)' :
-                     grade.startsWith('ม.') ? 'ระดับมัธยมศึกษาตอนต้น (ม.1 - ม.3)' : 'ระดับประถมศึกษาปีที่ 1-6'}
-                  </p>
+                  {/* Centered Logo and Title Block */}
+                  <div className="flex flex-col items-center justify-center text-center">
+                    {/* School Emblem / Logo */}
+                    <div className="text-center">
+                      {schoolInfo.logoUrl ? (
+                        <img src={schoolInfo.logoUrl} alt="School Logo" className="w-28 h-28 sm:w-32 sm:h-32 object-contain mx-auto" />
+                      ) : (
+                        <div className="w-28 h-28 sm:w-32 sm:h-32 rounded-2xl bg-indigo-50 border border-indigo-200 flex items-center justify-center text-4xl mx-auto">
+                          🏫
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Title Block: Spaced 0.3cm below Logo and centered horizontally with Logo */}
+                    <div className="text-center space-y-1" style={{ marginTop: '0.3cm' }}>
+                      <h1 className="text-xl font-bold text-slate-900 tracking-wide font-['Sarabun','TH_Sarabun_New',sans-serif]">
+                        สมุดรายงาน
+                      </h1>
+                      <h2 className="text-lg font-bold text-slate-900 font-['Sarabun','TH_Sarabun_New',sans-serif]">
+                        ผลการพัฒนาคุณภาพผู้เรียนรายบุคคล
+                      </h2>
+                      <p className="text-sm font-bold text-slate-800 font-['Sarabun','TH_Sarabun_New',sans-serif]">
+                        {grade.startsWith('อ.') ? 'ระดับปฐมวัย (อ.1 - อ.3)' : 
+                         grade.startsWith('ม.4') || grade.startsWith('ม.5') || grade.startsWith('ม.6') ? 'ระดับมัธยมศึกษาตอนปลาย (ม.4 - ม.6)' :
+                         grade.startsWith('ม.') ? 'ระดับมัธยมศึกษาตอนต้น (ม.1 - ม.3)' : 'ระดับประถมศึกษาปีที่ 1-6'}
+                      </p>
+                    </div>
+                  </div>
                 </div>
 
                 {/* School & Student Info Lines */}
@@ -1717,7 +1739,7 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
             <div className="space-y-8 print:space-y-0 font-['Sarabun','TH_Sarabun_New',sans-serif]">
               {/* Page 1 of Student Profile */}
               <div
-                className="a4-pp6-page bg-white border border-slate-300 rounded-lg py-6 sm:py-8 max-w-[210mm] min-h-[297mm] mx-auto text-slate-900 shadow-xl print:border-none print:shadow-none print:m-0 text-[13px] leading-relaxed flex flex-col justify-between"
+                className="a4-pp6-page bg-white border border-slate-300 rounded-lg py-6 sm:py-8 max-w-[210mm] min-h-[297mm] mx-auto text-slate-900 shadow-xl print:border-none print:shadow-none print:m-0 print:break-before-page text-[13px] leading-relaxed flex flex-col justify-between"
                 style={{ width: '210mm', maxWidth: '210mm', paddingLeft: '20mm', paddingRight: '15mm' }}
               >
                 <div>
@@ -1930,8 +1952,8 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
 
               {/* Page 2 of Student Profile (Matching Reference PDF Page 2) */}
               <div
-                className="a4-pp6-page bg-white border border-slate-300 rounded-lg py-6 sm:py-8 max-w-[210mm] min-h-[297mm] mx-auto text-slate-900 shadow-xl print:border-none print:shadow-none print:m-0 print:break-before-page text-[13px] leading-relaxed flex flex-col justify-between"
-                style={{ width: '210mm', maxWidth: '210mm', paddingLeft: '20mm', paddingRight: '15mm' }}
+                className="a4-pp6-page bg-white border border-slate-300 rounded-lg pt-6 sm:pt-8 max-w-[210mm] min-h-[297mm] mx-auto text-slate-900 shadow-xl print:border-none print:shadow-none print:m-0 print:break-before-page text-[13px] leading-relaxed flex flex-col justify-between"
+                style={{ width: '210mm', maxWidth: '210mm', paddingLeft: '20mm', paddingRight: '15mm', paddingBottom: '2.3cm' }}
               >
                 <div>
                   {/* Section: โรงเรียนเดิม */}
@@ -2099,12 +2121,12 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
                   </div>
                 </div>
 
-                {/* Bottom Signature */}
-                <div className="pt-6 text-center text-xs text-black">
+                {/* Bottom Signature - exactly 2.3cm from bottom edge */}
+                <div className="pt-4 text-center text-xs text-black mt-auto mb-0">
                   <div className="w-64 mx-auto space-y-1 text-black">
                     <p className="text-black">ลงชื่อ ..............................................................</p>
                     <p className="font-normal text-black">({advisorName || '......................................................'})</p>
-                    <p className="text-black">ครูประจำชั้น</p>
+                    <p className="text-black font-semibold text-[11px] leading-none m-0 p-0">ครูประจำชั้น</p>
                   </div>
                 </div>
               </div>
@@ -2722,8 +2744,8 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
               </div>
 
               <div
-                className="a4-pp6-page bg-white border border-slate-300 rounded-lg py-6 sm:py-8 max-w-[210mm] min-h-[297mm] mx-auto text-black shadow-xl print:border-none print:shadow-none print:m-0 print:break-before-page flex flex-col justify-between"
-                style={{ width: '210mm', maxWidth: '210mm', paddingLeft: '20mm', paddingRight: '15mm', color: '#000000' }}
+                className={`a4-pp6-page bg-white border border-slate-300 rounded-lg ${isCombinedHealth ? 'pt-6 sm:pt-8' : 'py-6 sm:py-8'} max-w-[210mm] min-h-[297mm] mx-auto text-black shadow-xl print:border-none print:shadow-none print:m-0 print:break-before-page flex flex-col justify-between`}
+                style={{ width: '210mm', maxWidth: '210mm', paddingLeft: '20mm', paddingRight: '15mm', ...(isCombinedHealth ? { paddingBottom: '2.3cm' } : {}), color: '#000000' }}
               >
                 <div className={isCombinedHealth ? 'space-y-4' : 'space-y-6'}>
                   {renderPP6Header(undefined, 'บันทึกข้อมูลสุขภาพ', isCombinedHealth)}
@@ -3068,11 +3090,11 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
                 </div>
 
                 {/* Bottom Signature: Class Advisor */}
-                <div className={`${isCombinedHealth ? 'pt-4 mb-2 print:mb-2' : 'pt-6 mb-[3in] print:mb-[3in]'} text-xs text-center max-w-sm mx-auto space-y-1 text-black`} style={{ color: '#000000' }}>
+                <div className={`${isCombinedHealth ? 'pt-4 mb-0 print:mb-0' : 'pt-6 mb-[3in] print:mb-[3in]'} text-xs text-center max-w-sm mx-auto space-y-1 text-black`} style={{ color: '#000000' }}>
                   <p className="text-black font-medium">ลงชื่อ ..............................................................</p>
                   <p className="font-normal text-black">({advisorName || '......................................................'})</p>
                   <p className="text-black font-semibold text-[11px]">ครูประจำชั้น</p>
-                  <p className="text-black font-medium text-[10px]">วันที่ ...... เดือน ........................ พ.ศ. ...........</p>
+                  <p className={`text-black font-medium text-[10px] ${isCombinedHealth ? 'leading-none' : ''}`}>วันที่ ...... เดือน ........................ พ.ศ. ...........</p>
                 </div>
 
               </div>
@@ -3082,8 +3104,8 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
           {/* TAB 6: ความคิดเห็นและการประเมินพฤติกรรม 8 ด้าน (ครูและผู้ปกครอง) */}
           {(activeTab === 'comments' || activeTab === 'all') && (
             <div
-              className="a4-pp6-page bg-white border border-slate-300 rounded-lg py-6 sm:py-8 max-w-[210mm] min-h-[297mm] mx-auto text-slate-900 shadow-xl print:border-none print:shadow-none print:m-0 print:break-before-page flex flex-col justify-between"
-              style={{ width: '210mm', maxWidth: '210mm', paddingLeft: '20mm', paddingRight: '15mm' }}
+              className="a4-pp6-page bg-white border border-slate-300 rounded-lg pt-6 sm:pt-8 max-w-[210mm] min-h-[297mm] mx-auto text-slate-900 shadow-xl print:border-none print:shadow-none print:m-0 print:break-before-page flex flex-col justify-between"
+              style={{ width: '210mm', maxWidth: '210mm', paddingLeft: '20mm', paddingRight: '15mm', paddingBottom: '2.3cm' }}
             >
               
               <div className="space-y-4">
@@ -3107,10 +3129,10 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
 
                 {/* 3-Column Evaluation Table */}
                 <div className="overflow-x-auto">
-                  <table className="w-full border-collapse border border-slate-800 text-xs">
+                  <table className="w-full border-collapse border border-slate-800 text-xs bg-white">
                     <thead>
-                      <tr className="bg-slate-100 text-black font-bold text-center border-b border-slate-800">
-                        <th className="border border-slate-800 p-2 text-center min-w-[200px] text-black">
+                      <tr className="bg-white text-black font-bold text-center border-b border-slate-800">
+                        <th className="border border-slate-800 p-2 text-center min-w-[200px] bg-white text-black">
                           ประเมินพฤติกรรม
                         </th>
                         <th className="border border-slate-800 p-2 w-[35%] text-center bg-white text-black">
@@ -3129,7 +3151,7 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
                         return (
                           <tr key={item.id} className="border-b border-slate-800 bg-white">
                             {/* column1: ประเมินพฤติกรรม */}
-                            <td className="border border-slate-800 p-2.5 align-middle">
+                            <td className="border border-slate-800 p-2.5 align-middle bg-white">
                               <div className="text-xs sm:text-sm font-bold text-black leading-snug">
                                 {item.number}. {item.title}
                               </div>
@@ -3193,7 +3215,7 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
                       {/* Row 9 / Last Row: ความคิดเห็น */}
                       <tr className="border-b border-slate-800 bg-white">
                         {/* column1: ประเมินพฤติกรรม / ความคิดเห็น */}
-                        <td className="border border-slate-800 p-2.5 align-top pt-3">
+                        <td className="border border-slate-800 p-2.5 align-top pt-3 bg-white">
                           <div className="text-xs sm:text-sm font-bold text-black">9. ความคิดเห็น</div>
                         </td>
 
@@ -3239,14 +3261,14 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
 
               </div>
 
-              {/* Bottom Signatures: 2 Columns (Left: Teacher, Right: Parent) */}
-              <div className="pt-6 grid grid-cols-2 gap-8 text-xs text-center mt-4 text-black">
+              {/* Bottom Signatures: 2 Columns (Left: Teacher, Right: Parent) - 2.3cm from bottom edge */}
+              <div className="pt-4 grid grid-cols-2 gap-8 text-xs text-center mt-2 mb-0 text-black">
                 {/* ฝั่งซ้าย: ครูประจำชั้น */}
                 <div className="space-y-1 text-black">
                   <p className="text-black">ลงชื่อ ..............................................................</p>
                   <p className="font-normal text-black">({advisorName || '......................................................'})</p>
                   <p className="text-black font-semibold text-[11px]">ครูประจำชั้น</p>
-                  <p className="text-black text-[10px]">วันที่ ...... เดือน ........................ พ.ศ. ...........</p>
+                  <p className="text-black text-[10px] leading-none">วันที่ ...... เดือน ........................ พ.ศ. ...........</p>
                 </div>
 
                 {/* ฝั่งขวา: ผู้ปกครอง */}
@@ -3256,7 +3278,7 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
                     ({student.guardianName || student.fatherName || student.motherName || '......................................................'})
                   </p>
                   <p className="text-black font-semibold text-[11px]">ผู้ปกครองนักเรียน</p>
-                  <p className="text-black text-[10px]">วันที่ ...... เดือน ........................ พ.ศ. ...........</p>
+                  <p className="text-black text-[10px] leading-none">วันที่ ...... เดือน ........................ พ.ศ. ...........</p>
                 </div>
               </div>
 

@@ -1688,16 +1688,21 @@ export const Module2Grading: React.FC<Module2Props> = ({
       const total = selectedSubject.isActivity ? 0 : Math.min(selectedSubject.totalScore || 100, safeCw + safeExam);
       const gpa = selectedSubject.isActivity ? 0 : calculateThaiGrade(total);
 
+      const recordSem: '1' | '2' = (selectedSubject.semester === '1' || selectedSubject.semester === '2')
+        ? selectedSubject.semester
+        : currentSemester;
+      const recordYear = selectedSubject.academicYear || currentAcademicYear;
+
       return {
-        id: `grd-${s.id}-${selectedSubject.id}-${currentSemester}`,
+        id: `grd-${s.id}-${selectedSubject.id}-${recordSem}`,
         studentId: s.id,
         studentName: `${s.prefix}${s.firstName} ${s.lastName}`,
         gradeLevel: selectedSubject.gradeLevel,
         subjectId: selectedSubject.id,
         subjectCode: selectedSubject.code,
         subjectName: selectedSubject.name,
-        semester: currentSemester,
-        academicYear,
+        semester: recordSem,
+        academicYear: recordYear,
         assignmentScores: row.assignmentScores || {},
         courseworkScore: safeCw,
         examScore: safeExam,
@@ -2223,16 +2228,21 @@ export const Module2Grading: React.FC<Module2Props> = ({
       const total = selectedSubject.isActivity ? 0 : Math.min(selectedSubject.totalScore, (Number(row.coursework) || 0) + (Number(row.exam) || 0));
       const gpa = selectedSubject.isActivity ? 0 : calculateThaiGrade(total);
 
+      const recordSem: '1' | '2' = (selectedSubject.semester === '1' || selectedSubject.semester === '2')
+        ? selectedSubject.semester
+        : currentSemester;
+      const recordYear = selectedSubject.academicYear || currentAcademicYear;
+
       return {
-        id: `grd-${s.id}-${selectedSubject.id}-${currentSemester}`,
+        id: `grd-${s.id}-${selectedSubject.id}-${recordSem}`,
         studentId: s.id,
         studentName: `${s.prefix}${s.firstName} ${s.lastName}`,
         gradeLevel: selectedSubject.gradeLevel,
         subjectId: selectedSubject.id,
         subjectCode: selectedSubject.code,
         subjectName: selectedSubject.name,
-        semester: currentSemester,
-        academicYear,
+        semester: recordSem,
+        academicYear: recordYear,
         assignmentScores: row.assignmentScores || {},
         courseworkScore: selectedSubject.isActivity ? 0 : (Number(row.coursework) || 0),
         examScore: selectedSubject.isActivity ? 0 : (Number(row.exam) || 0),

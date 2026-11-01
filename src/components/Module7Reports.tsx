@@ -531,25 +531,49 @@ export const Module7Reports: React.FC<Module7Props> = ({
     return assessmentSubjectChunks;
   }, [assessmentSubjectChunks, assessmentSelectedChunkIndex]);
 
-  // Helper to get scores for student & subject (from recorded grades by member)
+  const isGradeRecordForSemAndYear = (g: GradeRecord, targetSem: string, targetYear: string): boolean => {
+    if (!g) return false;
+    if (['grd-001', 'grd-002', 'grd-003'].includes(g.id)) return false;
+    const recSem = String(g.semester || '').trim();
+    const tSem = String(targetSem || '').trim();
+    if (recSem !== tSem) return false;
+    const subId = String(g.subjectId || '');
+    if (subId.includes('-sem1') && tSem !== '1') return false;
+    if (subId.includes('-sem2') && tSem !== '2') return false;
+    if (g.academicYear && String(g.academicYear).trim() !== String(targetYear).trim()) return false;
+    return true;
+  };
+
+  const hasRecordedScoreValue = (g?: GradeRecord): boolean => {
+    if (!g) return false;
+    const cw = Number(g.courseworkScore) || 0;
+    const ex = Number(g.examScore) || 0;
+    const tot = Number(g.totalScore) || 0;
+    const hasAsg = g.assignmentScores
+      ? Object.values(g.assignmentScores).some(v => typeof v === 'number' && !isNaN(v) && v > 0)
+      : false;
+    const hasAct = Boolean(g.activityResult && g.activityResult.trim() !== '');
+    return cw > 0 || ex > 0 || tot > 0 || hasAsg || hasAct;
+  };
+
+  // Helper to get scores for student & subject (strictly from the selected semester)
   const getStudentScores = (studentId: string, subject: Subject) => {
-    let rec = effectiveGrades.find(g => 
-      g.studentId === studentId && 
-      (g.subjectId === subject.id || (subject.code && g.subjectCode === subject.code)) &&
-      (g.semester === selectedSemester || !g.semester) &&
-      (g.academicYear === selectedYear || !g.academicYear)
+    const codeUpper = (subject.code || '').trim().toUpperCase();
+    const nameClean = (subject.name || '').trim();
+
+    let rec = effectiveGrades.find(g =>
+      g.studentId === studentId &&
+      g.subjectId === subject.id &&
+      isGradeRecordForSemAndYear(g, selectedSemester, selectedYear) &&
+      hasRecordedScoreValue(g)
     );
     if (!rec) {
-      rec = effectiveGrades.find(g => 
-        g.studentId === studentId && 
-        (g.subjectId === subject.id || (subject.code && g.subjectCode === subject.code)) &&
-        (g.semester === selectedSemester || !g.semester)
-      );
-    }
-    if (!rec) {
-      rec = effectiveGrades.find(g => 
-        g.studentId === studentId && 
-        (g.subjectId === subject.id || (subject.code && g.subjectCode === subject.code))
+      rec = effectiveGrades.find(g =>
+        g.studentId === studentId &&
+        ((codeUpper !== '' && (g.subjectCode || '').trim().toUpperCase() === codeUpper) ||
+          (nameClean !== '' && (g.subjectName || '').trim() === nameClean)) &&
+        isGradeRecordForSemAndYear(g, selectedSemester, selectedYear) &&
+        hasRecordedScoreValue(g)
       );
     }
     return {
@@ -572,18 +596,25 @@ export const Module7Reports: React.FC<Module7Props> = ({
 
   // Helper to get student's score for grade computation
   const getStudentGradeScore = (studentId: string, subject: Subject): number | null => {
+    const codeUpper = (subject.code || '').trim().toUpperCase();
+    const nameClean = (subject.name || '').trim();
+
     if (isAssessmentPrimary && selectedSemester === '2') {
       const recSem1 = effectiveGrades.find(g => 
         g.studentId === studentId && 
-        (g.subjectId === subject.id || (subject.code && g.subjectCode === subject.code)) &&
-        g.semester === '1' &&
-        (g.academicYear === selectedYear || !g.academicYear)
+        (g.subjectId === subject.id ||
+          (codeUpper !== '' && (g.subjectCode || '').trim().toUpperCase() === codeUpper) ||
+          (nameClean !== '' && (g.subjectName || '').trim() === nameClean)) &&
+        isGradeRecordForSemAndYear(g, '1', selectedYear) &&
+        hasRecordedScoreValue(g)
       );
       const recSem2 = effectiveGrades.find(g => 
         g.studentId === studentId && 
-        (g.subjectId === subject.id || (subject.code && g.subjectCode === subject.code)) &&
-        g.semester === '2' &&
-        (g.academicYear === selectedYear || !g.academicYear)
+        (g.subjectId === subject.id ||
+          (codeUpper !== '' && (g.subjectCode || '').trim().toUpperCase() === codeUpper) ||
+          (nameClean !== '' && (g.subjectName || '').trim() === nameClean)) &&
+        isGradeRecordForSemAndYear(g, '2', selectedYear) &&
+        hasRecordedScoreValue(g)
       );
       const s1 = typeof recSem1?.totalScore === 'number' ? recSem1.totalScore : null;
       const s2 = typeof recSem2?.totalScore === 'number' ? recSem2.totalScore : null;
