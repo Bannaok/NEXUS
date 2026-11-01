@@ -77,7 +77,36 @@ export const calculateThaiGrade = (score: number | null | undefined, _maxScore: 
   return '0';
 };
 
+export const isActivitySubject = (sub?: Subject | null): boolean => {
+  if (!sub) return false;
+  if (sub.isActivity) return true;
+  if (sub.id && (sub.id.startsWith('act-') || sub.id.includes('-act-'))) return true;
+  const code = (sub.code || '').trim().toUpperCase();
+  const name = (sub.name || '').trim();
+  if (code.startsWith('ก') || code.includes('กิจกรรม')) return true;
+  if (
+    name.includes('กิจกรรม') ||
+    name.includes('ลูกเสือ') ||
+    name.includes('เนตรนารี') ||
+    name.includes('ยุวกาชาด') ||
+    name.includes('ผู้บำเพ็ญประโยชน์') ||
+    name.includes('แนะแนว') ||
+    name.includes('เพื่อสังคม') ||
+    name.includes('สาธารณประโยชน์') ||
+    name.includes('ชุมนุม')
+  ) {
+    return true;
+  }
+  return false;
+};
+
+export const isActivityRecord = (rec?: GradeRecord | null): boolean => {
+  if (!rec) return false;
+  return rec.activityResult === 'ผ่าน' || rec.activityResult === 'ไม่ผ่าน';
+};
+
 const getPrimarySubjectOrder = (sub: Subject): number => {
+  if (isActivitySubject(sub)) return 500;
   const name = (sub.name || '').trim();
   const code = (sub.code || '').trim();
   if (name === 'ภาษาไทย' || code.startsWith('ท1')) return 1;
@@ -539,50 +568,6 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
     return `ผู้อำนวยการโรงเรียน${cleanSchool}`;
   }, [director, schoolInfo.schoolName]);
 
-  // Subjects and grades for this student: strictly only subjects for this student's grade
-  const studentSubjects = useMemo(() => {
-    const studentGrade = (student.gradeLevel || grade || '').trim();
-    if (!studentGrade) return [];
-
-    // Prefer subjects matching the current academicYear first
-    const yearMatched = effectiveSubjects.filter(s => {
-      const sGrade = (s.gradeLevel || '').trim();
-      const matchesYear = !s.academicYear || String(s.academicYear) === String(academicYear);
-      return sGrade === studentGrade && matchesYear;
-    });
-    const basePool = yearMatched.length > 0
-      ? yearMatched
-      : effectiveSubjects.filter(s => (s.gradeLevel || '').trim() === studentGrade);
-
-    // Strictly match the student's grade level and current semester
-    const exactSemMatched = basePool.filter(s => String(s.semester) === String(semester));
-    const fallbackSemMatched = basePool.filter(s => !s.semester);
-    let matched = [...exactSemMatched, ...fallbackSemMatched];
-
-    // Fallback: If no subjects matched this semester, match this student's grade level only
-    if (matched.length === 0) {
-      matched = basePool;
-    }
-
-    // Deduplicate by subject code or name to ensure each subject is shown only once (prefer exact semester match)
-    const seen = new Set<string>();
-    const unique: Subject[] = [];
-    matched.forEach(s => {
-      const key = s.code ? s.code.trim().toUpperCase() : s.name.trim();
-      if (!seen.has(key)) {
-        seen.add(key);
-        unique.push(s);
-      }
-    });
-
-    return unique.sort((a, b) => {
-      const ordA = getPrimarySubjectOrder(a);
-      const ordB = getPrimarySubjectOrder(b);
-      if (ordA !== ordB) return ordA - ordB;
-      return (a.code || '').localeCompare(b.code || '', 'th');
-    });
-  }, [effectiveSubjects, student.gradeLevel, grade, semester, academicYear]);
-
   // Strict helpers to ensure grade records only show in the exact semester they were recorded
   const isGradeRecordForSemester = (g: GradeRecord, targetSem: string, targetYear: string): boolean => {
     if (!g) return false;
@@ -608,6 +593,84 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
     const hasAct = Boolean(g.activityResult && g.activityResult.trim() !== '');
     return cw > 0 || ex > 0 || tot > 0 || hasAsg || hasAct;
   };
+
+  // Subjects and grades for this student: strictly only subjects for this student's grade
+  const studentSubjects = useMemo(() => {
+    const studentGrade = (student.gradeLevel || grade || '').trim();
+    if (!studentGrade) return [];
+
+    // Prefer subjects matching the current academicYear first
+    const yearMatched = effectiveSubjects.filter(s => {
+      const sGrade = (s.gradeLevel || '').trim();
+      const matchesYear = !s.academicYear || String(s.academicYear) === String(academicYear);
+      return sGrade === studentGrade && matchesYear;
+    });
+    const basePool = yearMatched.length > 0
+      ? yearMatched
+      : effectiveSubjects.filter(s => (s.gradeLevel || '').trim() === studentGrade);
+
+    // Strictly match the student's grade level and current semester
+    const exactSemMatched = basePool.filter(s => String(s.semester) === String(semester));
+    const fallbackSemMatched = basePool.filter(s => !s.semester);
+    let matched = [...exactSemMatched, ...fallbackSemMatched];
+
+    // Fallback: If no subjects matched this semester, match this student's grade level only
+    if (matched.length === 0) {
+      matched = basePool;
+    }
+
+    // Also include any extra activities recorded in effectiveGrades for this student in this term
+    const extraActivities: Subject[] = [];
+    effectiveGrades.forEach(g => {
+      if (
+        g.studentId === student.id &&
+        isGradeRecordForSemester(g, semester, academicYear) &&
+        Boolean(g.activityResult && g.activityResult.trim() !== '')
+      ) {
+        const subId = g.subjectId || '';
+        const subCode = g.subjectCode || '';
+        const subName = g.subjectName || '';
+        const existsInMatched = matched.some(
+          s => s.id === subId || (subCode && s.code === subCode) || s.name === subName
+        );
+        if (!existsInMatched && !extraActivities.some(a => a.id === subId || a.name === subName)) {
+          extraActivities.push({
+            id: subId || `act-extra-${subName}`,
+            code: subCode,
+            name: subName,
+            gradeLevel: studentGrade as GradeLevel,
+            hoursPerWeek: 1,
+            semester: semester as '1' | '2',
+            totalScore: 0,
+            courseworkScore: 0,
+            examScore: 0,
+            isActivity: true,
+          });
+        }
+      }
+    });
+    if (extraActivities.length > 0) {
+      matched = [...matched, ...extraActivities];
+    }
+
+    // Deduplicate by subject code or name to ensure each subject is shown only once (prefer exact semester match)
+    const seen = new Set<string>();
+    const unique: Subject[] = [];
+    matched.forEach(s => {
+      const key = s.code ? s.code.trim().toUpperCase() : s.name.trim();
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push(s);
+      }
+    });
+
+    return unique.sort((a, b) => {
+      const ordA = getPrimarySubjectOrder(a);
+      const ordB = getPrimarySubjectOrder(b);
+      if (ordA !== ordB) return ordA - ordB;
+      return (a.code || '').localeCompare(b.code || '', 'th');
+    });
+  }, [effectiveSubjects, effectiveGrades, student.id, student.gradeLevel, grade, semester, academicYear]);
 
   // Subject evaluation rows: pulls directly from "รายงานวัดผล" (StorageService.getGrades())
   // Strictly displays scores ONLY in the semester where they were entered
@@ -638,19 +701,52 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
         );
       }
 
-      const cw = rec?.courseworkScore !== undefined && rec.courseworkScore !== null ? rec.courseworkScore : null;
-      const ex = rec?.examScore !== undefined && rec.examScore !== null ? rec.examScore : null;
-      let total = rec?.totalScore !== undefined && rec.totalScore !== null ? rec.totalScore : null;
-      if (total === null && (cw !== null || ex !== null)) {
-        total = (Number(cw) || 0) + (Number(ex) || 0);
+      // 3. Fallback for activity subjects to find recorded pass/fail result
+      if (!rec && isActivitySubject(subj)) {
+        rec = effectiveGrades.find(g =>
+          g.studentId === student.id &&
+          isGradeRecordForSemester(g, semester, academicYear) &&
+          Boolean(g.activityResult && g.activityResult.trim() !== '') &&
+          ((codeUpper !== '' && (g.subjectCode || '').trim().toUpperCase() === codeUpper) ||
+            (nameClean !== '' && (g.subjectName || '').trim() === nameClean))
+        );
       }
-      const gradeStr = calculateThaiGrade(total, subj.totalScore || 100);
-      const points = getGradePoints(gradeStr);
+
+      const isAct = isActivitySubject(subj) || isActivityRecord(rec);
+
+      let cwDisplay = '-';
+      let exDisplay = '-';
+      let totalDisplay = '-';
+      let gradeStr = '-';
       const weight = subj.hoursPerWeek ? subj.hoursPerWeek / 2 : 1; // standard weight credit
 
-      if (points !== null) {
-        totalCredits += weight;
-        totalPoints += points * weight;
+      if (isAct) {
+        // Requirement 1: สำหรับวิชากิจกรรม ให้ column ระหว่างภาคเป็น "-", column ปลายภาคเป็น "-", column รวม จะแสดง "ผ่าน หรือ ไม่ผ่าน"
+        cwDisplay = '-';
+        exDisplay = '-';
+        totalDisplay = (rec?.activityResult === 'ผ่าน' || rec?.activityResult === 'ไม่ผ่าน')
+          ? rec.activityResult
+          : '-';
+        gradeStr = '-';
+        // Non-credit: do not add to GPA credits or points
+      } else {
+        const cw = rec?.courseworkScore !== undefined && rec.courseworkScore !== null ? rec.courseworkScore : null;
+        const ex = rec?.examScore !== undefined && rec.examScore !== null ? rec.examScore : null;
+        let total = rec?.totalScore !== undefined && rec.totalScore !== null ? rec.totalScore : null;
+        if (total === null && (cw !== null || ex !== null)) {
+          total = (Number(cw) || 0) + (Number(ex) || 0);
+        }
+        gradeStr = calculateThaiGrade(total, subj.totalScore || 100);
+        const points = getGradePoints(gradeStr);
+
+        cwDisplay = cw !== null ? String(cw) : '-';
+        exDisplay = ex !== null ? String(ex) : '-';
+        totalDisplay = total !== null ? String(total) : '-';
+
+        if (points !== null) {
+          totalCredits += weight;
+          totalPoints += points * weight;
+        }
       }
 
       // Member who registered to teach this subject
@@ -664,9 +760,10 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
 
       return {
         subject: subj,
-        coursework: cw !== null ? cw : '-',
-        exam: ex !== null ? ex : '-',
-        total: total !== null ? total : '-',
+        isActivity: isAct,
+        coursework: cwDisplay,
+        exam: exDisplay,
+        total: totalDisplay,
         grade: gradeStr,
         weight,
         teacherDisplayName: subjectTeacher || advisorName || '-'
@@ -713,6 +810,36 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
       }
     });
 
+    // Also include extra activities from effectiveGrades across both semesters if not already present
+    effectiveGrades.forEach(g => {
+      if (
+        g.studentId === student.id &&
+        (!g.academicYear || String(g.academicYear) === String(academicYear)) &&
+        Boolean(g.activityResult && g.activityResult.trim() !== '')
+      ) {
+        const subKey = g.subjectCode ? g.subjectCode.trim().toUpperCase() : (g.subjectName || '').trim();
+        if (subKey && !subjectGroups.has(subKey)) {
+          const actSubj: Subject = {
+            id: g.subjectId || `act-extra-${g.subjectName}`,
+            code: g.subjectCode || '',
+            name: g.subjectName || '',
+            gradeLevel: studentGrade as GradeLevel,
+            hoursPerWeek: 1,
+            semester: (g.semester as '1' | '2') || '1',
+            totalScore: 0,
+            courseworkScore: 0,
+            examScore: 0,
+            isActivity: true,
+          };
+          subjectGroups.set(subKey, {
+            primary: actSubj,
+            sem1Subj: String(g.semester) === '1' ? actSubj : undefined,
+            sem2Subj: String(g.semester) === '2' ? actSubj : undefined,
+          });
+        }
+      }
+    });
+
     // Fallback to studentSubjects if empty
     if (subjectGroups.size === 0) {
       studentSubjects.forEach(s => {
@@ -749,7 +876,7 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
       }
 
       // 2. Match by subject code or name strictly in targetSem & academicYear
-      return effectiveGrades.find(
+      const nameOrCodeFound = effectiveGrades.find(
         g =>
           g.studentId === student.id &&
           ((codeUpper !== '' && (g.subjectCode || '').trim().toUpperCase() === codeUpper) ||
@@ -757,6 +884,20 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
           isGradeRecordForSemester(g, targetSem, academicYear) &&
           hasRecordedGradeScore(g)
       );
+      if (nameOrCodeFound) return nameOrCodeFound;
+
+      // 3. Activity fallback match in targetSem & academicYear
+      if (isActivitySubject(grp.primary)) {
+        return effectiveGrades.find(
+          g =>
+            g.studentId === student.id &&
+            isGradeRecordForSemester(g, targetSem, academicYear) &&
+            Boolean(g.activityResult && g.activityResult.trim() !== '') &&
+            ((codeUpper !== '' && (g.subjectCode || '').trim().toUpperCase() === codeUpper) ||
+              (nameClean !== '' && (g.subjectName || '').trim() === nameClean))
+        );
+      }
+      return undefined;
     };
 
     const getNumericTotal = (rec?: GradeRecord): number | null => {
@@ -798,65 +939,110 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
       const rec1 = findStudentGradeForTerm(grp, '1');
       const rec2 = findStudentGradeForTerm(grp, '2');
 
+      const isAct = isActivitySubject(subj) || isActivityRecord(rec1) || isActivityRecord(rec2);
+
       const max1 = (grp.sem1Subj || subj).totalScore || 50;
       const max2 = (grp.sem2Subj || subj).totalScore || 50;
 
-      const total1 = getNumericTotal(rec1);
-      const total2 = getNumericTotal(rec2);
+      const total1Num = getNumericTotal(rec1);
+      const total2Num = getNumericTotal(rec2);
 
-      const grade1 = calculateThaiGrade(total1, max1);
-      const grade2 = calculateThaiGrade(total2, max2);
-
-      let avgTotal: number | null = null;
-      let combinedMax = 100;
-      if (isPrimaryGrade) {
-        if (total1 !== null && total2 !== null) {
-          avgTotal = Math.round((total1 + total2) * 100) / 100;
-          combinedMax = 100;
-        } else if (total1 !== null) {
-          avgTotal = total1;
-          combinedMax = 100;
-        } else if (total2 !== null) {
-          avgTotal = total2;
-          combinedMax = 100;
-        }
-      } else {
-        if (total1 !== null && total2 !== null) {
-          if (max1 + max2 === 100) {
-            avgTotal = Math.round((total1 + total2) * 100) / 100;
-            combinedMax = 100;
-          } else {
-            avgTotal = Math.round(((total1 + total2) / 2) * 100) / 100;
-            combinedMax = (max1 + max2) / 2;
-          }
-        } else if (total1 !== null) {
-          avgTotal = total1;
-          combinedMax = max1;
-        } else if (total2 !== null) {
-          avgTotal = total2;
-          combinedMax = max2;
-        }
-      }
-
-      const combinedGrade = calculateThaiGrade(avgTotal, combinedMax);
+      let total1Display = '-';
+      let grade1Display = '-';
+      let total2Display = '-';
+      let grade2Display = '-';
+      let avgTotalDisplay = '-';
+      let combinedGradeDisplay = '-';
       const weight = subj.hoursPerWeek ? subj.hoursPerWeek / 2 : 1;
 
-      const pts1 = getGradePoints(grade1);
-      if (pts1 !== null) {
-        totalCredits1 += weight;
-        totalPoints1 += pts1 * weight;
-      }
+      if (isAct) {
+        // Requirement 2: รวมภาคเรียน ตรง column คะแนน และ column รวมคะแนน ให้แสดง "ผ่าน หรือ ไม่ผ่าน"
+        // เน้นภาคเรียนที่ 1 ก็ดึงของภาคเรียนที่ 1 / ภาคเรียนที่ 2 ก็ดึงของภาคเรียนที่ 2
+        const act1 = (rec1?.activityResult === 'ผ่าน' || rec1?.activityResult === 'ไม่ผ่าน') ? rec1.activityResult : '-';
+        const act2 = (rec2?.activityResult === 'ผ่าน' || rec2?.activityResult === 'ไม่ผ่าน') ? rec2.activityResult : '-';
 
-      const pts2 = getGradePoints(grade2);
-      if (pts2 !== null) {
-        totalCredits2 += weight;
-        totalPoints2 += pts2 * weight;
-      }
+        total1Display = act1;
+        grade1Display = '-';
 
-      const ptsCombined = getGradePoints(combinedGrade);
-      if (ptsCombined !== null) {
-        totalCreditsCombined += weight;
-        totalPointsCombined += ptsCombined * weight;
+        total2Display = act2;
+        grade2Display = '-';
+
+        // Combined activity evaluation:
+        if (act1 === 'ผ่าน' && act2 === 'ผ่าน') {
+          avgTotalDisplay = 'ผ่าน';
+        } else if (act1 === 'ไม่ผ่าน' || act2 === 'ไม่ผ่าน') {
+          avgTotalDisplay = 'ไม่ผ่าน';
+        } else if (act1 === 'ผ่าน' || act2 === 'ผ่าน') {
+          avgTotalDisplay = 'ผ่าน';
+        } else {
+          avgTotalDisplay = '-';
+        }
+        combinedGradeDisplay = '-';
+
+        // Non-credit: do not add to GPA
+      } else {
+        const grade1 = calculateThaiGrade(total1Num, max1);
+        const grade2 = calculateThaiGrade(total2Num, max2);
+
+        let avgTotal: number | null = null;
+        let combinedMax = 100;
+        if (isPrimaryGrade) {
+          if (total1Num !== null && total2Num !== null) {
+            avgTotal = Math.round((total1Num + total2Num) * 100) / 100;
+            combinedMax = 100;
+          } else if (total1Num !== null) {
+            avgTotal = total1Num;
+            combinedMax = 100;
+          } else if (total2Num !== null) {
+            avgTotal = total2Num;
+            combinedMax = 100;
+          }
+        } else {
+          if (total1Num !== null && total2Num !== null) {
+            if (max1 + max2 === 100) {
+              avgTotal = Math.round((total1Num + total2Num) * 100) / 100;
+              combinedMax = 100;
+            } else {
+              avgTotal = Math.round(((total1Num + total2Num) / 2) * 100) / 100;
+              combinedMax = (max1 + max2) / 2;
+            }
+          } else if (total1Num !== null) {
+            avgTotal = total1Num;
+            combinedMax = max1;
+          } else if (total2Num !== null) {
+            avgTotal = total2Num;
+            combinedMax = max2;
+          }
+        }
+
+        const combinedGrade = calculateThaiGrade(avgTotal, combinedMax);
+
+        total1Display = total1Num !== null ? String(total1Num) : '-';
+        grade1Display = grade1;
+
+        total2Display = total2Num !== null ? String(total2Num) : '-';
+        grade2Display = grade2;
+
+        avgTotalDisplay = avgTotal !== null ? (Number.isInteger(avgTotal) ? String(avgTotal) : avgTotal.toFixed(1)) : '-';
+        combinedGradeDisplay = combinedGrade;
+
+        const pts1 = getGradePoints(grade1);
+        if (pts1 !== null) {
+          totalCredits1 += weight;
+          totalPoints1 += pts1 * weight;
+        }
+
+        const pts2 = getGradePoints(grade2);
+        if (pts2 !== null) {
+          totalCredits2 += weight;
+          totalPoints2 += pts2 * weight;
+        }
+
+        const ptsCombined = getGradePoints(combinedGrade);
+        if (ptsCombined !== null) {
+          totalCreditsCombined += weight;
+          totalPointsCombined += ptsCombined * weight;
+        }
       }
 
       const teacher1 = resolveSubjectTeacher(grp.sem1Subj) || (!grp.sem1Subj ? resolveSubjectTeacher(subj) : '');
@@ -865,12 +1051,13 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
 
       return {
         subject: subj,
-        total1: total1 !== null ? total1 : '-',
-        grade1,
-        total2: total2 !== null ? total2 : '-',
-        grade2,
-        avgTotal: avgTotal !== null ? (Number.isInteger(avgTotal) ? avgTotal : avgTotal.toFixed(1)) : '-',
-        combinedGrade,
+        isActivity: isAct,
+        total1: total1Display,
+        grade1: grade1Display,
+        total2: total2Display,
+        grade2: grade2Display,
+        avgTotal: avgTotalDisplay,
+        combinedGrade: combinedGradeDisplay,
         teacherDisplayName: subjectTeacher || advisorName || '-',
         teacher1DisplayName: teacher1 || advisorName || '-',
         teacher2DisplayName: teacher2 || advisorName || '-',
@@ -2239,7 +2426,7 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
                                   <td className={`py-1.5 px-2 text-center font-mono text-black border-r border-slate-800 ${rowBorderB}`}>
                                     {item.exam}
                                   </td>
-                                  <td className={`py-1.5 px-2 text-center font-mono font-bold text-black bg-white border-r border-slate-800 ${rowBorderB}`}>
+                                  <td className={`py-1.5 px-2 text-center ${item.isActivity ? 'font-sans' : 'font-mono'} font-bold text-black bg-white border-r border-slate-800 ${rowBorderB}`}>
                                     {item.total}
                                   </td>
                                   {!isPrimaryGrade && (
@@ -2308,24 +2495,32 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
                                   <td className="py-1.5 px-2 font-medium text-black border-r border-b border-slate-800">
                                     {item.subject.name}
                                   </td>
-                                  <td className="py-1.5 px-1 text-center font-mono text-black border-r border-b border-slate-800">
+                                  <td className={`py-1.5 px-1 text-center ${item.isActivity ? 'font-sans font-bold' : 'font-mono'} text-black border-r border-b border-slate-800`}>
                                     {item.total1}
                                   </td>
                                   <td className="py-1.5 px-1.5 text-black font-medium text-[10px] border-r border-b border-slate-800">
                                     {item.teacher1DisplayName}
                                   </td>
-                                  <td className="py-1.5 px-1 text-center font-mono text-black border-r border-b border-slate-800">
+                                  <td className={`py-1.5 px-1 text-center ${item.isActivity ? 'font-sans font-bold' : 'font-mono'} text-black border-r border-b border-slate-800`}>
                                     {item.total2}
                                   </td>
                                   <td className="py-1.5 px-1.5 text-black font-medium text-[10px] border-r border-b border-slate-800">
                                     {item.teacher2DisplayName}
                                   </td>
-                                  <td className="py-1.5 px-1 text-center font-mono font-bold text-black border-r border-b border-slate-800 bg-white">
-                                    {item.avgTotal}
-                                  </td>
-                                  <td className="py-1.5 px-1 text-center font-black text-xs text-black border-b border-slate-800 bg-white">
-                                    {item.combinedGrade}
-                                  </td>
+                                  {item.isActivity ? (
+                                    <td colSpan={2} className="py-1.5 px-1 text-center font-sans font-bold text-black border-b border-slate-800 bg-white">
+                                      {item.avgTotal}
+                                    </td>
+                                  ) : (
+                                    <>
+                                      <td className="py-1.5 px-1 text-center font-mono font-bold text-black border-r border-b border-slate-800 bg-white">
+                                        {item.avgTotal}
+                                      </td>
+                                      <td className="py-1.5 px-1 text-center font-black text-xs text-black border-b border-slate-800 bg-white">
+                                        {item.combinedGrade}
+                                      </td>
+                                    </>
+                                  )}
                                 </tr>
                               ))
                             )}
@@ -2379,24 +2574,32 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
                                   <td className="py-1.5 px-2.5 font-medium text-black border-r border-b border-slate-800">
                                     {item.subject.name}
                                   </td>
-                                  <td className="py-1.5 px-1.5 text-center font-mono text-black border-r border-b border-slate-800">
+                                  <td className={`py-1.5 px-1.5 text-center ${item.isActivity ? 'font-sans font-bold' : 'font-mono'} text-black border-r border-b border-slate-800`}>
                                     {item.total1}
                                   </td>
                                   <td className="py-1.5 px-1.5 text-center font-bold text-black border-r border-b border-slate-800">
                                     {item.grade1}
                                   </td>
-                                  <td className="py-1.5 px-1.5 text-center font-mono text-black border-r border-b border-slate-800">
+                                  <td className={`py-1.5 px-1.5 text-center ${item.isActivity ? 'font-sans font-bold' : 'font-mono'} text-black border-r border-b border-slate-800`}>
                                     {item.total2}
                                   </td>
                                   <td className="py-1.5 px-1.5 text-center font-bold text-black border-r border-b border-slate-800">
                                     {item.grade2}
                                   </td>
-                                  <td className="py-1.5 px-1.5 text-center font-mono font-bold text-black border-r border-b border-slate-800 bg-white">
-                                    {item.avgTotal}
-                                  </td>
-                                  <td className="py-1.5 px-1.5 text-center font-black text-xs text-black border-r border-b border-slate-800 bg-white">
-                                    {item.combinedGrade}
-                                  </td>
+                                  {item.isActivity ? (
+                                    <td colSpan={2} className="py-1.5 px-1.5 text-center font-sans font-bold text-black border-r border-b border-slate-800 bg-white">
+                                      {item.avgTotal}
+                                    </td>
+                                  ) : (
+                                    <>
+                                      <td className="py-1.5 px-1.5 text-center font-mono font-bold text-black border-r border-b border-slate-800 bg-white">
+                                        {item.avgTotal}
+                                      </td>
+                                      <td className="py-1.5 px-1.5 text-center font-black text-xs text-black border-r border-b border-slate-800 bg-white">
+                                        {item.combinedGrade}
+                                      </td>
+                                    </>
+                                  )}
                                   <td className="py-1.5 px-2.5 text-black font-medium border-b border-slate-800">
                                     {item.teacherDisplayName}
                                   </td>

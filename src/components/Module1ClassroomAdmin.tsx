@@ -2490,7 +2490,7 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
                               <td className="py-1.5 px-1 text-center border-r border-slate-800 font-mono font-semibold text-black">
                                 {st.rollNumber ?? (idx + 1)}
                               </td>
-                              <td className="py-1.5 px-2 text-center border-r border-slate-800 font-semibold whitespace-nowrap text-black">
+                              <td className="py-1.5 px-2 text-left border-r border-slate-800 font-semibold whitespace-nowrap text-black">
                                 {st.prefix}{st.firstName} {st.lastName}
                               </td>
                               {monthDays.map((dayItem) => {
