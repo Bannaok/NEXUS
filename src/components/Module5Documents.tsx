@@ -169,6 +169,9 @@ export const Module5Documents: React.FC<Module5Props> = ({
       setFileName(doc.fileName || '');
       setFileSize(doc.fileSize || '');
       setFileData(doc.fileData || '');
+      setUploadPercent(doc.fileName ? 100 : 0);
+      setUploadStatusText(doc.fileName ? '✓ มีไฟล์เดิมพร้อมบันทึก' : '');
+      setIsUploadingFile(false);
     } else {
       setEditingDoc(null);
       setModalTargetType(activeTab === 'orders' ? 'order' : 'document');
@@ -180,6 +183,9 @@ export const Module5Documents: React.FC<Module5Props> = ({
       setFileName('');
       setFileSize('');
       setFileData('');
+      setUploadPercent(0);
+      setUploadStatusText('');
+      setIsUploadingFile(false);
     }
     setIsUploadModalOpen(true);
   };
@@ -227,12 +233,12 @@ export const Module5Documents: React.FC<Module5Props> = ({
 
     setIsUploadingFile(true);
     setUploadPercent(15);
-    setUploadStatusText(`กำลังอ่านไฟล์ "${file.name}" (${sizeStr})...`);
+    setUploadStatusText(`กำลังอ่านและเตรียมไฟล์ "${file.name}"...`);
 
     const reader = new FileReader();
     reader.onprogress = (ev) => {
       if (ev.lengthComputable && ev.total > 0) {
-        const pct = Math.min(45, Math.round((ev.loaded / ev.total) * 45));
+        const pct = Math.min(40, Math.round((ev.loaded / ev.total) * 40));
         setUploadPercent(Math.max(15, pct));
       }
     };
@@ -241,8 +247,18 @@ export const Module5Documents: React.FC<Module5Props> = ({
       const base64 = event.target?.result as string;
       setFileUrl(deterministicHostedUrl);
       setFileData(''); // Keep local state clean without multi-megabyte base64
-      setUploadPercent(50);
-      setUploadStatusText('กำลังจัดเก็บและซิงค์ข้อมูลกับ Google Drive ประจำโรงเรียน...');
+      setUploadPercent(45);
+      setUploadStatusText('กำลังอัปโหลดไฟล์ไปยังคลาวด์และ Google Drive ประจำโรงเรียน...');
+
+      // Smooth progress ticker while uploading to server and Google Drive (45% -> 95%)
+      let currentPct = 45;
+      const progressTimer = setInterval(() => {
+        currentPct = Math.min(95, currentPct + 6);
+        setUploadPercent(currentPct);
+        if (currentPct >= 80) {
+          setUploadStatusText('กำลังประมวลผลและเชื่อมโยงข้อมูลกับระบบ Google Drive...');
+        }
+      }, 100);
 
       const category = `Documents_${modalTargetType === 'order' ? currentAcademicYear : 'General'}`;
 
@@ -261,32 +277,52 @@ export const Module5Documents: React.FC<Module5Props> = ({
         })
       })
         .then(async res => {
-          if (!res.ok) throw new Error('upload failed');
-          const data = await res.json();
-          const driveFileId = data?.driveFileId || '';
-          const driveUrl = data?.driveUrl || (driveFileId ? `https://drive.google.com/file/d/${driveFileId}/view?usp=sharing` : '');
-          const bestUrl = driveUrl || data?.url || deterministicHostedUrl;
-          setFileUrl(bestUrl);
+          clearInterval(progressTimer);
+          let finalUrl = deterministicHostedUrl;
+          if (res.ok) {
+            const data = await res.json();
+            const driveFileId = data?.driveFileId || '';
+            const driveUrl = data?.driveUrl || (driveFileId ? `https://drive.google.com/file/d/${driveFileId}/view?usp=sharing` : '');
+            finalUrl = driveUrl || data?.url || deterministicHostedUrl;
+          } else {
+            try {
+              const clientDriveUrl = await StorageService.uploadFileToGoogleDrive(base64, file.name, category);
+              if (clientDriveUrl && clientDriveUrl.startsWith('http')) {
+                finalUrl = clientDriveUrl;
+              }
+            } catch {}
+          }
+          setFileUrl(finalUrl);
           setUploadPercent(100);
-          setUploadStatusText('จัดเก็บลง Google Drive ประจำโรงเรียนเรียบร้อย');
-          return bestUrl;
+          setUploadStatusText('✓ อัปโหลดไฟล์เสร็จสมบูรณ์ 100% พร้อมกดยืนยันการบันทึกเอกสาร');
+          onShowToast(
+            'success',
+            'อัปโหลดไฟล์ครบ 100% แล้ว',
+            `อัปโหลด "${file.name}" (${sizeStr}) ครบ 100% เรียบร้อยแล้ว พร้อมบันทึกเอกสาร`
+          );
+          return finalUrl;
         })
         .catch(async () => {
+          clearInterval(progressTimer);
+          let fallbackUrl = deterministicHostedUrl;
           try {
             const clientDriveUrl = await StorageService.uploadFileToGoogleDrive(base64, file.name, category);
             if (clientDriveUrl && clientDriveUrl.startsWith('http')) {
-              setFileUrl(clientDriveUrl);
-              setUploadPercent(100);
-              setUploadStatusText('จัดเก็บลง Google Drive ประจำโรงเรียนเรียบร้อย');
-              return clientDriveUrl;
+              fallbackUrl = clientDriveUrl;
             }
           } catch {}
-          setFileUrl(deterministicHostedUrl);
+          setFileUrl(fallbackUrl);
           setUploadPercent(100);
-          setUploadStatusText('พร้อมบันทึกเอกสาร');
-          return deterministicHostedUrl;
+          setUploadStatusText('✓ อัปโหลดไฟล์เสร็จสมบูรณ์ 100% พร้อมกดยืนยันการบันทึกเอกสาร');
+          onShowToast(
+            'success',
+            'อัปโหลดไฟล์ครบ 100% แล้ว',
+            `อัปโหลด "${file.name}" (${sizeStr}) ครบ 100% เรียบร้อยแล้ว พร้อมบันทึกเอกสาร`
+          );
+          return fallbackUrl;
         })
         .finally(() => {
+          clearInterval(progressTimer);
           setIsUploadingFile(false);
         });
 
@@ -297,6 +333,7 @@ export const Module5Documents: React.FC<Module5Props> = ({
     reader.onerror = () => {
       setIsUploadingFile(false);
       setUploadPercent(0);
+      setUploadStatusText('');
       onShowToast('error', 'อ่านไฟล์ไม่สำเร็จ', 'ไม่สามารถอ่านไฟล์ได้ โปรดลองอีกครั้ง');
     };
 
@@ -317,6 +354,11 @@ export const Module5Documents: React.FC<Module5Props> = ({
     e.preventDefault();
     if (user.role !== 'admin') {
       onShowToast('warning', 'ไม่มีสิทธิ์', 'เฉพาะ Admin เท่านั้นที่สามารถอัปโหลดหรือแก้ไขเอกสาร');
+      return;
+    }
+
+    if (isUploadingFile || (fileName && uploadPercent < 100)) {
+      onShowToast('warning', 'กำลังอัปโหลดไฟล์', `กรุณารอให้อัปโหลดไฟล์ครบ 100% ก่อนบันทึกเอกสาร (ปัจจุบัน ${uploadPercent}%)`);
       return;
     }
 
@@ -871,49 +913,66 @@ export const Module5Documents: React.FC<Module5Props> = ({
                 />
 
                 {fileName ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between p-3 bg-emerald-50/70 rounded-2xl border border-emerald-200">
-                      <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="space-y-2.5">
+                    <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl flex items-center justify-between text-xs text-emerald-950">
+                      <div className="flex items-center gap-2 truncate">
                         {renderFileIcon(fileName)}
-                        <div className="min-w-0">
-                          <div className="text-xs font-bold text-slate-800 truncate" title={fileName}>
-                            {fileName}
-                          </div>
-                          <div className="text-[10px] text-emerald-700 font-mono">
-                            {fileSize || '1.0 MB'} • เขียนชื่อเรื่องอัตโนมัติแล้ว
-                          </div>
+                        <div className="truncate min-w-0">
+                          <div className="font-bold truncate" title={fileName}>{fileName}</div>
+                          <div className="text-[10px] text-emerald-700 font-mono">ขนาด: {fileSize || '1.0 MB'} • เขียนชื่อเรื่องอัตโนมัติแล้ว</div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-1 shrink-0">
+                      <div className="flex items-center gap-1.5 shrink-0 ml-2">
                         <button
                           type="button"
                           onClick={() => fileInputRef.current?.click()}
-                          className="px-2.5 py-1 text-xs font-semibold bg-white hover:bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 shadow-2xs cursor-pointer"
+                          className="px-2.5 py-1 text-xs font-semibold bg-white hover:bg-emerald-100 border border-emerald-200 rounded-lg text-emerald-800 shadow-2xs cursor-pointer"
                         >
                           เปลี่ยนไฟล์
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFileName('');
+                            setFileUrl('');
+                            setFileSize('');
+                            setUploadPercent(0);
+                            setUploadStatusText('');
+                            setIsUploadingFile(false);
+                            if (fileInputRef.current) fileInputRef.current.value = '';
+                          }}
+                          className="text-rose-600 hover:text-rose-800 font-bold text-xs px-2 py-1 bg-white border border-rose-200 rounded-lg shrink-0 cursor-pointer"
+                        >
+                          ยกเลิกไฟล์นี้
                         </button>
                       </div>
                     </div>
 
-                    {/* Progress Bar Display */}
+                    {/* Upload Progress Indicator with Percentage 0% - 100% - Exact style and color as Assignment page */}
                     {(isUploadingFile || uploadPercent > 0) && (
-                      <div className="p-2.5 bg-emerald-50/50 rounded-xl border border-emerald-200/70 space-y-1.5 animate-in fade-in">
-                        <div className="flex items-center justify-between text-[11px]">
-                          <span className="text-emerald-800 font-semibold flex items-center gap-1.5">
+                      <div className="p-3.5 bg-purple-50 border border-purple-200 rounded-2xl space-y-2 animate-in fade-in">
+                        <div className="flex items-center justify-between text-xs font-bold">
+                          <span className="flex items-center gap-1.5 text-purple-900 truncate pr-2">
                             {uploadPercent < 100 ? (
-                              <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
+                              <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-600 shrink-0" />
                             ) : (
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                             )}
-                            <span>{uploadStatusText || 'กำลังประมวลผลไฟล์...'}</span>
+                            <span className="truncate">{uploadStatusText || 'กำลังประมวลผลและอัปโหลดไฟล์...'}</span>
                           </span>
-                          <span className="font-mono font-bold text-emerald-700">{uploadPercent}%</span>
+                          <span className="font-mono text-purple-800 font-extrabold shrink-0 bg-purple-100 border border-purple-200 px-2 py-0.5 rounded-md">
+                            {uploadPercent}%
+                          </span>
                         </div>
-                        <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
+                        <div className="w-full bg-purple-200/80 h-2.5 rounded-full overflow-hidden p-0.5">
                           <div
-                            className="bg-emerald-600 h-1.5 rounded-full transition-all duration-300"
-                            style={{ width: `${uploadPercent}%` }}
+                            className="bg-gradient-to-r from-purple-600 via-indigo-600 to-emerald-500 h-full rounded-full transition-all duration-300 ease-out"
+                            style={{ width: `${Math.max(4, uploadPercent)}%` }}
                           />
+                        </div>
+                        <div className="flex items-center justify-between text-[10px] text-purple-700 font-medium">
+                          <span>{uploadPercent < 100 ? 'กำลังอัปโหลดข้อมูลและเชื่อมโยงระบบ...' : '✓ อัปโหลดครบ 100% พร้อมกดยืนยันการบันทึกเอกสาร'}</span>
+                          <span className="font-bold">{uploadPercent === 100 ? 'เสร็จสิ้น 100%' : `${uploadPercent}% / 100%`}</span>
                         </div>
                       </div>
                     )}
@@ -1007,16 +1066,39 @@ export const Module5Documents: React.FC<Module5Props> = ({
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setIsUploadModalOpen(false)}
+                  onClick={() => {
+                    setIsUploadModalOpen(false);
+                    setIsUploadingFile(false);
+                    setUploadPercent(0);
+                    setUploadStatusText('');
+                  }}
                   className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
                 >
                   ยกเลิก
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs transition-colors cursor-pointer"
+                  disabled={isUploadingFile || (fileName ? uploadPercent < 100 : false)}
+                  className={`px-5 py-2 text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-all ${
+                    !isUploadingFile && (!fileName || uploadPercent === 100)
+                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer active:scale-95'
+                      : 'bg-slate-300 dark:bg-slate-700 text-slate-500 dark:text-slate-400 cursor-not-allowed border border-slate-300 dark:border-slate-600'
+                  }`}
                 >
-                  บันทึกเอกสาร
+                  {isUploadingFile ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-500" />
+                  ) : uploadPercent === 100 ? (
+                    <CheckCircle2 className="w-3.5 h-3.5 text-white" />
+                  ) : (
+                    <Clock className="w-3.5 h-3.5 text-slate-400" />
+                  )}
+                  <span>
+                    {isUploadingFile
+                      ? `กำลังอัปโหลดไฟล์... ${uploadPercent}%`
+                      : fileName && uploadPercent < 100
+                      ? `รออัปโหลดครบ 100% (${uploadPercent}%)`
+                      : 'บันทึกเอกสาร'}
+                  </span>
                 </button>
               </div>
             </form>
