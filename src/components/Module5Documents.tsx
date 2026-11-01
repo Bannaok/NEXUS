@@ -19,10 +19,11 @@ import {
   Archive,
   Film,
   Music,
-  CheckCircle2
+  CheckCircle2,
+  ExternalLink
 } from 'lucide-react';
 import { StorageService } from '../services/storage';
-import { downloadRealFile, isWordFile, isPdfFile, isExcelFile, isImageFile, getFileExtension } from '../services/fileDownloadHelper';
+import { downloadRealFile, isWordFile, isPdfFile, isExcelFile, isImageFile, getFileExtension, extractDriveFileId, resolveDriveIdByFileNameFromGas } from '../services/fileDownloadHelper';
 
 interface Module5Props {
   user: UserSession;
@@ -471,6 +472,54 @@ export const Module5Documents: React.FC<Module5Props> = ({
     setDragOverId(null);
   };
 
+  // Get direct Google Drive view URL for a specific document file (never a folder)
+  const getDocDriveViewUrl = (doc?: DocumentItem | null): string => {
+    if (!doc) return '';
+    const fid =
+      doc.driveFileId ||
+      extractDriveFileId(doc.fileUrl) ||
+      extractDriveFileId(doc.fileData);
+    if (fid) {
+      return `https://drive.google.com/file/d/${fid}/view?usp=sharing`;
+    }
+    if (doc.fileUrl && doc.fileUrl.startsWith('https://drive.google.com/file/d/')) {
+      return doc.fileUrl;
+    }
+    return '';
+  };
+
+  const handleOpenDriveFile = async (doc?: DocumentItem | null, e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (!doc) return;
+
+    let driveUrl = getDocDriveViewUrl(doc);
+    if (driveUrl) {
+      window.open(driveUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
+    if (doc.fileName || doc.title) {
+      onShowToast('info', 'กำลังค้นหาไฟล์บน Google Drive', 'กำลังตรวจสอบตำแหน่งไฟล์ในระบบ Google Drive...');
+      try {
+        const recoveredFid = await resolveDriveIdByFileNameFromGas(doc.fileName || doc.title, user.schoolId);
+        if (recoveredFid) {
+          const fileViewUrl = `https://drive.google.com/file/d/${recoveredFid}/view?usp=sharing`;
+          window.open(fileViewUrl, '_blank', 'noopener,noreferrer');
+          return;
+        }
+      } catch {}
+    }
+
+    if (doc.fileUrl && doc.fileUrl !== '#') {
+      window.open(doc.fileUrl, '_blank', 'noopener,noreferrer');
+    } else {
+      onShowToast('warning', 'ไม่พบไฟล์บน Google Drive', 'เอกสารนี้ยังไม่มีลิงก์ไฟล์บน Google Drive');
+    }
+  };
+
   // Preview document in new window
   const handlePreviewDoc = (doc: DocumentItem) => {
     const fileSource = doc.fileData || doc.fileUrl;
@@ -807,8 +856,21 @@ export const Module5Documents: React.FC<Module5Props> = ({
                   </div>
                 </div>
 
-                {/* ด้านขวา: ปุ่มดาวน์โหลด และปุ่มจัดการสำหรับ Admin */}
+                {/* ด้านขวา: ปุ่มเปิด Drive, ปุ่มดาวน์โหลด และปุ่มจัดการสำหรับ Admin */}
                 <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+                  {/* ปุ่มเปิดดูไฟล์บน Google Drive โดยตรง */}
+                  <a
+                    href={getDocDriveViewUrl(doc) || '#'}
+                    onClick={(e) => handleOpenDriveFile(doc, e)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-2 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold inline-flex items-center gap-1 transition-colors cursor-pointer shadow-2xs no-underline"
+                    title="เปิดดูไฟล์บน Google Drive โดยตรง"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Drive</span>
+                  </a>
+
                   {/* ปุ่มดาวน์โหลดไฟล์ (อยู่ในหน้าเดิม ไม่เปิดแท็บใหม่) */}
                   <button
                     type="button"
@@ -1161,6 +1223,18 @@ export const Module5Documents: React.FC<Module5Props> = ({
 
             {/* Action Buttons */}
             <div className="pt-1 flex flex-col gap-2">
+              {/* ปุ่มเปิดดูบน Google Drive โดยตรง (เปิดเฉพาะไฟล์) */}
+              <a
+                href={getDocDriveViewUrl(selectedDocDetailModal) || '#'}
+                onClick={(e) => handleOpenDriveFile(selectedDocDetailModal, e)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-2xs cursor-pointer active:scale-95 no-underline"
+              >
+                <ExternalLink className="w-4 h-4 text-blue-600" />
+                <span>เปิดดูไฟล์บน Google Drive</span>
+              </a>
+
               <button
                 type="button"
                 disabled={downloadingDocId === selectedDocDetailModal.id}

@@ -460,6 +460,24 @@ function isTaskStorageKey(key: string): boolean {
   return key === KEYS.TASKS || key.startsWith(`${KEYS.TASKS}__`);
 }
 
+const deletedSubmissionKeysSet = new Set<string>();
+
+function makeSubTombstoneKey(taskId: string, identifier?: string): string {
+  if (!taskId || !identifier) return '';
+  return `${taskId.trim()}__${String(identifier).trim().toLowerCase().replace(/\s+/g, '')}`;
+}
+
+function isSubmissionKeyDeleted(taskId: string, ...identifiers: (string | undefined)[]): boolean {
+  if (!taskId) return false;
+  for (const id of identifiers) {
+    if (!id) continue;
+    const k = makeSubTombstoneKey(taskId, id);
+    if (k && deletedSubmissionKeysSet.has(k)) return true;
+  }
+  return false;
+}
+
+
 function mergeSingleTaskSubmissionsClient(existingTask: TaskItem, incomingTask: TaskItem, preferIncomingMeta = true): TaskItem {
   if (!existingTask) return incomingTask;
   if (!incomingTask) return existingTask;
@@ -479,23 +497,33 @@ function mergeSingleTaskSubmissionsClient(existingTask: TaskItem, incomingTask: 
   const subMap = new Map<string, TaskSubmission>();
   const getKey = (s: TaskSubmission) => String(s?.memberId || s?.memberName || '').trim();
 
+  const isSubDeleted = (taskId: string, s: TaskSubmission): boolean => {
+    if (!s) return true;
+    const k = getKey(s);
+    if (isSubmissionKeyDeleted(taskId, s.memberId, s.memberName, s.fileName, k)) return true;
+    const delAt =
+      (k ? deletedMap[k] : '') ||
+      (s.memberId ? (deletedMap[s.memberId] || deletedMap[s.memberId.toLowerCase()]) : '') ||
+      (s.memberName ? (deletedMap[s.memberName] || deletedMap[s.memberName.toLowerCase()]) : '') ||
+      (s.fileName ? deletedMap[s.fileName] : '');
+    if (delAt) {
+      if (!s.submittedAt) return true;
+      const delTime = new Date(delAt).getTime();
+      const subTime = new Date(s.submittedAt).getTime();
+      if (isNaN(subTime) || delTime >= subTime) return true;
+    }
+    return false;
+  };
+
   for (const s of existingSubs) {
     const k = getKey(s);
-    if (!k) continue;
-    const delAt = deletedMap[k] || deletedMap[s.memberId] || (s.memberName ? deletedMap[s.memberName] : '');
-    if (delAt && s.submittedAt && new Date(delAt).getTime() >= new Date(s.submittedAt).getTime()) {
-      continue;
-    }
+    if (!k || isSubDeleted(base.id, s)) continue;
     subMap.set(k, s);
   }
 
   for (const s of incomingSubs) {
     const k = getKey(s);
-    if (!k) continue;
-    const delAt = deletedMap[k] || deletedMap[s.memberId] || (s.memberName ? deletedMap[s.memberName] : '');
-    if (delAt && s.submittedAt && new Date(delAt).getTime() >= new Date(s.submittedAt).getTime()) {
-      continue;
-    }
+    if (!k || isSubDeleted(base.id, s)) continue;
     const prev = subMap.get(k);
     if (!prev) {
       subMap.set(k, s);
@@ -542,12 +570,34 @@ function mergeSingleTaskSubmissionsClient(existingTask: TaskItem, incomingTask: 
   }
 
   const mergedSubmissions = Array.from(subMap.values());
+
+  let finalSubmittedFileUrl = base.submittedFileUrl || existingTask.submittedFileUrl || incomingTask.submittedFileUrl;
+  let finalSubmittedBy = base.submittedBy || existingTask.submittedBy || incomingTask.submittedBy;
+  let finalSubmittedByName = base.submittedByName || existingTask.submittedByName || incomingTask.submittedByName;
+  let finalSubmittedFileName = base.submittedFileName || existingTask.submittedFileName || incomingTask.submittedFileName;
+
+  if (
+    finalSubmittedBy &&
+    (isSubmissionKeyDeleted(base.id, finalSubmittedBy, finalSubmittedByName, finalSubmittedFileName) ||
+     deletedMap[finalSubmittedBy] ||
+     deletedMap[finalSubmittedBy.toLowerCase()] ||
+     (finalSubmittedByName && (deletedMap[finalSubmittedByName] || deletedMap[finalSubmittedByName.toLowerCase()])))
+  ) {
+    finalSubmittedFileUrl = undefined;
+    finalSubmittedBy = undefined;
+    finalSubmittedByName = undefined;
+    finalSubmittedFileName = undefined;
+  }
+
   return {
     ...base,
     submissions: mergedSubmissions,
     deletedSubmissionsMap: Object.keys(deletedMap).length > 0 ? deletedMap : undefined,
     attachmentUrl: base.attachmentUrl || existingTask.attachmentUrl || incomingTask.attachmentUrl,
-    submittedFileUrl: base.submittedFileUrl || existingTask.submittedFileUrl || incomingTask.submittedFileUrl
+    submittedFileUrl: finalSubmittedFileUrl,
+    submittedBy: finalSubmittedBy,
+    submittedByName: finalSubmittedByName,
+    submittedFileName: finalSubmittedFileName
   };
 }
 
@@ -565,6 +615,19 @@ if (typeof window !== 'undefined') {
       if (Array.isArray(arr)) {
         arr.forEach(id => {
           if (id) deletedTaskIdsSet.add(String(id));
+        });
+      }
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    const rawSubKeys = localStorage.getItem('ams_deleted_submission_keys');
+    if (rawSubKeys) {
+      const arr = JSON.parse(rawSubKeys);
+      if (Array.isArray(arr)) {
+        arr.forEach(k => {
+          if (k) deletedSubmissionKeysSet.add(String(k));
         });
       }
     }
@@ -1179,6 +1242,21 @@ function applyIncomingUpdates(
       if (changedTaskTombstones && typeof window !== 'undefined') {
         try {
           localStorage.setItem('ams_deleted_task_ids', JSON.stringify(Array.from(deletedTaskIdsSet).slice(-2000)));
+        } catch {
+          // ignore
+        }
+      }
+    } else if (resolvedKey === 'ams_deleted_submission_keys' && Array.isArray(value)) {
+      let changedSubKeyTombstones = false;
+      for (const k of value) {
+        if (k && !deletedSubmissionKeysSet.has(String(k))) {
+          deletedSubmissionKeysSet.add(String(k));
+          changedSubKeyTombstones = true;
+        }
+      }
+      if (changedSubKeyTombstones && typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('ams_deleted_submission_keys', JSON.stringify(Array.from(deletedSubmissionKeysSet).slice(-3000)));
         } catch {
           // ignore
         }
@@ -3123,8 +3201,44 @@ export const StorageService = {
   getTasks(): TaskItem[] {
     const list = getLocal<TaskItem[]>(KEYS.TASKS, INITIAL_TASKS);
     if (!Array.isArray(list)) return [];
-    if (deletedTaskIdsSet.size === 0) return list;
-    return list.filter(t => t && t.id && !deletedTaskIdsSet.has(t.id));
+    const filteredTasks = deletedTaskIdsSet.size === 0 ? list : list.filter(t => t && t.id && !deletedTaskIdsSet.has(t.id));
+    if (deletedSubmissionKeysSet.size === 0) return filteredTasks;
+
+    return filteredTasks.map(t => {
+      if (!t || !Array.isArray(t.submissions)) return t;
+      let changed = false;
+      const cleanSubs = t.submissions.filter(s => {
+        if (!s) return false;
+        if (isSubmissionKeyDeleted(t.id, s.memberId, s.memberName, s.fileName)) {
+          changed = true;
+          return false;
+        }
+        return true;
+      });
+      let cleanSubmittedFileUrl = t.submittedFileUrl;
+      let cleanSubmittedBy = t.submittedBy;
+      let cleanSubmittedByName = t.submittedByName;
+      let cleanSubmittedFileName = t.submittedFileName;
+      if (
+        (cleanSubmittedBy && isSubmissionKeyDeleted(t.id, cleanSubmittedBy, cleanSubmittedByName, cleanSubmittedFileName)) ||
+        (cleanSubmittedFileName && isSubmissionKeyDeleted(t.id, cleanSubmittedFileName))
+      ) {
+        cleanSubmittedFileUrl = undefined;
+        cleanSubmittedBy = undefined;
+        cleanSubmittedByName = undefined;
+        cleanSubmittedFileName = undefined;
+        changed = true;
+      }
+      if (!changed) return t;
+      return {
+        ...t,
+        submissions: cleanSubs,
+        submittedFileUrl: cleanSubmittedFileUrl,
+        submittedBy: cleanSubmittedBy,
+        submittedByName: cleanSubmittedByName,
+        submittedFileName: cleanSubmittedFileName
+      };
+    });
   },
 
   saveTask(task: TaskItem): TaskItem[] {
@@ -3278,65 +3392,79 @@ export const StorageService = {
         if (!t || !Array.isArray(t.submissions)) return t;
         let taskUpdated = false;
         let nextMainUrl = t.submittedFileUrl;
-        const nextSubs = t.submissions.map(s => {
-          if (!s || !s.fileName) return s;
-          if (s.driveFileId || extractDriveFileIdClient(s.fileUrl)) return s;
+        const nextSubs = t.submissions
+          .filter(s => s && !isSubmissionKeyDeleted(t.id, s.memberId, s.memberName, s.fileName))
+          .map(s => {
+            if (!s || !s.fileName) return s;
+            if (s.driveFileId || extractDriveFileIdClient(s.fileUrl)) return s;
 
-          // 1. Check TaskSubmissions sheet by taskId + memberId + strict filename extension match
-          for (let i = subRows.length - 1; i >= 0; i--) {
-            const row = subRows[i];
-            if (!row) continue;
-            const rowTaskId = String(row.taskId || '').trim();
-            const rowMemberId = String(row.memberId || '').trim();
-            const rowFileName = String(row.fileName || '').trim();
-            const matchesTaskMember =
-              rowTaskId === t.id &&
-              rowMemberId === s.memberId &&
-              (!rowFileName || isStrictNameMatch(rowFileName, s.fileName));
-            if (matchesTaskMember || isStrictNameMatch(rowFileName, s.fileName)) {
-              const fid =
-                String(row.driveFileId || '').trim() ||
-                extractDriveFileIdClient(String(row.fileUrl || row.downloadUrl || ''));
-              if (fid) {
-                const viewUrl = `https://drive.google.com/file/d/${fid}/view?usp=sharing`;
-                taskUpdated = true;
-                updatedAny = true;
-                if (!nextMainUrl || t.submittedBy === s.memberId) nextMainUrl = viewUrl;
-                return {
-                  ...s,
-                  fileUrl: viewUrl,
-                  driveFileId: fid
-                };
+            // 1. Check TaskSubmissions sheet by taskId + memberId + strict filename extension match
+            for (let i = subRows.length - 1; i >= 0; i--) {
+              const row = subRows[i];
+              if (!row) continue;
+              const rowTaskId = String(row.taskId || '').trim();
+              const rowMemberId = String(row.memberId || '').trim();
+              const rowMemberName = String(row.memberName || '').trim();
+              const rowFileName = String(row.fileName || '').trim();
+              if (isSubmissionKeyDeleted(t.id, rowMemberId, rowMemberName, rowFileName)) continue;
+
+              const matchesTaskMember =
+                rowTaskId === t.id &&
+                rowMemberId === s.memberId &&
+                (!rowFileName || isStrictNameMatch(rowFileName, s.fileName));
+              if (matchesTaskMember || isStrictNameMatch(rowFileName, s.fileName)) {
+                const fid =
+                  String(row.driveFileId || '').trim() ||
+                  extractDriveFileIdClient(String(row.fileUrl || row.downloadUrl || ''));
+                if (fid) {
+                  const viewUrl = `https://drive.google.com/file/d/${fid}/view?usp=sharing`;
+                  taskUpdated = true;
+                  updatedAny = true;
+                  if (!nextMainUrl || t.submittedBy === s.memberId) nextMainUrl = viewUrl;
+                  return {
+                    ...s,
+                    fileUrl: viewUrl,
+                    driveFileId: fid
+                  };
+                }
               }
             }
-          }
 
-          // 2. Check DriveFiles sheet with strict filename + extension match
-          for (let i = driveRows.length - 1; i >= 0; i--) {
-            const row = driveRows[i];
-            if (!row) continue;
-            const rName = String(row.fileName || '').trim();
-            if (isStrictNameMatch(rName, s.fileName)) {
-              const fid =
-                String(row.driveFileId || '').trim() ||
-                extractDriveFileIdClient(String(row.driveViewUrl || row.downloadUrl || ''));
-              if (fid) {
-                const viewUrl = `https://drive.google.com/file/d/${fid}/view?usp=sharing`;
-                taskUpdated = true;
-                updatedAny = true;
-                if (!nextMainUrl || t.submittedBy === s.memberId) nextMainUrl = viewUrl;
-                return {
-                  ...s,
-                  fileUrl: viewUrl,
-                  driveFileId: fid
-                };
+            // 2. Check DriveFiles sheet with strict filename + extension match
+            for (let i = driveRows.length - 1; i >= 0; i--) {
+              const row = driveRows[i];
+              if (!row) continue;
+              const rName = String(row.fileName || '').trim();
+              if (isSubmissionKeyDeleted(t.id, rName)) continue;
+              if (isStrictNameMatch(rName, s.fileName)) {
+                const fid =
+                  String(row.driveFileId || '').trim() ||
+                  extractDriveFileIdClient(String(row.driveViewUrl || row.downloadUrl || ''));
+                if (fid) {
+                  const viewUrl = `https://drive.google.com/file/d/${fid}/view?usp=sharing`;
+                  taskUpdated = true;
+                  updatedAny = true;
+                  if (!nextMainUrl || t.submittedBy === s.memberId) nextMainUrl = viewUrl;
+                  return {
+                    ...s,
+                    fileUrl: viewUrl,
+                    driveFileId: fid
+                  };
+                }
               }
             }
-          }
-          return s;
-        });
+            return s;
+          });
 
-        if (!taskUpdated) return t;
+        if (
+          (nextMainUrl && t.submittedBy && isSubmissionKeyDeleted(t.id, t.submittedBy, t.submittedByName, t.submittedFileName)) ||
+          (t.submittedFileName && isSubmissionKeyDeleted(t.id, t.submittedFileName))
+        ) {
+          nextMainUrl = undefined;
+          taskUpdated = true;
+        }
+
+        if (!taskUpdated && nextSubs.length === t.submissions.length) return t;
         return {
           ...t,
           submissions: nextSubs,
@@ -3445,6 +3573,125 @@ export const StorageService = {
     }
 
     return updated;
+  },
+
+  isSubmissionDeleted(taskId: string, ...identifiers: (string | undefined)[]): boolean {
+    return isSubmissionKeyDeleted(taskId, ...identifiers);
+  },
+
+  deleteTaskSubmission(taskId: string, memberId: string, memberName?: string, fileName?: string): TaskItem[] {
+    const allTasks = this.getTasks();
+    const targetTask = allTasks.find(t => t.id === taskId);
+    if (!targetTask) return allTasks;
+
+    const normId = String(memberId || '').trim();
+    const normName = String(memberName || '').trim();
+    const normFile = String(fileName || '').trim();
+
+    // 1. Register permanent tombstone keys
+    const tombstoneKeys: string[] = [];
+    [normId, normName, normFile].forEach(id => {
+      if (id) {
+        const k = makeSubTombstoneKey(taskId, id);
+        if (k) {
+          deletedSubmissionKeysSet.add(k);
+          tombstoneKeys.push(k);
+        }
+      }
+    });
+
+    try {
+      localStorage.setItem('ams_deleted_submission_keys', JSON.stringify(Array.from(deletedSubmissionKeysSet).slice(-3000)));
+    } catch {
+      // ignore
+    }
+    pushToRemoteServer('ams_deleted_submission_keys', Array.from(deletedSubmissionKeysSet).slice(-3000), Date.now());
+
+    // 2. Update task's deletedSubmissionsMap
+    const nowIso = new Date().toISOString();
+    const nextDeletedMap: Record<string, string> = { ...(targetTask.deletedSubmissionsMap || {}) };
+    if (normId) {
+      nextDeletedMap[normId] = nowIso;
+      nextDeletedMap[normId.toLowerCase()] = nowIso;
+    }
+    if (normName) {
+      nextDeletedMap[normName] = nowIso;
+      nextDeletedMap[normName.toLowerCase()] = nowIso;
+    }
+    if (normFile) {
+      nextDeletedMap[normFile] = nowIso;
+    }
+
+    // Find the submission being removed to get file info for deletion
+    const existingSub = (targetTask.submissions || []).find(s =>
+      (normId && (s.memberId === normId || s.memberId?.toLowerCase() === normId.toLowerCase())) ||
+      (normName && (s.memberName === normName || s.memberName?.toLowerCase() === normName.toLowerCase())) ||
+      (normFile && s.fileName === normFile)
+    );
+
+    // 3. Filter out submissions
+    const nextSubs = (targetTask.submissions || []).filter(s => {
+      if (!s) return false;
+      if (normId && (s.memberId === normId || s.memberId?.toLowerCase() === normId.toLowerCase())) return false;
+      if (normName && (s.memberName === normName || s.memberName?.toLowerCase() === normName.toLowerCase())) return false;
+      if (normFile && s.fileName === normFile) return false;
+      if (isSubmissionKeyDeleted(taskId, s.memberId, s.memberName, s.fileName)) return false;
+      return true;
+    });
+
+    let nextSubmittedFileUrl = targetTask.submittedFileUrl;
+    let nextSubmittedBy = targetTask.submittedBy;
+    let nextSubmittedByName = targetTask.submittedByName;
+    let nextSubmittedFileName = targetTask.submittedFileName;
+
+    if (
+      (nextSubmittedBy && (nextSubmittedBy === normId || nextSubmittedBy.toLowerCase() === normId.toLowerCase())) ||
+      (nextSubmittedByName && (nextSubmittedByName === normName || nextSubmittedByName.toLowerCase() === normName.toLowerCase())) ||
+      (nextSubmittedFileName && nextSubmittedFileName === normFile)
+    ) {
+      nextSubmittedFileUrl = undefined;
+      nextSubmittedBy = undefined;
+      nextSubmittedByName = undefined;
+      nextSubmittedFileName = undefined;
+    }
+
+    const updatedTask: TaskItem = {
+      ...targetTask,
+      submissions: nextSubs,
+      deletedSubmissionsMap: nextDeletedMap,
+      submittedFileUrl: nextSubmittedFileUrl,
+      submittedBy: nextSubmittedBy,
+      submittedByName: nextSubmittedByName,
+      submittedFileName: nextSubmittedFileName
+    };
+
+    const updatedList = allTasks.map(t => t.id === taskId ? updatedTask : t);
+    setLocal(KEYS.TASKS, updatedList);
+
+    // 4. Delete physical file if cached on server
+    const targetFile = normFile || existingSub?.fileName;
+    if (targetFile) {
+      fetch('/api/files/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName: targetFile,
+          taskId: taskId,
+          memberId: normId
+        })
+      }).catch(() => {});
+    }
+
+    // 5. Post to Google Apps Script to permanently remove submission row from Sheet
+    this.syncPostToGoogle('deleteTaskSubmission', {
+      taskId,
+      memberId: normId,
+      memberName: normName,
+      fileName: targetFile,
+      task: updatedTask
+    }).catch(() => {});
+
+    return updatedList;
   },
 
   reorderTasks(tasks: TaskItem[]): TaskItem[] {

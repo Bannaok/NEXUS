@@ -73,6 +73,8 @@ export const Module4Assignments: React.FC<Module4Props> = ({
     title: string;
     isAnnouncement?: boolean;
     memberId?: string;
+    memberName?: string;
+    fileName?: string;
   } | null>(null);
 
   // Form states for creating & editing tasks/announcements
@@ -252,11 +254,22 @@ export const Module4Assignments: React.FC<Module4Props> = ({
 
   // Robust matcher for finding a member's submission in a task (handles ID, username, fullName, and prefix-stripped name)
   const findMemberSubmission = (task: TaskItem, member: MemberAccount): TaskSubmission | undefined => {
-    if (!task) return undefined;
-    const subs = task.submissions || [];
+    if (!task || !member) return undefined;
     const normMemberName = normalizePersonName(member.fullName);
+
+    // Check if permanently deleted via tombstone or deletedSubmissionsMap
+    if (StorageService.isSubmissionDeleted(task.id, member.id, member.username, member.fullName, normMemberName)) {
+      return undefined;
+    }
+    const delMap = task.deletedSubmissionsMap || {};
+    if (delMap[member.id] || (member.username && delMap[member.username]) || (member.fullName && delMap[member.fullName])) {
+      return undefined;
+    }
+
+    const subs = task.submissions || [];
     const found = subs.find(s => {
       if (!s) return false;
+      if (StorageService.isSubmissionDeleted(task.id, s.memberId, s.memberName, s.fileName)) return false;
       if (s.memberId === member.id) return true;
       if (member.username && s.memberId?.toLowerCase() === member.username.toLowerCase()) return true;
       if (member.fullName && s.memberName === member.fullName) return true;
@@ -272,6 +285,9 @@ export const Module4Assignments: React.FC<Module4Props> = ({
        (member.fullName && task.submittedByName === member.fullName) ||
        (normMemberName && normalizePersonName(task.submittedByName) === normMemberName))
     ) {
+      if (StorageService.isSubmissionDeleted(task.id, task.submittedBy, task.submittedByName, task.submittedFileName)) {
+        return undefined;
+      }
       return {
         memberId: member.id,
         memberName: member.fullName,
@@ -313,11 +329,21 @@ export const Module4Assignments: React.FC<Module4Props> = ({
   };
 
   const getMySubmission = (task: TaskItem): TaskSubmission | undefined => {
-    if (!task) return undefined;
-    const subs = task.submissions || [];
+    if (!task || !user) return undefined;
     const normMyName = normalizePersonName(user.fullName);
+
+    if (StorageService.isSubmissionDeleted(task.id, user.id, user.username, user.fullName, normMyName)) {
+      return undefined;
+    }
+    const delMap = task.deletedSubmissionsMap || {};
+    if (delMap[user.id] || (user.username && delMap[user.username]) || (user.fullName && delMap[user.fullName])) {
+      return undefined;
+    }
+
+    const subs = task.submissions || [];
     const found = subs.find(s => {
       if (!s) return false;
+      if (StorageService.isSubmissionDeleted(task.id, s.memberId, s.memberName, s.fileName)) return false;
       if (s.memberId === user.id) return true;
       if (user.username && s.memberId?.toLowerCase() === user.username.toLowerCase()) return true;
       if (user.fullName && s.memberName === user.fullName) return true;
@@ -338,6 +364,9 @@ export const Module4Assignments: React.FC<Module4Props> = ({
        (user.fullName && task.submittedByName === user.fullName) ||
        (normMyName && normalizePersonName(task.submittedByName) === normMyName))
     ) {
+      if (StorageService.isSubmissionDeleted(task.id, task.submittedBy, task.submittedByName, task.submittedFileName)) {
+        return undefined;
+      }
       return {
         memberId: user.id,
         memberName: user.fullName,
@@ -360,6 +389,7 @@ export const Module4Assignments: React.FC<Module4Props> = ({
 
     const addSub = (s: TaskSubmission, fallbackName?: string) => {
       if (!s) return;
+      if (StorageService.isSubmissionDeleted(task.id, s.memberId, s.memberName, s.fileName)) return;
       const key = String(s.memberId || s.memberName || '').trim().toLowerCase();
       if (!key || seenKeys.has(key)) return;
       seenKeys.add(key);
@@ -386,14 +416,16 @@ export const Module4Assignments: React.FC<Module4Props> = ({
     });
 
     if (result.length === 0 && task.submittedFileUrl && (task.submittedBy || task.submittedByName)) {
-      addSub({
-        memberId: task.submittedBy || 'member',
-        memberName: task.submittedByName || task.submittedBy || 'สมาชิก',
-        fileUrl: task.submittedFileUrl,
-        fileName: task.submittedFileName || 'ไฟล์งานที่ส่ง',
-        fileSize: task.submittedFileSize || '1.0 MB',
-        submittedAt: task.submittedAt || new Date().toISOString()
-      });
+      if (!StorageService.isSubmissionDeleted(task.id, task.submittedBy, task.submittedByName, task.submittedFileName)) {
+        addSub({
+          memberId: task.submittedBy || 'member',
+          memberName: task.submittedByName || task.submittedBy || 'สมาชิก',
+          fileUrl: task.submittedFileUrl,
+          fileName: task.submittedFileName || 'ไฟล์งานที่ส่ง',
+          fileSize: task.submittedFileSize || '1.0 MB',
+          submittedAt: task.submittedAt || new Date().toISOString()
+        });
+      }
     }
 
     return result;
@@ -828,46 +860,19 @@ export const Module4Assignments: React.FC<Module4Props> = ({
     onShowToast('info', 'ลบไฟล์เดิมแล้ว', 'กรุณาเลือกไฟล์ใหม่ที่ต้องการส่ง');
   };
 
-  const handleDeleteMemberSubmission = (taskId: string, memberId: string) => {
-    const task = tasks.find(t => t.id === taskId);
-    if (!task) return;
-    const mem = members.find(m => m.id === memberId || m.username === memberId);
-    const normMemName = normalizePersonName(mem?.fullName);
-    const updatedSubs = (task.submissions || []).filter(s => 
-      s.memberId !== memberId && 
-      (!mem || (
-        s.memberId !== mem.username &&
-        s.memberName !== mem.fullName &&
-        (!normMemName || normalizePersonName(s.memberName) !== normMemName)
-      ))
-    );
-    const isStillSubmittedByThisMember =
-      task.submittedBy === memberId ||
-      (mem && (task.submittedBy === mem.username || task.submittedByName === mem.fullName));
-
-    const delIso = new Date().toISOString();
-    const nextDeletedMap: Record<string, string> = {
-      ...(task.deletedSubmissionsMap || {}),
-      [memberId]: delIso
-    };
-    if (mem?.username) nextDeletedMap[mem.username] = delIso;
-    if (mem?.fullName) nextDeletedMap[mem.fullName] = delIso;
-
-    const updatedTask: TaskItem = {
-      ...task,
-      submissions: updatedSubs,
-      deletedSubmissionsMap: nextDeletedMap,
-      isCompleted: updatedSubs.length >= totalSchoolMembers,
-      isManualCompleted: false,
-      submittedFileUrl: isStillSubmittedByThisMember ? undefined : task.submittedFileUrl,
-      submittedFileName: isStillSubmittedByThisMember ? undefined : task.submittedFileName,
-      submittedFileSize: isStillSubmittedByThisMember ? undefined : task.submittedFileSize,
-      submittedBy: isStillSubmittedByThisMember ? undefined : task.submittedBy,
-      submittedByName: isStillSubmittedByThisMember ? undefined : task.submittedByName
-    };
-    onSaveTask(updatedTask);
-    setStatusTaskModal(updatedTask);
-    onShowToast('info', 'ลบงานแล้ว', 'ลบงานที่สมาชิกส่งเรียบร้อยแล้ว');
+  const handleDeleteMemberSubmission = (
+    taskId: string,
+    memberId: string,
+    memberName?: string,
+    fileName?: string
+  ) => {
+    const updatedTasks = StorageService.deleteTaskSubmission(taskId, memberId, memberName, fileName);
+    const updatedTask = updatedTasks.find(t => t.id === taskId);
+    if (updatedTask) {
+      onSaveTask(updatedTask);
+      setStatusTaskModal(updatedTask);
+    }
+    onShowToast('info', 'ลบงานแล้ว', 'ลบงานที่สมาชิกส่งเรียบร้อยแล้ว และจะไม่กู้คืนกลับมา');
   };
 
   const handleDownloadFile = async (
@@ -1622,7 +1627,9 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                                 setConfirmDeleteModal({
                                   type: 'submission',
                                   id: liveStatusTask.id,
-                                  memberId: mem.id,
+                                  memberId: submission?.memberId || mem.id,
+                                  memberName: submission?.memberName || mem.fullName,
+                                  fileName: submission?.fileName,
                                   title: `งานที่ส่งของ ${mem.fullName}`
                                 });
                               }}
@@ -1639,7 +1646,7 @@ export const Module4Assignments: React.FC<Module4Props> = ({
 
                   {/* แสดงรายการส่งงานเพิ่มเติมหากมีสมาชิกที่ส่งเข้ามาแต่ไม่ได้อยู่ในรายการ schoolMembers */}
                   {(liveStatusTask.submissions || [])
-                    .filter(s => s && !schoolMembers.some(m => findMemberSubmission(liveStatusTask, m)?.memberId === s.memberId || findMemberSubmission(liveStatusTask, m)?.memberName === s.memberName))
+                    .filter(s => s && !StorageService.isSubmissionDeleted(liveStatusTask.id, s.memberId, s.memberName, s.fileName) && !schoolMembers.some(m => findMemberSubmission(liveStatusTask, m)?.memberId === s.memberId || findMemberSubmission(liveStatusTask, m)?.memberName === s.memberName))
                     .map((sub, extraIdx) => {
                       const effectiveFileUrl = resolveSubmissionDriveUrl(sub, liveStatusTask.submittedFileUrl, liveStatusTask);
                       const extraDlKey = `sub-extra-${liveStatusTask.id}-${sub.memberId || extraIdx}`;
@@ -1704,6 +1711,24 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                                 <span className="hidden sm:inline">Drive</span>
                               </a>
                             )}
+                            {/* Delete submission icon for extra submission */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setConfirmDeleteModal({
+                                  type: 'submission',
+                                  id: liveStatusTask.id,
+                                  memberId: sub.memberId,
+                                  memberName: sub.memberName,
+                                  fileName: sub.fileName,
+                                  title: `งานที่ส่งของ ${sub.memberName || sub.memberId || 'สมาชิก'}`
+                                });
+                              }}
+                              className="p-1.5 bg-white hover:bg-rose-50 text-rose-600 border border-slate-200 rounded-xl transition-colors cursor-pointer shadow-2xs"
+                              title="ลบงานที่ส่ง"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
                           </div>
                         </div>
                       );
@@ -2384,8 +2409,13 @@ export const Module4Assignments: React.FC<Module4Props> = ({
               <button
                 type="button"
                 onClick={() => {
-                  if (confirmDeleteModal.type === 'submission' && confirmDeleteModal.memberId) {
-                    handleDeleteMemberSubmission(confirmDeleteModal.id, confirmDeleteModal.memberId);
+                  if (confirmDeleteModal.type === 'submission' && (confirmDeleteModal.memberId || confirmDeleteModal.memberName)) {
+                    handleDeleteMemberSubmission(
+                      confirmDeleteModal.id,
+                      confirmDeleteModal.memberId || '',
+                      confirmDeleteModal.memberName,
+                      confirmDeleteModal.fileName
+                    );
                   } else {
                     onDeleteTask(confirmDeleteModal.id);
                     if (selectedTaskDetailModal?.id === confirmDeleteModal.id) {

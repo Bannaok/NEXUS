@@ -321,10 +321,26 @@ function deleteServerHostedFile(fileId: string): boolean {
 // Server-side Tombstones & Recent Mutation Protection
 const deletedDocIdsServer = new Set<string>();
 const deletedTaskIdsServer = new Set<string>();
+const deletedSubmissionKeysServer = new Set<string>();
 const deletedLeaveIdsServer = new Set<string>();
 const deletedDutyLogIdsServer = new Set<string>();
 const deletedSubjectIdsServer = new Set<string>();
 const recentServerMutationTs = new Map<string, number>();
+
+function makeSubTombstoneKeyServer(taskId: string, identifier?: string): string {
+  if (!taskId || !identifier) return '';
+  return `${taskId.trim()}__${String(identifier).trim().toLowerCase().replace(/\s+/g, '')}`;
+}
+
+function isSubmissionKeyDeletedServer(taskId: string, ...identifiers: (string | undefined)[]): boolean {
+  if (!taskId) return false;
+  for (const id of identifiers) {
+    if (!id) continue;
+    const k = makeSubTombstoneKeyServer(taskId, id);
+    if (k && deletedSubmissionKeysServer.has(k)) return true;
+  }
+  return false;
+}
 
 function isSubjectKeyName(key: string): boolean {
   return key === 'ams_subjects' || key.startsWith('ams_subjects__');
@@ -524,6 +540,11 @@ if (fs.existsSync(STORE_FILE)) {
           if (id) deletedTaskIdsServer.add(String(id));
         }
       }
+      if (Array.isArray(state.store['ams_deleted_submission_keys'])) {
+        for (const k of state.store['ams_deleted_submission_keys']) {
+          if (k) deletedSubmissionKeysServer.add(String(k));
+        }
+      }
       if (Array.isArray(state.store['ams_deleted_leave_ids'])) {
         for (const id of state.store['ams_deleted_leave_ids']) {
           if (id) deletedLeaveIdsServer.add(String(id));
@@ -701,6 +722,10 @@ async function syncWithFirestoreServer(seedMissingLocalToFirestore = false): Pro
         for (const id of item.value) {
           if (id) deletedTaskIdsServer.add(String(id));
         }
+      } else if (item.key === 'ams_deleted_submission_keys' && Array.isArray(item.value)) {
+        for (const k of item.value) {
+          if (k) deletedSubmissionKeysServer.add(String(k));
+        }
       } else if (item.key === 'ams_deleted_leave_ids' && Array.isArray(item.value)) {
         for (const id of item.value) {
           if (id) deletedLeaveIdsServer.add(String(id));
@@ -829,6 +854,10 @@ function startServerFirestoreListener() {
             } else if (resolved.key === 'ams_deleted_task_ids' && Array.isArray(resolved.value)) {
               for (const id of resolved.value) {
                 if (id) deletedTaskIdsServer.add(String(id));
+              }
+            } else if (resolved.key === 'ams_deleted_submission_keys' && Array.isArray(resolved.value)) {
+              for (const k of resolved.value) {
+                if (k) deletedSubmissionKeysServer.add(String(k));
               }
             } else if (resolved.key === 'ams_deleted_leave_ids' && Array.isArray(resolved.value)) {
               for (const id of resolved.value) {
@@ -1183,10 +1212,14 @@ function mergeSingleTaskSubmissionsServer(existingTask: any, incomingTask: any):
 
   const mergedSubsMap = new Map<string, any>();
 
+  const targetTaskId = String(incomingTask?.id || existingTask?.id || '').trim();
   const considerSub = (sub: any) => {
     if (!sub || typeof sub !== 'object') return;
     const key = normalizeSubKeyServer(sub);
     if (!key) return;
+    if (isSubmissionKeyDeletedServer(targetTaskId, sub.memberId, sub.memberName, sub.fileName, key)) {
+      return;
+    }
     const subTime = String(sub.submittedAt || '');
     const delById = sub.memberId ? deletedMap[String(sub.memberId).trim().toLowerCase()] : undefined;
     const delByName = sub.memberName ? deletedMap[String(sub.memberName).trim().toLowerCase()] : undefined;
@@ -1230,10 +1263,29 @@ function mergeSingleTaskSubmissionsServer(existingTask: any, incomingTask: any):
   incSubs.forEach(considerSub);
 
   const mergedSubmissions = Array.from(mergedSubsMap.values());
+  let finalSubUrl = incomingTask.submittedFileUrl || existingTask.submittedFileUrl;
+  let finalSubBy = incomingTask.submittedBy || existingTask.submittedBy;
+  let finalSubByName = incomingTask.submittedByName || existingTask.submittedByName;
+  let finalSubFileName = incomingTask.submittedFileName || existingTask.submittedFileName;
+
+  if (
+    (finalSubBy && isSubmissionKeyDeletedServer(targetTaskId, finalSubBy, finalSubByName, finalSubFileName)) ||
+    (finalSubFileName && isSubmissionKeyDeletedServer(targetTaskId, finalSubFileName))
+  ) {
+    finalSubUrl = undefined;
+    finalSubBy = undefined;
+    finalSubByName = undefined;
+    finalSubFileName = undefined;
+  }
+
   const result: any = {
     ...existingTask,
     ...incomingTask,
-    submissions: mergedSubmissions
+    submissions: mergedSubmissions,
+    submittedFileUrl: finalSubUrl,
+    submittedBy: finalSubBy,
+    submittedByName: finalSubByName,
+    submittedFileName: finalSubFileName
   };
   if (Object.keys(deletedMap).length > 0) {
     result.deletedSubmissionsMap = deletedMap;
@@ -1940,16 +1992,19 @@ async function healMissingTaskSubmissionUrlsServer(): Promise<void> {
         if (!t || !Array.isArray(t.submissions)) return t;
         let taskChanged = false;
         let recoveredMainUrl = t.submittedFileUrl;
-        const nextSubs = t.submissions.map((s: any) => {
-          if (!s || !s.fileName) return s;
-          if (s.fileUrl && String(s.fileUrl).startsWith('http')) return s;
-          const targetName = String(s.fileName).trim().toLowerCase();
+        const nextSubs = t.submissions
+          .filter((s: any) => s && !isSubmissionKeyDeletedServer(t.id, s.memberId, s.memberName, s.fileName))
+          .map((s: any) => {
+            if (!s || !s.fileName) return s;
+            if (s.fileUrl && String(s.fileUrl).startsWith('http')) return s;
+            const targetName = String(s.fileName).trim().toLowerCase();
 
-          // 1. Check TaskSubmissions sheet by taskId + memberId or fileName
-          for (let i = (subRows || []).length - 1; i >= 0; i--) {
-            const sr = subRows[i];
-            if (!sr) continue;
-            const matchTaskMember =
+            // 1. Check TaskSubmissions sheet by taskId + memberId or fileName
+            for (let i = (subRows || []).length - 1; i >= 0; i--) {
+              const sr = subRows[i];
+              if (!sr) continue;
+              if (isSubmissionKeyDeletedServer(t.id, sr.memberId, sr.memberName, sr.fileName)) continue;
+              const matchTaskMember =
               String(sr.taskId || '') === String(t.id || '') &&
               (String(sr.memberId || '') === String(s.memberId || '') ||
                 String(sr.memberName || '').trim() === String(s.memberName || '').trim());
@@ -1998,7 +2053,15 @@ async function healMissingTaskSubmissionUrlsServer(): Promise<void> {
           return s;
         });
 
-        if (!taskChanged) return t;
+        if (
+          (recoveredMainUrl && t.submittedBy && isSubmissionKeyDeletedServer(t.id, t.submittedBy, t.submittedByName, t.submittedFileName)) ||
+          (t.submittedFileName && isSubmissionKeyDeletedServer(t.id, t.submittedFileName))
+        ) {
+          recoveredMainUrl = undefined;
+          taskChanged = true;
+        }
+
+        if (!taskChanged && nextSubs.length === t.submissions.length) return t;
         return {
           ...t,
           submissions: nextSubs,
@@ -2478,7 +2541,7 @@ async function startServer() {
   // Direct file delete endpoint: cleans up local cache and deletes file from Google Drive
   app.post('/api/files/delete', async (req, res) => {
     try {
-      const { fileId, fileUrl, driveFileId, schoolId, documentId } = req.body || {};
+      const { fileId, fileUrl, driveFileId, schoolId, documentId, taskId, memberId, fileName } = req.body || {};
       const safeDocId = documentId ? String(documentId).trim() : '';
       if (safeDocId) {
         deletedDocIdsServer.add(safeDocId);
@@ -2498,6 +2561,17 @@ async function startServer() {
       if (fileUrl && typeof fileUrl === 'string' && fileUrl.startsWith('/api/files/')) {
         const fId = fileUrl.replace('/api/files/', '').split('?')[0];
         deleteServerHostedFile(fId);
+      }
+      if (taskId && memberId) {
+        const tClean = String(taskId).replace(/[^a-zA-Z0-9_-]/g, '_');
+        const mClean = String(memberId).replace(/[^a-zA-Z0-9_-]/g, '_');
+        deleteServerHostedFile(`sub_${tClean}_${mClean}`);
+      }
+      if (fileName) {
+        const match = findServerHostedFileByMatch({ fileName, taskId, memberId });
+        if (match?.id) {
+          deleteServerHostedFile(match.id);
+        }
       }
 
       // 2. Trash file from Google Drive via Google Apps Script
@@ -2644,6 +2718,40 @@ async function startServer() {
             for (const k of Object.keys(state.store)) {
               if (isTaskKeyName(k) && Array.isArray(state.store[k])) {
                 state.store[k] = state.store[k].filter((t: any) => t && t.id && !deletedTaskIdsServer.has(String(t.id)));
+              }
+            }
+          } else if (key === 'ams_deleted_submission_keys' && Array.isArray(value)) {
+            for (const k of value) {
+              if (k) deletedSubmissionKeysServer.add(String(k));
+            }
+            // Purge deleted submissions from all loaded task stores immediately
+            for (const tk of Object.keys(state.store)) {
+              if (isTaskKeyName(tk) && Array.isArray(state.store[tk])) {
+                state.store[tk] = state.store[tk].map((t: any) => {
+                  if (!t || !Array.isArray(t.submissions)) return t;
+                  const filtered = t.submissions.filter((s: any) => !isSubmissionKeyDeletedServer(t.id, s?.memberId, s?.memberName, s?.fileName));
+                  let subUrl = t.submittedFileUrl;
+                  let subBy = t.submittedBy;
+                  let subByName = t.submittedByName;
+                  let subFileName = t.submittedFileName;
+                  if (
+                    (subBy && isSubmissionKeyDeletedServer(t.id, subBy, subByName, subFileName)) ||
+                    (subFileName && isSubmissionKeyDeletedServer(t.id, subFileName))
+                  ) {
+                    subUrl = undefined;
+                    subBy = undefined;
+                    subByName = undefined;
+                    subFileName = undefined;
+                  }
+                  return {
+                    ...t,
+                    submissions: filtered,
+                    submittedFileUrl: subUrl,
+                    submittedBy: subBy,
+                    submittedByName: subByName,
+                    submittedFileName: subFileName
+                  };
+                });
               }
             }
           } else if (key === 'ams_deleted_leave_ids' && Array.isArray(value)) {
