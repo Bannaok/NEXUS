@@ -1148,11 +1148,11 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
     });
 
     // 2. Date & Location (Right Indented)
-    const writeAtY = mm(34);
+    const writeAtY = mm(36.5);
     const writeLblW = drawText('เขียนที่', mm(110), writeAtY);
     drawDottedField(mm(110) + writeLblW + mm(1.5), rightMargin, writeAtY, d.formattedSchoolName, 'center');
 
-    const dateRowY = mm(41.5);
+    const dateRowY = mm(43.5);
     let curX = mm(92);
     curX += drawText('วันที่', curX, dateRowY) + mm(1.2);
     drawDottedField(curX, curX + mm(13), dateRowY, d.createdDate.day, 'center');
@@ -1164,7 +1164,7 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
     drawDottedField(curX, rightMargin, dateRowY, d.createdDate.year, 'center');
 
     // 3. Subject & Recipient
-    const subjY = mm(50.5);
+    const subjY = mm(53.5);
     drawText('เรื่อง', leftMargin, subjY, { weight: 700 });
     const subjectStr = d.isPersonal
       ? 'ขอลากิจส่วนตัว'
@@ -1175,12 +1175,12 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
       : `ขอ${targetLeave.leaveType}`;
     drawDottedField(mm(29), rightMargin, subjY, subjectStr, 'left');
 
-    const toY = mm(58);
+    const toY = mm(61);
     drawText('เรียน', leftMargin, toY, { weight: 700 });
     drawDottedField(mm(29), rightMargin, toY, d.directorPositionTitle, 'left');
 
     // 4. Applicant Info
-    const appY = mm(66.5);
+    const appY = mm(69.5);
     let ax = mm(27); // 12mm paragraph indent
     ax += drawText('ข้าพเจ้า', ax, appY) + mm(1.5);
     drawDottedField(ax, mm(117), appY, d.applicantFullName, 'center');
@@ -1188,7 +1188,7 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
     ax += drawText('ตำแหน่ง', ax, appY) + mm(1.5);
     drawDottedField(ax, rightMargin, appY, d.teacherPosition, 'center');
 
-    const affY = mm(74);
+    const affY = mm(77);
     const affLblW = drawText('สังกัด', leftMargin, affY);
     drawDottedField(
       leftMargin + affLblW + mm(1.8),
@@ -1200,16 +1200,16 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
 
     // 5. Leave Checkboxes & Reasons
     const chkX = mm(26);
-    const chk1Y = mm(82.5);
+    const chk1Y = mm(85.5);
     drawText('ขอลา', leftMargin, chk1Y);
     const c1W = drawCheckOption(chkX, chk1Y, d.isSick, 'ป่วย เนื่องจาก');
     drawDottedField(chkX + c1W + mm(2), rightMargin, chk1Y, d.isSick ? targetLeave.reason : '', 'left');
 
-    const chk2Y = mm(90);
+    const chk2Y = mm(93);
     const c2W = drawCheckOption(chkX, chk2Y, d.isPersonal, 'กิจส่วนตัว เนื่องจาก');
     drawDottedField(chkX + c2W + mm(2), rightMargin, chk2Y, d.isPersonal ? targetLeave.reason : '', 'left');
 
-    const chk3Y = mm(97.5);
+    const chk3Y = mm(100.5);
     const c3W = drawCheckOption(
       chkX,
       chk3Y,
@@ -1218,7 +1218,7 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
     );
     drawDottedField(chkX + c3W + mm(2), rightMargin, chk3Y, d.isMaternity ? targetLeave.reason : '', 'left');
 
-    let nextY = mm(105.5);
+    let nextY = mm(108.5);
     if (d.isOther) {
       const cOtherW = drawCheckOption(chkX, nextY, true, `${targetLeave.leaveType} เนื่องจาก`);
       drawDottedField(chkX + cOtherW + mm(2), rightMargin, nextY, targetLeave.reason || '', 'left');
@@ -7645,12 +7645,12 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                       {/* Top Portion: Official Leave Letter Body */}
                       <div>
                         {/* Form Title */}
-                        <h1 className="text-center font-bold text-[19.5pt] text-black tracking-normal mb-3">
+                        <h1 className="text-center font-bold text-[19.5pt] text-black tracking-normal" style={{ marginBottom: '0.5cm' }}>
                           แบบใบลาป่วย ลาคลอดบุตร ลากิจส่วนตัว
                         </h1>
 
                         {/* Date & Location (Right indented) */}
-                        <div className="mb-3 flex flex-col items-end pr-2 font-normal text-[15.5pt]">
+                        <div className="flex flex-col items-end pr-2 font-normal text-[15.5pt]" style={{ marginBottom: '1cm' }}>
                           <div className="flex items-baseline gap-1 w-[320px]">
                             <span className="shrink-0">เขียนที่</span>
                             <span className="inline-block border-b-[1.5px] border-dotted border-black flex-1 text-center font-normal px-2 pb-0 leading-none">
@@ -8576,7 +8576,7 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
               </div>
 
               {/* Signatures Section */}
-              <div className="grid grid-cols-2 gap-8 mt-auto pt-5 pb-3 text-center text-[12px] text-black font-normal" style={{ fontWeight: 400, color: '#000000' }}>
+              <div className="grid grid-cols-2 gap-8 mt-auto pt-4 pb-0 text-center text-[12px] text-black font-normal" style={{ fontWeight: 400, color: '#000000', marginBottom: 0 }}>
                 <div className="space-y-1 text-black font-normal" style={{ lineHeight: 1.35 }}>
                   <p className="font-normal text-black m-0">ลงชื่อ ...........................................................</p>
                   <p className="font-normal text-black m-0">( {formatDutySignatureName(log.dutyTeacherName)} )</p>
@@ -8624,7 +8624,7 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                       width: 100vw !important;
                       height: auto !important;
                       margin: 0 !important;
-                      padding: 10mm 12mm !important;
+                      padding: 10mm 12mm 20mm 12mm !important;
                       border: none !important;
                       box-shadow: none !important;
                       background: white !important;
@@ -8686,7 +8686,7 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                         width: '210mm',
                         minWidth: '210mm',
                         minHeight: '297mm',
-                        padding: '10mm 12mm',
+                        padding: '10mm 12mm 20mm 12mm',
                         boxSizing: 'border-box',
                         backgroundColor: '#ffffff',
                         color: '#000000',
@@ -8740,7 +8740,7 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                       min-height: 297mm !important;
                       height: auto !important;
                       margin: 0 auto !important;
-                      padding: 10mm 12mm !important;
+                      padding: 10mm 12mm 20mm 12mm !important;
                       page-break-after: always !important;
                       break-after: page !important;
                       box-shadow: none !important;
@@ -8812,7 +8812,7 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                             width: '210mm',
                             minWidth: '210mm',
                             minHeight: '297mm',
-                            padding: '10mm 12mm',
+                            padding: '10mm 12mm 20mm 12mm',
                             boxSizing: 'border-box',
                             backgroundColor: '#ffffff',
                             color: '#000000',

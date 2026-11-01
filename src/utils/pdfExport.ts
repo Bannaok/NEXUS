@@ -217,13 +217,16 @@ const buildSanitizedDocumentCss = (): string => {
     }
     .duty-a4-sheet {
       box-sizing: border-box !important;
-      padding: 10mm 12mm !important;
+      padding: 10mm 12mm 20mm 12mm !important;
       background-color: #ffffff !important;
       color: #000000 !important;
       font-weight: 400 !important;
       font-family: 'Sarabun', 'TH Sarabun New', system-ui, -apple-system, sans-serif !important;
       font-variant-numeric: tabular-nums !important;
       font-feature-settings: "tnum" 1, "zero" 0 !important;
+      display: flex !important;
+      flex-direction: column !important;
+      justify-content: space-between !important;
     }
     .duty-a4-sheet * {
       color: #000000 !important;
@@ -484,10 +487,13 @@ export const exportSheetsToPdf = async ({
         clonedSheet.style.boxSizing = 'border-box';
         clonedSheet.style.margin = '0';
         if (isDutySheet) {
-          clonedSheet.style.padding = '10mm 12mm';
+          clonedSheet.style.padding = '10mm 12mm 20mm 12mm';
           clonedSheet.style.backgroundColor = '#ffffff';
           clonedSheet.style.color = '#000000';
           clonedSheet.style.fontWeight = '400';
+          clonedSheet.style.display = 'flex';
+          clonedSheet.style.flexDirection = 'column';
+          clonedSheet.style.justifyContent = 'space-between';
         } else {
           clonedSheet.style.paddingLeft = '20mm';
           clonedSheet.style.paddingRight = '10mm';
@@ -498,7 +504,9 @@ export const exportSheetsToPdf = async ({
         clonedSheet.style.width = `${standardA4WidthPx}px`;
         clonedSheet.style.maxWidth = `${standardA4WidthPx}px`;
         clonedSheet.style.minWidth = `${standardA4WidthPx}px`;
+        clonedSheet.style.height = `${standardA4HeightPx}px`;
         clonedSheet.style.minHeight = `${standardA4HeightPx}px`;
+        clonedSheet.style.maxHeight = `${standardA4HeightPx}px`;
 
         // 4. Remove any remaining page-limit lines or no-print elements inside clonedSheet
         const ignored = Array.from(

@@ -1360,7 +1360,13 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
                                     type="button"
                                     onClick={() => setSessionToDelete(sess)}
                                     className="p-2.5 rounded-xl bg-rose-50 hover:bg-rose-600 text-rose-600 hover:text-white border border-rose-200 transition-all cursor-pointer shadow-2xs"
-                                    title={gradeFilter === 'ALL' ? 'ลบรายการนี้' : `ลบข้อมูลชั้น ${gradeFilter} หรือลบรายการนี้`}
+                                    title={
+                                      user.role === 'member'
+                                        ? `ลบข้อมูลเฉพาะชั้น ${user.assignedGrade || gradeFilter}`
+                                        : gradeFilter === 'ALL'
+                                          ? 'ลบรายการนี้'
+                                          : `ลบข้อมูลชั้น ${gradeFilter} หรือลบรายการนี้`
+                                    }
                                   >
                                     <Trash2 className="w-4 h-4" />
                                   </button>
@@ -1447,7 +1453,11 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
                             className="w-full py-3 px-4 rounded-2xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs flex items-center justify-center gap-2 border border-rose-200 transition-all active:scale-95 cursor-pointer"
                           >
                             <Trash2 className="w-4 h-4 text-rose-600" />
-                            <span>ลบรายการนี้</span>
+                            <span>
+                              {user.role === 'member'
+                                ? `ลบข้อมูลเฉพาะชั้น ${user.assignedGrade || gradeFilter}`
+                                : 'ลบรายการนี้'}
+                            </span>
                           </button>
                         </div>
 
@@ -2249,7 +2259,9 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
       {/* MODAL: DELETE SESSION CONFIRMATION */}
       {sessionToDelete && (() => {
         const sessDate = sessionToDelete.date;
-        const currentTargetGrade = gradeFilter !== 'ALL' ? gradeFilter : null;
+        const isMember = user.role === 'member';
+        const memberGrade = user.assignedGrade || gradeFilter;
+        const currentTargetGrade = isMember ? memberGrade : (gradeFilter !== 'ALL' ? gradeFilter : null);
         const targetStudentsCount = currentTargetGrade 
           ? students.filter(s => (s.gradeLevel || '').trim() === currentTargetGrade).length 
           : students.length;
@@ -2277,72 +2289,112 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
                 </p>
                 <p className="text-[11px] text-rose-800">
                   {currentTargetGrade 
-                    ? `ระดับชั้นที่เลือก: ชั้น ${currentTargetGrade} (${targetStudentsCount} คน)` 
+                    ? `ระดับชั้น: ชั้น ${currentTargetGrade} (${targetStudentsCount} คน)` 
                     : `ระดับชั้นที่เลือก: ทุกระดับชั้น (${students.length} คน)`}
                 </p>
               </div>
 
-              {currentTargetGrade ? (
-                <div className="space-y-3">
-                  <p className="text-xs text-slate-600 leading-relaxed">
-                    คุณกำลังเลือกชั้น <strong>{currentTargetGrade}</strong> กรุณาเลือกว่าต้องการลบข้อมูลเฉพาะชั้นนี้ หรือต้องการลบรายการออกทั้งรายการ:
-                  </p>
-                  <div className="space-y-2">
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteGradeRecords(sessDate, currentTargetGrade)}
-                      className="w-full text-left p-3 rounded-xl border border-amber-200 bg-amber-50/70 hover:bg-amber-100 transition-all cursor-pointer group"
-                    >
-                      <div className="text-xs font-bold text-amber-950 group-hover:text-amber-900 flex items-center justify-between">
-                        <span>1. ลบข้อมูลเฉพาะชั้น {currentTargetGrade}</span>
-                        <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-black">เฉพาะชั้น</span>
-                      </div>
-                      <p className="text-[11px] text-amber-800 mt-1">
-                        ล้างค่าน้ำหนักและส่วนสูงของนักเรียนชั้น {currentTargetGrade} ในวันที่นี้ (ข้อมูลระดับชั้นอื่นยังคงอยู่)
-                      </p>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteSessionConfirm(sessionToDelete.id)}
-                      className="w-full text-left p-3 rounded-xl border border-rose-200 bg-rose-50/70 hover:bg-rose-100 transition-all cursor-pointer group"
-                    >
-                      <div className="text-xs font-bold text-rose-950 group-hover:text-rose-900 flex items-center justify-between">
-                        <span>2. ลบทั้งรายการ (ทุกระดับชั้น)</span>
-                        <span className="text-[10px] bg-rose-200 text-rose-900 px-1.5 py-0.5 rounded font-black">ทั้งรายการ</span>
-                      </div>
-                      <p className="text-[11px] text-rose-800 mt-1">
-                        ลบรายการวันที่ {formatThaiDate(sessDate)} ออกจากระบบทั้งหมด
-                      </p>
-                    </button>
+              {isMember ? (() => {
+                const activeGrade = currentTargetGrade || memberGrade;
+                return (
+                  /* Member UI: Strictly delete only homeroom class, no option to delete all grade levels */
+                  <div className="space-y-3">
+                    <p className="text-xs font-semibold text-slate-700 leading-relaxed">
+                      คุณต้องการลบข้อมูลน้ำหนักและส่วนสูงของนักเรียน <strong className="text-rose-700">ชั้น {activeGrade}</strong> ในรายการวันที่ <strong>{formatThaiDate(sessDate)}</strong> ใช่หรือไม่?
+                    </p>
+                    <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl text-[11px] text-amber-800 font-medium">
+                      ⚠️ การลบนี้จะล้างข้อมูลน้ำหนักและส่วนสูงเฉพาะนักเรียนชั้น {activeGrade} ของคุณเท่านั้น (ข้อมูลระดับชั้นอื่นยังคงเดิม)
+                    </div>
+                    <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                      <button
+                        type="button"
+                        onClick={() => setSessionToDelete(null)}
+                        className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+                      >
+                        ยกเลิก
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteGradeRecords(sessDate, activeGrade)}
+                        className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs cursor-pointer active:scale-95"
+                      >
+                        ยืนยันลบข้อมูลชั้น {activeGrade}
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <div className="space-y-2">
+                );
+              })() : currentTargetGrade ? (() => {
+                const activeGrade = currentTargetGrade;
+                return (
+                  /* Admin UI with specific grade selected */
+                  <div className="space-y-3">
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      คุณกำลังเลือกชั้น <strong>{activeGrade}</strong> กรุณาเลือกว่าต้องการลบข้อมูลเฉพาะชั้นนี้ หรือต้องการลบรายการออกทั้งรายการ:
+                    </p>
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteGradeRecords(sessDate, activeGrade)}
+                        className="w-full text-left p-3 rounded-xl border border-amber-200 bg-amber-50/70 hover:bg-amber-100 transition-all cursor-pointer group"
+                      >
+                        <div className="text-xs font-bold text-amber-950 group-hover:text-amber-900 flex items-center justify-between">
+                          <span>1. ลบข้อมูลเฉพาะชั้น {activeGrade}</span>
+                          <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-black">เฉพาะชั้น</span>
+                        </div>
+                        <p className="text-[11px] text-amber-800 mt-1">
+                          ล้างค่าน้ำหนักและส่วนสูงของนักเรียนชั้น {activeGrade} ในวันที่นี้ (ข้อมูลระดับชั้นอื่นยังคงอยู่)
+                        </p>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteSessionConfirm(sessionToDelete.id)}
+                        className="w-full text-left p-3 rounded-xl border border-rose-200 bg-rose-50/70 hover:bg-rose-100 transition-all cursor-pointer group"
+                      >
+                        <div className="text-xs font-bold text-rose-950 group-hover:text-rose-900 flex items-center justify-between">
+                          <span>2. ลบทั้งรายการ (ทุกระดับชั้น)</span>
+                          <span className="text-[10px] bg-rose-200 text-rose-900 px-1.5 py-0.5 rounded font-black">ทั้งรายการ</span>
+                        </div>
+                        <p className="text-[11px] text-rose-800 mt-1">
+                          ลบรายการวันที่ {formatThaiDate(sessDate)} ออกจากระบบทั้งหมด
+                        </p>
+                      </button>
+                    </div>
+                    <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                      <button
+                        type="button"
+                        onClick={() => setSessionToDelete(null)}
+                        className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+                      >
+                        ยกเลิก
+                      </button>
+                    </div>
+                  </div>
+                );
+              })() : (
+                /* Admin UI with ALL grades selected */
+                <div className="space-y-3">
                   <p className="text-xs text-slate-600 leading-relaxed">
                     คุณต้องการลบรายการบันทึกวันที่ <strong>{formatThaiDate(sessDate)}</strong> ออกจากระบบทั้งหมด (ทุกระดับชั้น) ใช่หรือไม่?
                   </p>
+                  <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                    <button
+                      type="button"
+                      onClick={() => setSessionToDelete(null)}
+                      className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+                    >
+                      ยกเลิก
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteSessionConfirm(sessionToDelete.id)}
+                      className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs cursor-pointer active:scale-95"
+                    >
+                      ยืนยันลบรายการ (ทุกระดับชั้น)
+                    </button>
+                  </div>
                 </div>
               )}
-
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setSessionToDelete(null)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
-                >
-                  ยกเลิก
-                </button>
-                {!currentTargetGrade && (
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteSessionConfirm(sessionToDelete.id)}
-                    className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs cursor-pointer active:scale-95"
-                  >
-                    ยืนยันลบรายการ (ทุกระดับชั้น)
-                  </button>
-                )}
-              </div>
             </div>
           </div>
         );
