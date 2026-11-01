@@ -97,9 +97,6 @@ const getGradeCleanName = (g: GradeLevel | null): string => {
     case 'ม.1': return 'ชั้นมัธยมศึกษาปีที่ 1';
     case 'ม.2': return 'ชั้นมัธยมศึกษาปีที่ 2';
     case 'ม.3': return 'ชั้นมัธยมศึกษาปีที่ 3';
-    case 'ม.4': return 'ชั้นมัธยมศึกษาปีที่ 4';
-    case 'ม.5': return 'ชั้นมัธยมศึกษาปีที่ 5';
-    case 'ม.6': return 'ชั้นมัธยมศึกษาปีที่ 6';
     default: return `ชั้น ${g}`;
   }
 };

@@ -35,7 +35,7 @@ import {
   Check,
   Loader2
 } from 'lucide-react';
-import { calculateThaiNutritionalStatus, get100SchoolDaysForTerm } from './Module1ClassroomAdmin';
+import { calculateThaiNutritionalStatus, get100SchoolDaysForTerm, isMilkTeethRecorded } from './Module1ClassroomAdmin';
 import { exportSheetsToPdf } from '../utils/pdfExport';
 
 export interface PhorPhor6ModalProps {
@@ -121,9 +121,6 @@ const getGradeCleanName = (g: GradeLevel | null): string => {
     case 'ม.1': return 'ชั้นมัธยมศึกษาปีที่ 1';
     case 'ม.2': return 'ชั้นมัธยมศึกษาปีที่ 2';
     case 'ม.3': return 'ชั้นมัธยมศึกษาปีที่ 3';
-    case 'ม.4': return 'ชั้นมัธยมศึกษาปีที่ 4';
-    case 'ม.5': return 'ชั้นมัธยมศึกษาปีที่ 5';
-    case 'ม.6': return 'ชั้นมัธยมศึกษาปีที่ 6';
     default: return `ชั้น ${g}`;
   }
 };
@@ -146,6 +143,7 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
   const [activeTab, setActiveTab] = useState<PhorPhor6Tab>('cover');
   const [isCombinedAcademic, setIsCombinedAcademic] = useState<boolean>(false);
   const [isCombinedAttendance, setIsCombinedAttendance] = useState<boolean>(false);
+  const [isCombinedHealth, setIsCombinedHealth] = useState<boolean>(false);
 
   // หน้าข้อมูลโรงเรียน: Always pull directly from "ข้อมูลโรงเรียน" (StorageService.getSchoolInfo())
   const schoolInfo = useMemo(() => {
@@ -905,91 +903,98 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
       });
 
       const monthKeys = Array.from(monthGroupsMap.keys());
-      const termDateSet = new Set(school100Days.map(d => d.date));
-      const hasAnyRecord = studentAttendance.some(
-        a => termDateSet.has(a.date) || String(a.semester) === String(targetSem)
-      ) || studentAttendance.length > 0;
+      let monthList: { monthTitle: string; schoolDays: number; days: { date: string }[] }[] = [];
 
-      const rows = monthKeys.map((mKey, idx) => {
-        const group = monthGroupsMap.get(mKey)!;
-        const mName = thaiMonthNames[group.monthNum] || '';
-        const monthTitle = `เดือนที่ ${idx + 1} (${mName})`;
-        const monthDays = group.days;
-        const monthSchoolDays = monthDays.length;
+      if (monthKeys.length > 0) {
+        monthList = monthKeys.map((mKey, idx) => {
+          const group = monthGroupsMap.get(mKey)!;
+          const mName = thaiMonthNames[group.monthNum] || '';
+          return {
+            monthTitle: `เดือนที่ ${idx + 1} (${mName})`,
+            schoolDays: group.days.length,
+            days: group.days
+          };
+        });
+      } else {
+        const fallbackNames = targetSem === '2'
+          ? ['พฤศจิกายน', 'ธันวาคม', 'มกราคม', 'กุมภาพันธ์', 'มีนาคม']
+          : ['พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน'];
+        monthList = fallbackNames.map((mName, idx) => ({
+          monthTitle: `เดือนที่ ${idx + 1} (${mName})`,
+          schoolDays: 20,
+          days: []
+        }));
+      }
 
+      let termTotalPresent = 0;
+      let termTotalAbsent = 0;
+      let termTotalLeave = 0;
+      let termTotalSick = 0;
+      let termTotalRecorded = 0;
+
+      const rows = monthList.map((mGroup) => {
         let pCount = 0;
         let aCount = 0;
         let lCount = 0;
         let sCount = 0;
+        let recordedInMonth = 0;
 
-        if (hasAnyRecord) {
-          monthDays.forEach(d => {
-            const status = attendanceMap.get(d.date);
-            if (status === 'present') pCount++;
-            else if (status === 'absent') aCount++;
-            else if (status === 'leave') lCount++;
-            else if (status === 'sick') sCount++;
-            else {
-              pCount++;
-            }
-          });
-        } else {
-          const basePresent = Math.floor(96 / monthKeys.length);
-          const remPresent = 96 % monthKeys.length;
-          pCount = basePresent + (idx < remPresent ? 1 : 0);
-          aCount = idx === 0 ? 1 : 0;
-          lCount = idx === 1 ? 1 : 0;
-          sCount = idx === 2 ? 2 : 0;
-        }
+        mGroup.days.forEach(d => {
+          const status = attendanceMap.get(d.date);
+          if (status === 'present') { pCount++; recordedInMonth++; }
+          else if (status === 'absent') { aCount++; recordedInMonth++; }
+          else if (status === 'leave') { lCount++; recordedInMonth++; }
+          else if (status === 'sick') { sCount++; recordedInMonth++; }
+        });
 
-        const totalRecorded = pCount + aCount + lCount + sCount;
-        const effectiveDays = Math.max(monthSchoolDays, totalRecorded);
-        const pct = effectiveDays > 0 ? ((pCount / effectiveDays) * 100).toFixed(0) + '%' : '100%';
+        termTotalPresent += pCount;
+        termTotalAbsent += aCount;
+        termTotalLeave += lCount;
+        termTotalSick += sCount;
+        termTotalRecorded += recordedInMonth;
+
+        const hasRecord = recordedInMonth > 0;
+        const pct = hasRecord ? ((pCount / recordedInMonth) * 100).toFixed(0) + '%' : '-';
 
         return {
-          month: monthTitle,
-          schoolDays: effectiveDays,
-          present: pCount,
-          absent: aCount,
-          leave: lCount,
-          sick: sCount,
-          percent: pct
+          month: mGroup.monthTitle,
+          schoolDays: mGroup.schoolDays,
+          present: hasRecord ? pCount : '-',
+          absent: hasRecord ? (aCount > 0 ? aCount : '-') : '-',
+          leave: hasRecord ? (lCount > 0 ? lCount : '-') : '-',
+          sick: hasRecord ? (sCount > 0 ? sCount : '-') : '-',
+          percent: pct,
+          rawPresent: pCount,
+          rawAbsent: aCount,
+          rawLeave: lCount,
+          rawSick: sCount,
+          recordedDays: recordedInMonth,
+          hasRecord
         };
       });
 
-      const effectiveRows = rows.length > 0 ? rows : (targetSem === '2' ? [
-        { month: 'เดือนที่ 1 (พฤศจิกายน)', schoolDays: 20, present: 20, absent: 0, leave: 0, sick: 0, percent: '100%' },
-        { month: 'เดือนที่ 2 (ธันวาคม)', schoolDays: 20, present: 20, absent: 0, leave: 0, sick: 0, percent: '100%' },
-        { month: 'เดือนที่ 3 (มกราคม)', schoolDays: 20, present: 19, absent: 0, leave: 1, sick: 0, percent: '95%' },
-        { month: 'เดือนที่ 4 (กุมภาพันธ์)', schoolDays: 20, present: 18, absent: 0, leave: 0, sick: 2, percent: '90%' },
-        { month: 'เดือนที่ 5 (มีนาคม)', schoolDays: 20, present: 19, absent: 1, leave: 0, sick: 0, percent: '95%' }
-      ] : [
-        { month: 'เดือนที่ 1 (พฤษภาคม)', schoolDays: 20, present: 19, absent: 1, leave: 0, sick: 0, percent: '95%' },
-        { month: 'เดือนที่ 2 (มิถุนายน)', schoolDays: 20, present: 20, absent: 0, leave: 0, sick: 0, percent: '100%' },
-        { month: 'เดือนที่ 3 (กรกฎาคม)', schoolDays: 20, present: 19, absent: 0, leave: 1, sick: 0, percent: '95%' },
-        { month: 'เดือนที่ 4 (สิงหาคม)', schoolDays: 20, present: 18, absent: 0, leave: 0, sick: 2, percent: '90%' },
-        { month: 'เดือนที่ 5 (กันยายน)', schoolDays: 20, present: 20, absent: 0, leave: 0, sick: 0, percent: '100%' }
-      ]);
-
-      const sumSchoolDays = effectiveRows.reduce((acc, r) => acc + r.schoolDays, 0);
-      const sumPresent = effectiveRows.reduce((acc, r) => acc + r.present, 0);
-      const sumAbsent = effectiveRows.reduce((acc, r) => acc + r.absent, 0);
-      const sumLeave = effectiveRows.reduce((acc, r) => acc + r.leave, 0);
-      const sumSick = effectiveRows.reduce((acc, r) => acc + r.sick, 0);
-      const totalEffectiveSum = sumPresent + sumAbsent + sumLeave + sumSick;
-      const sumPercentNum = totalEffectiveSum > 0 ? (sumPresent / totalEffectiveSum) * 100 : 100;
-      const sumPercent = sumPercentNum.toFixed(1) + '%';
+      const sumSchoolDays = rows.reduce((acc, r) => acc + r.schoolDays, 0);
+      const hasTermRecord = termTotalRecorded > 0;
+      const sumPercentNum = hasTermRecord ? (termTotalPresent / termTotalRecorded) * 100 : 0;
+      const sumPercent = hasTermRecord ? sumPercentNum.toFixed(1) + '%' : '-';
 
       return {
-        rows: effectiveRows,
+        rows,
+        hasRecords: hasTermRecord,
         totals: {
           schoolDays: sumSchoolDays,
-          present: sumPresent,
-          absent: sumAbsent,
-          leave: sumLeave,
-          sick: sumSick,
+          present: hasTermRecord ? termTotalPresent : '-',
+          absent: hasTermRecord ? (termTotalAbsent > 0 ? termTotalAbsent : '-') : '-',
+          leave: hasTermRecord ? (termTotalLeave > 0 ? termTotalLeave : '-') : '-',
+          sick: hasTermRecord ? (termTotalSick > 0 ? termTotalSick : '-') : '-',
           percent: sumPercent,
-          percentNum: sumPercentNum
+          percentNum: sumPercentNum,
+          evaluation: hasTermRecord ? (sumPercentNum >= 80 ? 'ผ่านเกณฑ์' : 'ไม่ผ่านเกณฑ์') : '-',
+          rawPresent: termTotalPresent,
+          rawAbsent: termTotalAbsent,
+          rawLeave: termTotalLeave,
+          rawSick: termTotalSick,
+          rawRecorded: termTotalRecorded
         }
       };
     };
@@ -1006,122 +1011,176 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
     const term2 = computeTermAttendance('2');
 
     const schoolDays = term1.totals.schoolDays + term2.totals.schoolDays;
-    const present = term1.totals.present + term2.totals.present;
-    const absent = term1.totals.absent + term2.totals.absent;
-    const leave = term1.totals.leave + term2.totals.leave;
-    const sick = term1.totals.sick + term2.totals.sick;
-    const totalEffective = present + absent + leave + sick;
-    const percentNum = totalEffective > 0 ? (present / totalEffective) * 100 : 100;
-    const percent = percentNum.toFixed(1) + '%';
+    const grandTotalRecorded = term1.totals.rawRecorded + term2.totals.rawRecorded;
+    const hasGrandRecord = grandTotalRecorded > 0;
+
+    const present = term1.totals.rawPresent + term2.totals.rawPresent;
+    const absent = term1.totals.rawAbsent + term2.totals.rawAbsent;
+    const leave = term1.totals.rawLeave + term2.totals.rawLeave;
+    const sick = term1.totals.rawSick + term2.totals.rawSick;
+    const percentNum = hasGrandRecord ? (present / grandTotalRecorded) * 100 : 0;
+    const percent = hasGrandRecord ? percentNum.toFixed(1) + '%' : '-';
 
     return {
       term1,
       term2,
+      hasRecords: hasGrandRecord,
       grandTotals: {
         schoolDays,
-        present,
-        absent,
-        leave,
-        sick,
+        present: hasGrandRecord ? present : '-',
+        absent: hasGrandRecord ? (absent > 0 ? absent : '-') : '-',
+        leave: hasGrandRecord ? (leave > 0 ? leave : '-') : '-',
+        sick: hasGrandRecord ? (sick > 0 ? sick : '-') : '-',
         percent,
-        percentNum
+        percentNum,
+        evaluation: hasGrandRecord ? (percentNum >= 80 ? 'ผ่านเกณฑ์' : 'ไม่ผ่านเกณฑ์') : '-'
       }
     };
   }, [computeTermAttendance]);
 
-  // Health data (Weight, Height, Toothbrushing, Milk)
-  const healthStats = useMemo(() => {
-    const studentTracking = dailyTracking.filter(d => d.studentId === student.id);
-    
-    // Sort by date desc
-    const sorted = [...studentTracking].sort((a, b) => b.date.localeCompare(a.date));
-    
-    // Find latest record with weight/height
-    const latestWithWeight = sorted.find(d => d.weight > 0 && d.height > 0);
-    const initialWeight = sorted[sorted.length - 1]?.weight || 0;
-    const initialHeight = sorted[sorted.length - 1]?.height || 0;
+  // Health data (Weight, Height, Toothbrushing, Milk) per semester and overall
+  const computeTermHealth = useMemo(() => {
+    const term1Days = new Set(get100SchoolDaysForTerm(academicYear, '1').map(d => d.date));
+    const term2Days = new Set(get100SchoolDaysForTerm(academicYear, '2').map(d => d.date));
 
-    const currentWeight = latestWithWeight ? latestWithWeight.weight : 0;
-    const currentHeight = latestWithWeight ? latestWithWeight.height : 0;
-    
-    const nutri = calculateThaiNutritionalStatus(currentWeight, currentHeight, student);
-
-    // Milk stats
-    let milkFull = 0;
-    let milkNone = 0;
-    let milkAllergic = 0;
-    studentTracking.forEach(d => {
-      if (d.milkStatus === 'ดื่มครบ') milkFull++;
-      else if (d.milkStatus === 'ไม่ได้ดื่ม') milkNone++;
-      else if (d.milkStatus === 'แพ้นม') milkAllergic++;
-    });
-    const milkTotal = milkFull + milkNone + milkAllergic;
-    const milkRate = milkTotal > 0 ? ((milkFull / milkTotal) * 100).toFixed(1) : '100.0';
-
-    // Teeth stats
-    let teethClean = 0;
-    let teethNone = 0;
-    studentTracking.forEach(d => {
-      if (d.toothBrushStatus === 'แปรงฟันแล้ว') teethClean++;
-      else if (d.toothBrushStatus === 'ยังไม่ได้แปรง') teethNone++;
-    });
-    const teethTotal = teethClean + teethNone;
-    const teethRate = teethTotal > 0 ? ((teethClean / teethTotal) * 100).toFixed(1) : '100.0';
-
-    return {
-      weight: currentWeight || (student.age ? student.age * 2.8 + 8 : 25),
-      height: currentHeight || (student.age ? student.age * 5.5 + 85 : 125),
-      bmi: nutri.bmi > 0 ? nutri.bmi : 16.2,
-      bmiStatus: nutri.bmi > 0 ? nutri.status : 'สมส่วน',
-      initialWeight,
-      initialHeight,
-      milkFull: milkTotal > 0 ? milkFull : 98,
-      milkTotal: milkTotal > 0 ? milkTotal : 100,
-      milkRate: milkTotal > 0 ? milkRate : '98.0',
-      teethClean: teethTotal > 0 ? teethClean : 97,
-      teethTotal: teethTotal > 0 ? teethTotal : 100,
-      teethRate: teethTotal > 0 ? teethRate : '97.0'
+    const getDateTerm = (dateStr: string): '1' | '2' => {
+      if (term1Days.has(dateStr)) return '1';
+      if (term2Days.has(dateStr)) return '2';
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+        const m = parseInt(dateStr.split('-')[1], 10);
+        if (m >= 5 && m <= 10) return '1';
+        return '2';
+      }
+      return semester === '2' ? '2' : '1';
     };
-  }, [dailyTracking, student]);
 
-  const weightHeightRecords = useMemo(() => {
-    const studentTracking = dailyTracking.filter(d => d.studentId === student.id && (d.weight > 0 || d.height > 0));
-    const sorted = [...studentTracking].sort((a, b) => a.date.localeCompare(b.date));
-    
     const formatDateOnly = (dStr: string) => {
       if (!dStr) return '-';
       if (/^\d{4}-\d{2}-\d{2}$/.test(dStr)) {
         const [y, m, d] = dStr.split('-');
         const months = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
-        const thaiYear = parseInt(y) + 543;
-        const monthIndex = parseInt(m) - 1;
-        return `${parseInt(d)} ${months[monthIndex] || m} ${thaiYear}`;
+        const thaiYear = parseInt(y, 10) > 2400 ? parseInt(y, 10) : parseInt(y, 10) + 543;
+        const monthIndex = parseInt(m, 10) - 1;
+        return `${parseInt(d, 10)} ${months[monthIndex] || m} ${thaiYear}`;
       }
       return dStr;
     };
 
-    if (sorted.length > 0) {
-      return sorted.map((d, index) => {
-        const w = d.weight > 0 ? d.weight : (student.age ? student.age * 2.8 + 8 : 25);
-        const h = d.height > 0 ? d.height : (student.age ? student.age * 5.5 + 85 : 125);
-        const nutri = calculateThaiNutritionalStatus(w, h, student);
-        return {
-          no: index + 1,
-          date: formatDateOnly(d.date),
-          weight: Number(w).toFixed(1),
-          height: h,
-          bmi: nutri.bmi > 0 ? nutri.bmi : 16.2,
-          bmiStatus: nutri.bmi > 0 ? nutri.status : 'สมส่วน'
-        };
-      });
-    }
+    return (targetSem: '1' | '2') => {
+      const studentTermRecords = dailyTracking.filter(
+        d => d.studentId === student.id && getDateTerm(d.date) === targetSem
+      );
 
-    const defaultYear = parseInt(academicYear) ? (parseInt(academicYear) > 2500 ? parseInt(academicYear) : parseInt(academicYear) + 543) : 2567;
-    return [
-      { no: 1, date: `15 พ.ค. ${defaultYear}`, weight: Number(healthStats.weight).toFixed(1), height: healthStats.height, bmi: healthStats.bmi, bmiStatus: healthStats.bmiStatus },
-      { no: 2, date: `15 พ.ย. ${defaultYear}`, weight: Number(healthStats.weight).toFixed(1), height: healthStats.height, bmi: healthStats.bmi, bmiStatus: healthStats.bmiStatus }
-    ];
-  }, [dailyTracking, student, healthStats, academicYear]);
+      // 1) Weight & Height rows for this semester
+      const weightRecords = studentTermRecords
+        .filter(d => (d.weight || 0) > 0 || (d.height || 0) > 0)
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+      const weightHeightRows = weightRecords.length > 0
+        ? weightRecords.map((d, index) => {
+            const w = d.weight > 0 ? d.weight : 0;
+            const h = d.height > 0 ? d.height : 0;
+            const nutri = calculateThaiNutritionalStatus(w, h, student);
+            return {
+              no: String(index + 1),
+              date: formatDateOnly(d.date),
+              weight: w > 0 ? Number(w).toFixed(1) : '-',
+              height: h > 0 ? String(h) : '-',
+              bmi: w > 0 && h > 0 && nutri.bmi > 0 ? String(nutri.bmi) : '-',
+              bmiStatus: w > 0 && h > 0 && nutri.bmi > 0 ? nutri.status : '-'
+            };
+          })
+        : [
+            {
+              no: '-',
+              date: '-',
+              weight: '-',
+              height: '-',
+              bmi: '-',
+              bmiStatus: '-'
+            }
+          ];
+
+      // 2) & 3) Milk & Toothbrushing explicitly recorded in the ดื่มนม-แปรงฟัน page
+      const milkTeethRecords = studentTermRecords.filter(d => isMilkTeethRecorded(d));
+
+      let milkFull = 0;
+      let milkNone = 0;
+      let milkAllergic = 0;
+      let teethClean = 0;
+      let teethNone = 0;
+
+      milkTeethRecords.forEach(d => {
+        if (d.milkStatus === 'ดื่มครบ') milkFull++;
+        else if (d.milkStatus === 'ไม่ได้ดื่ม') milkNone++;
+        else if (d.milkStatus === 'แพ้นม') milkAllergic++;
+
+        if (d.toothBrushStatus === 'แปรงฟันแล้ว') teethClean++;
+        else if (d.toothBrushStatus === 'ยังไม่ได้แปรง') teethNone++;
+      });
+
+      const milkTotal = milkFull + milkNone + milkAllergic;
+      const hasMilkRecorded = milkTotal > 0;
+      const milkRate = hasMilkRecorded ? ((milkFull / milkTotal) * 100).toFixed(1) : '-';
+
+      const teethTotal = teethClean + teethNone;
+      const hasTeethRecorded = teethTotal > 0;
+      const teethRate = hasTeethRecorded ? ((teethClean / teethTotal) * 100).toFixed(1) : '-';
+
+      return {
+        weightHeightRows,
+        hasWeightRecorded: weightRecords.length > 0,
+        hasMilkRecorded,
+        hasTeethRecorded,
+        hasMilkTeethRecorded: hasMilkRecorded || hasTeethRecorded,
+        milkFull: hasMilkRecorded ? String(milkFull) : '-',
+        milkTotal: hasMilkRecorded ? String(milkTotal) : '-',
+        milkRate: hasMilkRecorded ? `${milkRate}%` : '-',
+        teethClean: hasTeethRecorded ? String(teethClean) : '-',
+        teethTotal: hasTeethRecorded ? String(teethTotal) : '-',
+        teethRate: hasTeethRecorded ? `${teethRate}%` : '-',
+        rawMilkFull: milkFull,
+        rawMilkTotal: milkTotal,
+        rawTeethClean: teethClean,
+        rawTeethTotal: teethTotal
+      };
+    };
+  }, [dailyTracking, student, academicYear, semester]);
+
+  const currentTermHealth = useMemo(() => {
+    return computeTermHealth(semester === '2' ? '2' : '1');
+  }, [computeTermHealth, semester]);
+
+  const combinedHealth = useMemo(() => {
+    const term1 = computeTermHealth('1');
+    const term2 = computeTermHealth('2');
+    const hasMilkTeethRecorded = term1.hasMilkTeethRecorded || term2.hasMilkTeethRecorded;
+    const hasMilkRecorded = term1.hasMilkRecorded || term2.hasMilkRecorded;
+    const hasTeethRecorded = term1.hasTeethRecorded || term2.hasTeethRecorded;
+    return {
+      term1,
+      term2,
+      hasMilkTeethRecorded,
+      hasMilkRecorded,
+      hasTeethRecorded
+    };
+  }, [computeTermHealth]);
+
+  const healthStats = useMemo(() => {
+    const studentTracking = dailyTracking.filter(d => d.studentId === student.id);
+    const sorted = [...studentTracking].sort((a, b) => b.date.localeCompare(a.date));
+    const latestWithWeight = sorted.find(d => d.weight > 0 && d.height > 0);
+    const currentWeight = latestWithWeight ? latestWithWeight.weight : 0;
+    const currentHeight = latestWithWeight ? latestWithWeight.height : 0;
+    const nutri = calculateThaiNutritionalStatus(currentWeight, currentHeight, student);
+
+    return {
+      weight: currentWeight || 0,
+      height: currentHeight || 0,
+      bmi: nutri.bmi > 0 ? nutri.bmi : 0,
+      bmiStatus: nutri.bmi > 0 ? nutri.status : '-'
+    };
+  }, [dailyTracking, student]);
 
   const parseThaiBirthDate = (bDateStr?: string) => {
     if (!bDateStr) return { day: '', month: '', year: '' };
@@ -1405,8 +1464,8 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
             <span>ความคิดเห็น</span>
           </button>
 
-          {/* ปุ่ม "รวมภาคเรียน" สำหรับหน้าวัดผล และ หน้าเวลาเรียน */}
-          {(activeTab === 'academic' || activeTab === 'attendance' || activeTab === 'all') && (
+          {/* ปุ่ม "รวมภาคเรียน" สำหรับหน้าวัดผล, หน้าเวลาเรียน และหน้าสุขภาพ */}
+          {(activeTab === 'academic' || activeTab === 'attendance' || activeTab === 'health' || activeTab === 'all') && (
             <button
               type="button"
               onClick={() => {
@@ -1414,16 +1473,20 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
                   setIsCombinedAcademic(prev => !prev);
                 } else if (activeTab === 'attendance') {
                   setIsCombinedAttendance(prev => !prev);
+                } else if (activeTab === 'health') {
+                  setIsCombinedHealth(prev => !prev);
                 } else {
-                  const next = !(isCombinedAcademic && isCombinedAttendance);
+                  const next = !(isCombinedAcademic && isCombinedAttendance && isCombinedHealth);
                   setIsCombinedAcademic(next);
                   setIsCombinedAttendance(next);
+                  setIsCombinedHealth(next);
                 }
               }}
               className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
                 (activeTab === 'academic' && isCombinedAcademic) ||
                 (activeTab === 'attendance' && isCombinedAttendance) ||
-                (activeTab === 'all' && isCombinedAcademic && isCombinedAttendance)
+                (activeTab === 'health' && isCombinedHealth) ||
+                (activeTab === 'all' && isCombinedAcademic && isCombinedAttendance && isCombinedHealth)
                   ? 'bg-emerald-600 text-white shadow-xs ring-2 ring-emerald-300'
                   : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-300'
               }`}
@@ -2442,9 +2505,9 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
                               <td className="py-2 px-3 text-left font-medium border-r border-b border-slate-800 text-black">{r.month}</td>
                               <td className="py-2 px-2 font-mono border-r border-b border-slate-800 text-black">{r.schoolDays}</td>
                               <td className="py-2 px-2 font-mono font-bold text-black border-r border-b border-slate-800">{r.present}</td>
-                              <td className="py-2 px-2 font-mono text-black border-r border-b border-slate-800">{r.absent > 0 ? r.absent : '-'}</td>
-                              <td className="py-2 px-2 font-mono text-black border-r border-b border-slate-800">{r.leave > 0 ? r.leave : '-'}</td>
-                              <td className="py-2 px-2 font-mono text-black border-r border-b border-slate-800">{r.sick > 0 ? r.sick : '-'}</td>
+                              <td className="py-2 px-2 font-mono text-black border-r border-b border-slate-800">{r.absent}</td>
+                              <td className="py-2 px-2 font-mono text-black border-r border-b border-slate-800">{r.leave}</td>
+                              <td className="py-2 px-2 font-mono text-black border-r border-b border-slate-800">{r.sick}</td>
                               <td className="py-2 px-2 font-mono font-bold text-black border-b border-slate-800">{r.percent}</td>
                             </tr>
                           ))}
@@ -2452,9 +2515,9 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
                             <td className="py-2 px-3 text-center border-r border-slate-800 text-black">รวมตลอดภาคเรียน</td>
                             <td className="py-2 px-2 font-mono border-r border-slate-800 text-black">{attendanceMonthlyRecords.totals.schoolDays}</td>
                             <td className="py-2 px-2 font-mono text-black border-r border-slate-800">{attendanceMonthlyRecords.totals.present}</td>
-                            <td className="py-2 px-2 font-mono text-black border-r border-slate-800">{attendanceMonthlyRecords.totals.absent > 0 ? attendanceMonthlyRecords.totals.absent : '-'}</td>
-                            <td className="py-2 px-2 font-mono text-black border-r border-slate-800">{attendanceMonthlyRecords.totals.leave > 0 ? attendanceMonthlyRecords.totals.leave : '-'}</td>
-                            <td className="py-2 px-2 font-mono text-black border-r border-slate-800">{attendanceMonthlyRecords.totals.sick > 0 ? attendanceMonthlyRecords.totals.sick : '-'}</td>
+                            <td className="py-2 px-2 font-mono text-black border-r border-slate-800">{attendanceMonthlyRecords.totals.absent}</td>
+                            <td className="py-2 px-2 font-mono text-black border-r border-slate-800">{attendanceMonthlyRecords.totals.leave}</td>
+                            <td className="py-2 px-2 font-mono text-black border-r border-slate-800">{attendanceMonthlyRecords.totals.sick}</td>
                             <td className="py-2 px-2 font-mono font-black text-black">{attendanceMonthlyRecords.totals.percent}</td>
                           </tr>
                         </tbody>
@@ -2487,9 +2550,9 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
                                   <td className="py-1 px-3 text-left font-medium border-r border-b border-slate-800 text-black">{r.month}</td>
                                   <td className="py-1 px-2 font-mono border-r border-b border-slate-800 text-black">{r.schoolDays}</td>
                                   <td className="py-1 px-2 font-mono font-bold text-black border-r border-b border-slate-800">{r.present}</td>
-                                  <td className="py-1 px-2 font-mono text-black border-r border-b border-slate-800">{r.absent > 0 ? r.absent : '-'}</td>
-                                  <td className="py-1 px-2 font-mono text-black border-r border-b border-slate-800">{r.leave > 0 ? r.leave : '-'}</td>
-                                  <td className="py-1 px-2 font-mono text-black border-r border-b border-slate-800">{r.sick > 0 ? r.sick : '-'}</td>
+                                  <td className="py-1 px-2 font-mono text-black border-r border-b border-slate-800">{r.absent}</td>
+                                  <td className="py-1 px-2 font-mono text-black border-r border-b border-slate-800">{r.leave}</td>
+                                  <td className="py-1 px-2 font-mono text-black border-r border-b border-slate-800">{r.sick}</td>
                                   <td className="py-1 px-2 font-mono font-bold text-black border-b border-slate-800">{r.percent}</td>
                                 </tr>
                               ))}
@@ -2497,9 +2560,9 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
                                 <td className="py-1.5 px-3 text-center border-r border-slate-800 text-black">รวมภาคเรียนที่ 1</td>
                                 <td className="py-1.5 px-2 font-mono border-r border-slate-800 text-black">{combinedAttendanceRecords.term1.totals.schoolDays}</td>
                                 <td className="py-1.5 px-2 font-mono text-black border-r border-slate-800">{combinedAttendanceRecords.term1.totals.present}</td>
-                                <td className="py-1.5 px-2 font-mono text-black border-r border-slate-800">{combinedAttendanceRecords.term1.totals.absent > 0 ? combinedAttendanceRecords.term1.totals.absent : '-'}</td>
-                                <td className="py-1.5 px-2 font-mono text-black border-r border-slate-800">{combinedAttendanceRecords.term1.totals.leave > 0 ? combinedAttendanceRecords.term1.totals.leave : '-'}</td>
-                                <td className="py-1.5 px-2 font-mono text-black border-r border-slate-800">{combinedAttendanceRecords.term1.totals.sick > 0 ? combinedAttendanceRecords.term1.totals.sick : '-'}</td>
+                                <td className="py-1.5 px-2 font-mono text-black border-r border-slate-800">{combinedAttendanceRecords.term1.totals.absent}</td>
+                                <td className="py-1.5 px-2 font-mono text-black border-r border-slate-800">{combinedAttendanceRecords.term1.totals.leave}</td>
+                                <td className="py-1.5 px-2 font-mono text-black border-r border-slate-800">{combinedAttendanceRecords.term1.totals.sick}</td>
                                 <td className="py-1.5 px-2 font-mono font-bold text-black">{combinedAttendanceRecords.term1.totals.percent}</td>
                               </tr>
                             </tbody>
@@ -2531,9 +2594,9 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
                                   <td className="py-1 px-3 text-left font-medium border-r border-b border-slate-800 text-black">{r.month}</td>
                                   <td className="py-1 px-2 font-mono border-r border-b border-slate-800 text-black">{r.schoolDays}</td>
                                   <td className="py-1 px-2 font-mono font-bold text-black border-r border-b border-slate-800">{r.present}</td>
-                                  <td className="py-1 px-2 font-mono text-black border-r border-b border-slate-800">{r.absent > 0 ? r.absent : '-'}</td>
-                                  <td className="py-1 px-2 font-mono text-black border-r border-b border-slate-800">{r.leave > 0 ? r.leave : '-'}</td>
-                                  <td className="py-1 px-2 font-mono text-black border-r border-b border-slate-800">{r.sick > 0 ? r.sick : '-'}</td>
+                                  <td className="py-1 px-2 font-mono text-black border-r border-b border-slate-800">{r.absent}</td>
+                                  <td className="py-1 px-2 font-mono text-black border-r border-b border-slate-800">{r.leave}</td>
+                                  <td className="py-1 px-2 font-mono text-black border-r border-b border-slate-800">{r.sick}</td>
                                   <td className="py-1 px-2 font-mono font-bold text-black border-b border-slate-800">{r.percent}</td>
                                 </tr>
                               ))}
@@ -2541,9 +2604,9 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
                                 <td className="py-1.5 px-3 text-center border-r border-slate-800 text-black">รวมภาคเรียนที่ 2</td>
                                 <td className="py-1.5 px-2 font-mono border-r border-slate-800 text-black">{combinedAttendanceRecords.term2.totals.schoolDays}</td>
                                 <td className="py-1.5 px-2 font-mono text-black border-r border-slate-800">{combinedAttendanceRecords.term2.totals.present}</td>
-                                <td className="py-1.5 px-2 font-mono text-black border-r border-slate-800">{combinedAttendanceRecords.term2.totals.absent > 0 ? combinedAttendanceRecords.term2.totals.absent : '-'}</td>
-                                <td className="py-1.5 px-2 font-mono text-black border-r border-slate-800">{combinedAttendanceRecords.term2.totals.leave > 0 ? combinedAttendanceRecords.term2.totals.leave : '-'}</td>
-                                <td className="py-1.5 px-2 font-mono text-black border-r border-slate-800">{combinedAttendanceRecords.term2.totals.sick > 0 ? combinedAttendanceRecords.term2.totals.sick : '-'}</td>
+                                <td className="py-1.5 px-2 font-mono text-black border-r border-slate-800">{combinedAttendanceRecords.term2.totals.absent}</td>
+                                <td className="py-1.5 px-2 font-mono text-black border-r border-slate-800">{combinedAttendanceRecords.term2.totals.leave}</td>
+                                <td className="py-1.5 px-2 font-mono text-black border-r border-slate-800">{combinedAttendanceRecords.term2.totals.sick}</td>
                                 <td className="py-1.5 px-2 font-mono font-bold text-black">{combinedAttendanceRecords.term2.totals.percent}</td>
                               </tr>
                             </tbody>
@@ -2575,31 +2638,31 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
                                 <td className="py-1 px-3 font-medium border-r border-b border-slate-800 text-center text-black">ภาคเรียนที่ 1</td>
                                 <td className="py-1 px-2 font-mono border-r border-b border-slate-800 text-black">{combinedAttendanceRecords.term1.totals.schoolDays}</td>
                                 <td className="py-1 px-2 font-mono font-bold border-r border-b border-slate-800 text-black">{combinedAttendanceRecords.term1.totals.present}</td>
-                                <td className="py-1 px-2 font-mono border-r border-b border-slate-800 text-black">{combinedAttendanceRecords.term1.totals.absent > 0 ? combinedAttendanceRecords.term1.totals.absent : '-'}</td>
-                                <td className="py-1 px-2 font-mono border-r border-b border-slate-800 text-black">{combinedAttendanceRecords.term1.totals.leave > 0 ? combinedAttendanceRecords.term1.totals.leave : '-'}</td>
-                                <td className="py-1 px-2 font-mono border-r border-b border-slate-800 text-black">{combinedAttendanceRecords.term1.totals.sick > 0 ? combinedAttendanceRecords.term1.totals.sick : '-'}</td>
+                                <td className="py-1 px-2 font-mono border-r border-b border-slate-800 text-black">{combinedAttendanceRecords.term1.totals.absent}</td>
+                                <td className="py-1 px-2 font-mono border-r border-b border-slate-800 text-black">{combinedAttendanceRecords.term1.totals.leave}</td>
+                                <td className="py-1 px-2 font-mono border-r border-b border-slate-800 text-black">{combinedAttendanceRecords.term1.totals.sick}</td>
                                 <td className="py-1 px-2 font-mono font-bold border-r border-b border-slate-800 text-black">{combinedAttendanceRecords.term1.totals.percent}</td>
-                                <td className="py-1 px-2 font-bold border-b border-slate-800 text-black">{combinedAttendanceRecords.term1.totals.percentNum >= 80 ? 'ผ่านเกณฑ์' : 'ไม่ผ่านเกณฑ์'}</td>
+                                <td className="py-1 px-2 font-bold border-b border-slate-800 text-black">{combinedAttendanceRecords.term1.totals.evaluation}</td>
                               </tr>
                               <tr>
                                 <td className="py-1 px-3 font-medium border-r border-b border-slate-800 text-center text-black">ภาคเรียนที่ 2</td>
                                 <td className="py-1 px-2 font-mono border-r border-b border-slate-800 text-black">{combinedAttendanceRecords.term2.totals.schoolDays}</td>
                                 <td className="py-1 px-2 font-mono font-bold border-r border-b border-slate-800 text-black">{combinedAttendanceRecords.term2.totals.present}</td>
-                                <td className="py-1 px-2 font-mono border-r border-b border-slate-800 text-black">{combinedAttendanceRecords.term2.totals.absent > 0 ? combinedAttendanceRecords.term2.totals.absent : '-'}</td>
-                                <td className="py-1 px-2 font-mono border-r border-b border-slate-800 text-black">{combinedAttendanceRecords.term2.totals.leave > 0 ? combinedAttendanceRecords.term2.totals.leave : '-'}</td>
-                                <td className="py-1 px-2 font-mono border-r border-b border-slate-800 text-black">{combinedAttendanceRecords.term2.totals.sick > 0 ? combinedAttendanceRecords.term2.totals.sick : '-'}</td>
+                                <td className="py-1 px-2 font-mono border-r border-b border-slate-800 text-black">{combinedAttendanceRecords.term2.totals.absent}</td>
+                                <td className="py-1 px-2 font-mono border-r border-b border-slate-800 text-black">{combinedAttendanceRecords.term2.totals.leave}</td>
+                                <td className="py-1 px-2 font-mono border-r border-b border-slate-800 text-black">{combinedAttendanceRecords.term2.totals.sick}</td>
                                 <td className="py-1 px-2 font-mono font-bold border-r border-b border-slate-800 text-black">{combinedAttendanceRecords.term2.totals.percent}</td>
-                                <td className="py-1 px-2 font-bold border-b border-slate-800 text-black">{combinedAttendanceRecords.term2.totals.percentNum >= 80 ? 'ผ่านเกณฑ์' : 'ไม่ผ่านเกณฑ์'}</td>
+                                <td className="py-1 px-2 font-bold border-b border-slate-800 text-black">{combinedAttendanceRecords.term2.totals.evaluation}</td>
                               </tr>
                               <tr className="bg-white font-bold text-black">
                                 <td className="py-1.5 px-3 border-r border-slate-800 text-center text-black">รวม 2 ภาคเรียน</td>
                                 <td className="py-1.5 px-2 font-mono border-r border-slate-800 text-black">{combinedAttendanceRecords.grandTotals.schoolDays}</td>
                                 <td className="py-1.5 px-2 font-mono border-r border-slate-800 text-black">{combinedAttendanceRecords.grandTotals.present}</td>
-                                <td className="py-1.5 px-2 font-mono border-r border-slate-800 text-black">{combinedAttendanceRecords.grandTotals.absent > 0 ? combinedAttendanceRecords.grandTotals.absent : '-'}</td>
-                                <td className="py-1.5 px-2 font-mono border-r border-slate-800 text-black">{combinedAttendanceRecords.grandTotals.leave > 0 ? combinedAttendanceRecords.grandTotals.leave : '-'}</td>
-                                <td className="py-1.5 px-2 font-mono border-r border-slate-800 text-black">{combinedAttendanceRecords.grandTotals.sick > 0 ? combinedAttendanceRecords.grandTotals.sick : '-'}</td>
+                                <td className="py-1.5 px-2 font-mono border-r border-slate-800 text-black">{combinedAttendanceRecords.grandTotals.absent}</td>
+                                <td className="py-1.5 px-2 font-mono border-r border-slate-800 text-black">{combinedAttendanceRecords.grandTotals.leave}</td>
+                                <td className="py-1.5 px-2 font-mono border-r border-slate-800 text-black">{combinedAttendanceRecords.grandTotals.sick}</td>
                                 <td className="py-1.5 px-2 font-mono font-black border-r border-slate-800 text-black">{combinedAttendanceRecords.grandTotals.percent}</td>
-                                <td className="py-1.5 px-2 font-bold text-black">{combinedAttendanceRecords.grandTotals.percentNum >= 80 ? 'ผ่านเกณฑ์' : 'ไม่ผ่านเกณฑ์'}</td>
+                                <td className="py-1.5 px-2 font-bold text-black">{combinedAttendanceRecords.grandTotals.evaluation}</td>
                               </tr>
                             </tbody>
                           </table>
@@ -2624,139 +2687,395 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
 
           {/* TAB 5: สุขภาพ (น้ำหนัก, แปรงฟัน, ดื่มนม) */}
           {(activeTab === 'health' || activeTab === 'all') && (
-            <div
-              className="a4-pp6-page bg-white border border-slate-300 rounded-lg py-6 sm:py-8 max-w-[210mm] min-h-[297mm] mx-auto text-black shadow-xl print:border-none print:shadow-none print:m-0 print:break-before-page flex flex-col justify-between"
-              style={{ width: '210mm', maxWidth: '210mm', paddingLeft: '20mm', paddingRight: '15mm' }}
-            >
-              
-              <div className="space-y-6">
-                {renderPP6Header(undefined, 'บันทึกข้อมูลสุขภาพ')}
-
-                {/* Student Info Bar: รหัสประจำตัว, ชื่อ-นามสกุล, เลขที่ (สีขาวทางการ) */}
-                <div className="flex flex-wrap items-center justify-between text-xs bg-white p-2.5 rounded-lg border border-slate-800 gap-4 mb-5 text-black">
-                  <div>
-                    <span className="font-bold text-black">รหัสประจำตัว: </span>
-                    <span className="font-semibold text-black font-mono">{student.studentCode || '-'}</span>
-                  </div>
-                  <div>
-                    <span className="font-bold text-black">ชื่อ-นามสกุล: </span>
-                    <span className="font-semibold text-black">{student.prefix}{student.firstName} {student.lastName}</span>
-                  </div>
-                  <div>
-                    <span className="font-bold text-black">เลขที่: </span>
-                    <span className="font-semibold text-black">{student.rollNumber || '-'}</span>
-                  </div>
+            <div className="space-y-3">
+              {/* Mode Selector Bar above A4 sheet (Hidden on Print & PDF) */}
+              <div className="max-w-[210mm] mx-auto bg-white px-4 py-2.5 rounded-2xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-2 print:hidden no-print" data-pdf-ignore="true">
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-700">
+                  <Heart className="w-4 h-4 text-rose-500" />
+                  <span>รูปแบบการแสดงผลหน้าสุขภาพ:</span>
                 </div>
+                <div className="inline-flex rounded-xl p-1 bg-slate-100 border border-slate-200 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setIsCombinedHealth(false)}
+                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      !isCombinedHealth
+                        ? 'bg-purple-600 text-white shadow-2xs'
+                        : 'text-slate-700 hover:bg-white/70'
+                    }`}
+                  >
+                    ภาคเรียนที่ {semester}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsCombinedHealth(true)}
+                    className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      isCombinedHealth
+                        ? 'bg-emerald-600 text-white shadow-2xs'
+                        : 'text-slate-700 hover:bg-white/70'
+                    }`}
+                  >
+                    <Layers className="w-3.5 h-3.5" />
+                    <span>รวมภาคเรียน</span>
+                  </button>
+                </div>
+              </div>
 
-                <div className="space-y-6 text-xs text-black">
-                  
-                  {/* 1. Growth: Weight & Height Table */}
-                  <div className="space-y-2">
-                    <div className="font-bold text-black text-xs">
-                      <span>1) น้ำหนัก - ส่วนสูง และภาวะโภชนาการ</span>
+              <div
+                className="a4-pp6-page bg-white border border-slate-300 rounded-lg py-6 sm:py-8 max-w-[210mm] min-h-[297mm] mx-auto text-black shadow-xl print:border-none print:shadow-none print:m-0 print:break-before-page flex flex-col justify-between"
+                style={{ width: '210mm', maxWidth: '210mm', paddingLeft: '20mm', paddingRight: '15mm', color: '#000000' }}
+              >
+                <div className={isCombinedHealth ? 'space-y-4' : 'space-y-6'}>
+                  {renderPP6Header(undefined, 'บันทึกข้อมูลสุขภาพ', isCombinedHealth)}
+
+                  {/* Student Info Bar: รหัสประจำตัว, ชื่อ-นามสกุล, เลขที่ (สีขาวทางการ) */}
+                  <div className={`flex flex-wrap items-center justify-between text-xs bg-white p-2.5 rounded-lg border border-slate-800 gap-4 ${isCombinedHealth ? 'mb-3' : 'mb-5'} text-black`}>
+                    <div>
+                      <span className="font-bold text-black">รหัสประจำตัว: </span>
+                      <span className="font-semibold text-black font-mono">{student.studentCode || '-'}</span>
                     </div>
-                    <div className="border border-slate-800 rounded-lg overflow-hidden bg-white">
-                      <table className="w-full text-left text-xs border-collapse bg-white">
-                        <thead>
-                          <tr className="bg-white text-black font-bold text-center">
-                            <th className="py-2 px-2 border-r border-b border-slate-800 w-14 text-black">ครั้งที่</th>
-                            <th className="py-2 px-3 border-r border-b border-slate-800 text-center text-black">วันที่</th>
-                            <th className="py-2 px-2 border-r border-b border-slate-800 w-28 text-black">น้ำหนัก (กก.)</th>
-                            <th className="py-2 px-2 border-r border-b border-slate-800 w-28 text-black">ส่วนสูง (ซม.)</th>
-                            <th className="py-2 px-2 border-r border-b border-slate-800 w-20 text-black">BMI</th>
-                            <th className="py-2 px-3 border-b border-slate-800 w-32 text-black">ผลการประเมิน</th>
-                          </tr>
-                        </thead>
-                        <tbody className="text-center bg-white">
-                          {weightHeightRecords.map((item, idx) => {
-                            const rowBorderB = idx < weightHeightRecords.length - 1 ? 'border-b border-slate-800' : '';
-                            return (
-                              <tr key={item.no} className="bg-white">
-                                <td className={`py-2 px-2 font-mono font-bold text-black border-r border-slate-800 ${rowBorderB}`}>{item.no}</td>
-                                <td className={`py-2 px-3 text-center font-medium text-black border-r border-slate-800 ${rowBorderB}`}>{item.date}</td>
-                                <td className={`py-2 px-2 font-mono font-bold text-black border-r border-slate-800 ${rowBorderB}`}>{item.weight}</td>
-                                <td className={`py-2 px-2 font-mono font-bold text-black border-r border-slate-800 ${rowBorderB}`}>{item.height}</td>
-                                <td className={`py-2 px-2 font-mono font-bold text-black border-r border-slate-800 ${rowBorderB}`}>{item.bmi}</td>
-                                <td className={`py-2 px-3 font-bold text-black ${rowBorderB}`}>
-                                  {item.bmiStatus}
-                                </td>
+                    <div>
+                      <span className="font-bold text-black">ชื่อ-นามสกุล: </span>
+                      <span className="font-semibold text-black">{student.prefix}{student.firstName} {student.lastName}</span>
+                    </div>
+                    <div>
+                      <span className="font-bold text-black">เลขที่: </span>
+                      <span className="font-semibold text-black">{student.rollNumber || '-'}</span>
+                    </div>
+                  </div>
+
+                  {!isCombinedHealth ? (
+                    /* Single Semester Health View */
+                    <div className="space-y-6 text-xs text-black">
+                      {/* 1) น้ำหนัก - ส่วนสูง */}
+                      <div className="space-y-2">
+                        <div className="font-bold text-black text-xs">
+                          <span>1) น้ำหนัก - ส่วนสูง (ภาคเรียนที่ {semester})</span>
+                        </div>
+                        <div className="border border-slate-800 rounded-lg overflow-hidden bg-white">
+                          <table className="w-full text-left text-xs border-collapse bg-white">
+                            <thead>
+                              <tr className="bg-white text-black font-bold text-center">
+                                <th className="py-2 px-2 border-r border-b border-slate-800 w-14 text-black">ครั้งที่</th>
+                                <th className="py-2 px-3 border-r border-b border-slate-800 text-center text-black">วันที่</th>
+                                <th className="py-2 px-2 border-r border-b border-slate-800 w-28 text-black">น้ำหนัก (กก.)</th>
+                                <th className="py-2 px-2 border-r border-b border-slate-800 w-28 text-black">ส่วนสูง (ซม.)</th>
+                                <th className="py-2 px-2 border-r border-b border-slate-800 w-20 text-black">BMI</th>
+                                <th className="py-2 px-3 border-b border-slate-800 w-32 text-black">ผลการประเมิน</th>
                               </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
+                            </thead>
+                            <tbody className="text-center bg-white">
+                              {currentTermHealth.weightHeightRows.map((item, idx) => {
+                                const rowBorderB = idx < currentTermHealth.weightHeightRows.length - 1 ? 'border-b border-slate-800' : '';
+                                return (
+                                  <tr key={`${item.no}-${idx}`} className="bg-white">
+                                    <td className={`py-2 px-2 font-mono font-bold text-black border-r border-slate-800 ${rowBorderB}`}>{item.no}</td>
+                                    <td className={`py-2 px-3 text-center font-medium text-black border-r border-slate-800 ${rowBorderB}`}>{item.date}</td>
+                                    <td className={`py-2 px-2 font-mono font-bold text-black border-r border-slate-800 ${rowBorderB}`}>{item.weight}</td>
+                                    <td className={`py-2 px-2 font-mono font-bold text-black border-r border-slate-800 ${rowBorderB}`}>{item.height}</td>
+                                    <td className={`py-2 px-2 font-mono font-bold text-black border-r border-slate-800 ${rowBorderB}`}>{item.bmi}</td>
+                                    <td className={`py-2 px-3 font-bold text-black ${rowBorderB}`}>
+                                      {item.bmiStatus}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
 
-                  {/* 2. Milk Drinking Table */}
-                  <div className="space-y-2">
-                    <div className="font-bold text-black text-xs">
-                      <span>2) บันทึกดื่มนมโรงเรียน</span>
-                    </div>
-                    <div className="border border-slate-800 rounded-lg overflow-hidden bg-white">
-                      <table className="w-full text-left text-xs border-collapse bg-white">
-                        <thead>
-                          <tr className="bg-white text-black font-bold text-center">
-                            <th className="py-2 px-3 border-r border-b border-slate-800 w-12 text-black">ที่</th>
-                            <th className="py-2 px-3 border-r border-b border-slate-800 text-center text-black">รายการบันทึก</th>
-                            <th className="py-2 px-3 border-r border-b border-slate-800 w-28 text-black">วันทั้งหมด</th>
-                            <th className="py-2 px-3 border-r border-b border-slate-800 w-28 text-black">วันที่ดื่ม</th>
-                            <th className="py-2 px-3 border-b border-slate-800 w-32 text-black">ร้อยละ (%)</th>
-                          </tr>
-                        </thead>
-                        <tbody className="text-center bg-white">
-                          <tr className="bg-white">
-                            <td className="py-2 px-3 font-mono border-r border-slate-800 text-black">1</td>
-                            <td className="py-2 px-3 text-center font-medium text-black border-r border-slate-800">ดื่มนม</td>
-                            <td className="py-2 px-3 font-mono font-bold text-black border-r border-slate-800">{healthStats.milkTotal}</td>
-                            <td className="py-2 px-3 font-mono font-bold text-black border-r border-slate-800">{healthStats.milkFull}</td>
-                            <td className="py-2 px-3 font-mono font-bold text-black">{healthStats.milkRate}%</td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
+                      {/* 2) บันทึกดื่มนมโรงเรียน & 3) บันทึกแปรงฟันหลังอาหารกลางวัน (แสดงเฉพาะเมื่อครูได้บันทึกในหน้าดื่มนม-แปรงฟัน) */}
+                      {currentTermHealth.hasMilkTeethRecorded && (
+                        <>
+                          <div className="space-y-2">
+                            <div className="font-bold text-black text-xs">
+                              <span>2) บันทึกดื่มนมโรงเรียน (ภาคเรียนที่ {semester})</span>
+                            </div>
+                            <div className="border border-slate-800 rounded-lg overflow-hidden bg-white">
+                              <table className="w-full text-left text-xs border-collapse bg-white">
+                                <thead>
+                                  <tr className="bg-white text-black font-bold text-center">
+                                    <th className="py-2 px-3 border-r border-b border-slate-800 w-12 text-black">ที่</th>
+                                    <th className="py-2 px-3 border-r border-b border-slate-800 text-center text-black">รายการบันทึก</th>
+                                    <th className="py-2 px-3 border-r border-b border-slate-800 w-28 text-black">วันทั้งหมด</th>
+                                    <th className="py-2 px-3 border-r border-b border-slate-800 w-28 text-black">วันที่ดื่ม</th>
+                                    <th className="py-2 px-3 border-b border-slate-800 w-32 text-black">ร้อยละ (%)</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="text-center bg-white">
+                                  <tr className="bg-white">
+                                    <td className="py-2 px-3 font-mono border-r border-slate-800 text-black">1</td>
+                                    <td className="py-2 px-3 text-center font-medium text-black border-r border-slate-800">ดื่มนม</td>
+                                    <td className="py-2 px-3 font-mono font-bold text-black border-r border-slate-800">{currentTermHealth.milkTotal}</td>
+                                    <td className="py-2 px-3 font-mono font-bold text-black border-r border-slate-800">{currentTermHealth.milkFull}</td>
+                                    <td className="py-2 px-3 font-mono font-bold text-black">{currentTermHealth.milkRate}</td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
 
-                  {/* 3. Toothbrushing Table */}
-                  <div className="space-y-2">
-                    <div className="font-bold text-black text-xs">
-                      <span>3) บันทึกแปรงฟันหลังอาหารกลางวัน</span>
+                          <div className="space-y-2">
+                            <div className="font-bold text-black text-xs">
+                              <span>3) บันทึกแปรงฟันหลังอาหารกลางวัน (ภาคเรียนที่ {semester})</span>
+                            </div>
+                            <div className="border border-slate-800 rounded-lg overflow-hidden bg-white">
+                              <table className="w-full text-left text-xs border-collapse bg-white">
+                                <thead>
+                                  <tr className="bg-white text-black font-bold text-center">
+                                    <th className="py-2 px-3 border-r border-b border-slate-800 w-12 text-black">ที่</th>
+                                    <th className="py-2 px-3 border-r border-b border-slate-800 text-center text-black">รายการบันทึก</th>
+                                    <th className="py-2 px-3 border-r border-b border-slate-800 w-28 text-black">วันทั้งหมด</th>
+                                    <th className="py-2 px-3 border-r border-b border-slate-800 w-28 text-black">วันที่แปรง</th>
+                                    <th className="py-2 px-3 border-b border-slate-800 w-32 text-black">ร้อยละ (%)</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="text-center bg-white">
+                                  <tr className="bg-white">
+                                    <td className="py-2 px-3 font-mono border-r border-slate-800 text-black">1</td>
+                                    <td className="py-2 px-3 text-center font-medium text-black border-r border-slate-800">แปรงฟัน</td>
+                                    <td className="py-2 px-3 font-mono font-bold text-black border-r border-slate-800">{currentTermHealth.teethTotal}</td>
+                                    <td className="py-2 px-3 font-mono font-bold text-black border-r border-slate-800">{currentTermHealth.teethClean}</td>
+                                    <td className="py-2 px-3 font-mono font-bold text-black">{currentTermHealth.teethRate}</td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </>
+                      )}
                     </div>
-                    <div className="border border-slate-800 rounded-lg overflow-hidden bg-white">
-                      <table className="w-full text-left text-xs border-collapse bg-white">
-                        <thead>
-                          <tr className="bg-white text-black font-bold text-center">
-                            <th className="py-2 px-3 border-r border-b border-slate-800 w-12 text-black">ที่</th>
-                            <th className="py-2 px-3 border-r border-b border-slate-800 text-center text-black">รายการบันทึก</th>
-                            <th className="py-2 px-3 border-r border-b border-slate-800 w-28 text-black">วันทั้งหมด</th>
-                            <th className="py-2 px-3 border-r border-b border-slate-800 w-28 text-black">วันที่แปรง</th>
-                            <th className="py-2 px-3 border-b border-slate-800 w-32 text-black">ร้อยละ (%)</th>
-                          </tr>
-                        </thead>
-                        <tbody className="text-center bg-white">
-                          <tr className="bg-white">
-                            <td className="py-2 px-3 font-mono border-r border-slate-800 text-black">1</td>
-                            <td className="py-2 px-3 text-center font-medium text-black border-r border-slate-800">แปรงฟัน</td>
-                            <td className="py-2 px-3 font-mono font-bold text-black border-r border-slate-800">{healthStats.teethTotal}</td>
-                            <td className="py-2 px-3 font-mono font-bold text-black border-r border-slate-800">{healthStats.teethClean}</td>
-                            <td className="py-2 px-3 font-mono font-bold text-black">{healthStats.teethRate}%</td>
-                          </tr>
-                        </tbody>
-                      </table>
+                  ) : (
+                    /* Combined 2-Semester Health View (รวมภาคเรียนที่ 1 และ ภาคเรียนที่ 2) */
+                    <div className="space-y-4 text-xs text-black">
+                      {/* 1) น้ำหนัก - ส่วนสูง (ภาคเรียนที่ 1 และ ภาคเรียนที่ 2) */}
+                      <div className="space-y-2">
+                        <div className="font-bold text-black text-xs">
+                          <span>1) น้ำหนัก - ส่วนสูง</span>
+                        </div>
+
+                        {/* ภาคเรียนที่ 1 */}
+                        <div className="space-y-1">
+                          <div className="text-[11px] font-bold text-black">
+                            ภาคเรียนที่ 1
+                          </div>
+                          <div className="border border-slate-800 rounded-lg overflow-hidden bg-white">
+                            <table className="w-full text-left text-[11px] border-collapse bg-white">
+                              <thead>
+                                <tr className="bg-white text-black font-bold text-center">
+                                  <th className="py-1.5 px-2 border-r border-b border-slate-800 w-14 text-black">ครั้งที่</th>
+                                  <th className="py-1.5 px-3 border-r border-b border-slate-800 text-center text-black">วันที่</th>
+                                  <th className="py-1.5 px-2 border-r border-b border-slate-800 w-28 text-black">น้ำหนัก (กก.)</th>
+                                  <th className="py-1.5 px-2 border-r border-b border-slate-800 w-28 text-black">ส่วนสูง (ซม.)</th>
+                                  <th className="py-1.5 px-2 border-r border-b border-slate-800 w-20 text-black">BMI</th>
+                                  <th className="py-1.5 px-3 border-b border-slate-800 w-32 text-black">ผลการประเมิน</th>
+                                </tr>
+                              </thead>
+                              <tbody className="text-center bg-white">
+                                {combinedHealth.term1.weightHeightRows.map((item, idx) => {
+                                  const rowBorderB = idx < combinedHealth.term1.weightHeightRows.length - 1 ? 'border-b border-slate-800' : '';
+                                  return (
+                                    <tr key={`wh1-${idx}`} className="bg-white">
+                                      <td className={`py-1.5 px-2 font-mono font-bold text-black border-r border-slate-800 ${rowBorderB}`}>{item.no}</td>
+                                      <td className={`py-1.5 px-3 text-center font-medium text-black border-r border-slate-800 ${rowBorderB}`}>{item.date}</td>
+                                      <td className={`py-1.5 px-2 font-mono font-bold text-black border-r border-slate-800 ${rowBorderB}`}>{item.weight}</td>
+                                      <td className={`py-1.5 px-2 font-mono font-bold text-black border-r border-slate-800 ${rowBorderB}`}>{item.height}</td>
+                                      <td className={`py-1.5 px-2 font-mono font-bold text-black border-r border-slate-800 ${rowBorderB}`}>{item.bmi}</td>
+                                      <td className={`py-1.5 px-3 font-bold text-black ${rowBorderB}`}>{item.bmiStatus}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
+                        {/* ภาคเรียนที่ 2 */}
+                        <div className="space-y-1">
+                          <div className="text-[11px] font-bold text-black">
+                            ภาคเรียนที่ 2
+                          </div>
+                          <div className="border border-slate-800 rounded-lg overflow-hidden bg-white">
+                            <table className="w-full text-left text-[11px] border-collapse bg-white">
+                              <thead>
+                                <tr className="bg-white text-black font-bold text-center">
+                                  <th className="py-1.5 px-2 border-r border-b border-slate-800 w-14 text-black">ครั้งที่</th>
+                                  <th className="py-1.5 px-3 border-r border-b border-slate-800 text-center text-black">วันที่</th>
+                                  <th className="py-1.5 px-2 border-r border-b border-slate-800 w-28 text-black">น้ำหนัก (กก.)</th>
+                                  <th className="py-1.5 px-2 border-r border-b border-slate-800 w-28 text-black">ส่วนสูง (ซม.)</th>
+                                  <th className="py-1.5 px-2 border-r border-b border-slate-800 w-20 text-black">BMI</th>
+                                  <th className="py-1.5 px-3 border-b border-slate-800 w-32 text-black">ผลการประเมิน</th>
+                                </tr>
+                              </thead>
+                              <tbody className="text-center bg-white">
+                                {combinedHealth.term2.weightHeightRows.map((item, idx) => {
+                                  const rowBorderB = idx < combinedHealth.term2.weightHeightRows.length - 1 ? 'border-b border-slate-800' : '';
+                                  return (
+                                    <tr key={`wh2-${idx}`} className="bg-white">
+                                      <td className={`py-1.5 px-2 font-mono font-bold text-black border-r border-slate-800 ${rowBorderB}`}>{item.no}</td>
+                                      <td className={`py-1.5 px-3 text-center font-medium text-black border-r border-slate-800 ${rowBorderB}`}>{item.date}</td>
+                                      <td className={`py-1.5 px-2 font-mono font-bold text-black border-r border-slate-800 ${rowBorderB}`}>{item.weight}</td>
+                                      <td className={`py-1.5 px-2 font-mono font-bold text-black border-r border-slate-800 ${rowBorderB}`}>{item.height}</td>
+                                      <td className={`py-1.5 px-2 font-mono font-bold text-black border-r border-slate-800 ${rowBorderB}`}>{item.bmi}</td>
+                                      <td className={`py-1.5 px-3 font-bold text-black ${rowBorderB}`}>{item.bmiStatus}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 2) บันทึกดื่มนมโรงเรียน & 3) บันทึกแปรงฟันหลังอาหารกลางวัน (แสดงเฉพาะเมื่อครูได้บันทึกในหน้าดื่มนม-แปรงฟัน) */}
+                      {combinedHealth.hasMilkTeethRecorded && (
+                        <>
+                          {/* 2) บันทึกดื่มนมโรงเรียน (ภาคเรียนที่ 1 และ ภาคเรียนที่ 2) */}
+                          <div className="space-y-2">
+                            <div className="font-bold text-black text-xs">
+                              <span>2) บันทึกดื่มนมโรงเรียน</span>
+                            </div>
+
+                            {/* ภาคเรียนที่ 1 */}
+                            <div className="space-y-1">
+                              <div className="text-[11px] font-bold text-black">
+                                ภาคเรียนที่ 1
+                              </div>
+                              <div className="border border-slate-800 rounded-lg overflow-hidden bg-white">
+                                <table className="w-full text-left text-[11px] border-collapse bg-white">
+                                  <thead>
+                                    <tr className="bg-white text-black font-bold text-center">
+                                      <th className="py-1.5 px-3 border-r border-b border-slate-800 w-12 text-black">ที่</th>
+                                      <th className="py-1.5 px-3 border-r border-b border-slate-800 text-center text-black">รายการบันทึก</th>
+                                      <th className="py-1.5 px-3 border-r border-b border-slate-800 w-28 text-black">วันทั้งหมด</th>
+                                      <th className="py-1.5 px-3 border-r border-b border-slate-800 w-28 text-black">วันที่ดื่ม</th>
+                                      <th className="py-1.5 px-3 border-b border-slate-800 w-32 text-black">ร้อยละ (%)</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="text-center bg-white">
+                                    <tr className="bg-white">
+                                      <td className="py-1.5 px-3 font-mono border-r border-slate-800 text-black">1</td>
+                                      <td className="py-1.5 px-3 text-center font-medium text-black border-r border-slate-800">ดื่มนม</td>
+                                      <td className="py-1.5 px-3 font-mono font-bold text-black border-r border-slate-800">{combinedHealth.term1.milkTotal}</td>
+                                      <td className="py-1.5 px-3 font-mono font-bold text-black border-r border-slate-800">{combinedHealth.term1.milkFull}</td>
+                                      <td className="py-1.5 px-3 font-mono font-bold text-black">{combinedHealth.term1.milkRate}</td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+
+                            {/* ภาคเรียนที่ 2 */}
+                            <div className="space-y-1">
+                              <div className="text-[11px] font-bold text-black">
+                                ภาคเรียนที่ 2
+                              </div>
+                              <div className="border border-slate-800 rounded-lg overflow-hidden bg-white">
+                                <table className="w-full text-left text-[11px] border-collapse bg-white">
+                                  <thead>
+                                    <tr className="bg-white text-black font-bold text-center">
+                                      <th className="py-1.5 px-3 border-r border-b border-slate-800 w-12 text-black">ที่</th>
+                                      <th className="py-1.5 px-3 border-r border-b border-slate-800 text-center text-black">รายการบันทึก</th>
+                                      <th className="py-1.5 px-3 border-r border-b border-slate-800 w-28 text-black">วันทั้งหมด</th>
+                                      <th className="py-1.5 px-3 border-r border-b border-slate-800 w-28 text-black">วันที่ดื่ม</th>
+                                      <th className="py-1.5 px-3 border-b border-slate-800 w-32 text-black">ร้อยละ (%)</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="text-center bg-white">
+                                    <tr className="bg-white">
+                                      <td className="py-1.5 px-3 font-mono border-r border-slate-800 text-black">1</td>
+                                      <td className="py-1.5 px-3 text-center font-medium text-black border-r border-slate-800">ดื่มนม</td>
+                                      <td className="py-1.5 px-3 font-mono font-bold text-black border-r border-slate-800">{combinedHealth.term2.milkTotal}</td>
+                                      <td className="py-1.5 px-3 font-mono font-bold text-black border-r border-slate-800">{combinedHealth.term2.milkFull}</td>
+                                      <td className="py-1.5 px-3 font-mono font-bold text-black">{combinedHealth.term2.milkRate}</td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* 3) บันทึกแปรงฟันหลังอาหารกลางวัน (ภาคเรียนที่ 1 และ ภาคเรียนที่ 2) */}
+                          <div className="space-y-2">
+                            <div className="font-bold text-black text-xs">
+                              <span>3) บันทึกแปรงฟันหลังอาหารกลางวัน</span>
+                            </div>
+
+                            {/* ภาคเรียนที่ 1 */}
+                            <div className="space-y-1">
+                              <div className="text-[11px] font-bold text-black">
+                                ภาคเรียนที่ 1
+                              </div>
+                              <div className="border border-slate-800 rounded-lg overflow-hidden bg-white">
+                                <table className="w-full text-left text-[11px] border-collapse bg-white">
+                                  <thead>
+                                    <tr className="bg-white text-black font-bold text-center">
+                                      <th className="py-1.5 px-3 border-r border-b border-slate-800 w-12 text-black">ที่</th>
+                                      <th className="py-1.5 px-3 border-r border-b border-slate-800 text-center text-black">รายการบันทึก</th>
+                                      <th className="py-1.5 px-3 border-r border-b border-slate-800 w-28 text-black">วันทั้งหมด</th>
+                                      <th className="py-1.5 px-3 border-r border-b border-slate-800 w-28 text-black">วันที่แปรง</th>
+                                      <th className="py-1.5 px-3 border-b border-slate-800 w-32 text-black">ร้อยละ (%)</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="text-center bg-white">
+                                    <tr className="bg-white">
+                                      <td className="py-1.5 px-3 font-mono border-r border-slate-800 text-black">1</td>
+                                      <td className="py-1.5 px-3 text-center font-medium text-black border-r border-slate-800">แปรงฟัน</td>
+                                      <td className="py-1.5 px-3 font-mono font-bold text-black border-r border-slate-800">{combinedHealth.term1.teethTotal}</td>
+                                      <td className="py-1.5 px-3 font-mono font-bold text-black border-r border-slate-800">{combinedHealth.term1.teethClean}</td>
+                                      <td className="py-1.5 px-3 font-mono font-bold text-black">{combinedHealth.term1.teethRate}</td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+
+                            {/* ภาคเรียนที่ 2 */}
+                            <div className="space-y-1">
+                              <div className="text-[11px] font-bold text-black">
+                                ภาคเรียนที่ 2
+                              </div>
+                              <div className="border border-slate-800 rounded-lg overflow-hidden bg-white">
+                                <table className="w-full text-left text-[11px] border-collapse bg-white">
+                                  <thead>
+                                    <tr className="bg-white text-black font-bold text-center">
+                                      <th className="py-1.5 px-3 border-r border-b border-slate-800 w-12 text-black">ที่</th>
+                                      <th className="py-1.5 px-3 border-r border-b border-slate-800 text-center text-black">รายการบันทึก</th>
+                                      <th className="py-1.5 px-3 border-r border-b border-slate-800 w-28 text-black">วันทั้งหมด</th>
+                                      <th className="py-1.5 px-3 border-r border-b border-slate-800 w-28 text-black">วันที่แปรง</th>
+                                      <th className="py-1.5 px-3 border-b border-slate-800 w-32 text-black">ร้อยละ (%)</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="text-center bg-white">
+                                    <tr className="bg-white">
+                                      <td className="py-1.5 px-3 font-mono border-r border-slate-800 text-black">1</td>
+                                      <td className="py-1.5 px-3 text-center font-medium text-black border-r border-slate-800">แปรงฟัน</td>
+                                      <td className="py-1.5 px-3 font-mono font-bold text-black border-r border-slate-800">{combinedHealth.term2.teethTotal}</td>
+                                      <td className="py-1.5 px-3 font-mono font-bold text-black border-r border-slate-800">{combinedHealth.term2.teethClean}</td>
+                                      <td className="py-1.5 px-3 font-mono font-bold text-black">{combinedHealth.term2.teethRate}</td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          </div>
+                        </>
+                      )}
                     </div>
-                  </div>
+                  )}
 
                 </div>
-              </div>
 
-              {/* Bottom Signature: Class Advisor (Centered, 3 inches from bottom margin) */}
-              <div className="pt-6 mb-[3in] text-xs text-center max-w-sm mx-auto space-y-1 print:mb-[3in] text-black">
-                <p className="text-black font-medium">ลงชื่อ ..............................................................</p>
-                <p className="font-normal text-black">({advisorName || '......................................................'})</p>
-                <p className="text-black font-semibold text-[11px]">ครูประจำชั้น</p>
-                <p className="text-black font-medium text-[10px]">วันที่ ...... เดือน ........................ พ.ศ. ...........</p>
-              </div>
+                {/* Bottom Signature: Class Advisor */}
+                <div className={`${isCombinedHealth ? 'pt-4 mb-2 print:mb-2' : 'pt-6 mb-[3in] print:mb-[3in]'} text-xs text-center max-w-sm mx-auto space-y-1 text-black`} style={{ color: '#000000' }}>
+                  <p className="text-black font-medium">ลงชื่อ ..............................................................</p>
+                  <p className="font-normal text-black">({advisorName || '......................................................'})</p>
+                  <p className="text-black font-semibold text-[11px]">ครูประจำชั้น</p>
+                  <p className="text-black font-medium text-[10px]">วันที่ ...... เดือน ........................ พ.ศ. ...........</p>
+                </div>
 
+              </div>
             </div>
           )}
 

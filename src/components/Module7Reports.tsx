@@ -57,7 +57,7 @@ const PRIMARY_GRADES: GradeLevel[] = [
 ];
 
 const SECONDARY_GRADES: GradeLevel[] = [
-  'ม.1', 'ม.2', 'ม.3', 'ม.4', 'ม.5', 'ม.6'
+  'ม.1', 'ม.2', 'ม.3'
 ];
 
 const THAI_MONTH_NAMES: Record<number, string> = {
@@ -109,9 +109,6 @@ const getGradeFullName = (g: GradeLevel): string => {
     case 'ม.1': return 'ชั้นมัธยมศึกษาปีที่ 1 (ม.1)';
     case 'ม.2': return 'ชั้นมัธยมศึกษาปีที่ 2 (ม.2)';
     case 'ม.3': return 'ชั้นมัธยมศึกษาปีที่ 3 (ม.3)';
-    case 'ม.4': return 'ชั้นมัธยมศึกษาปีที่ 4 (ม.4)';
-    case 'ม.5': return 'ชั้นมัธยมศึกษาปีที่ 5 (ม.5)';
-    case 'ม.6': return 'ชั้นมัธยมศึกษาปีที่ 6 (ม.6)';
     default: return `ชั้น ${g}`;
   }
 };
@@ -131,9 +128,6 @@ const getGradeCleanName = (g: GradeLevel | null): string => {
     case 'ม.1': return 'ชั้นมัธยมศึกษาปีที่ 1';
     case 'ม.2': return 'ชั้นมัธยมศึกษาปีที่ 2';
     case 'ม.3': return 'ชั้นมัธยมศึกษาปีที่ 3';
-    case 'ม.4': return 'ชั้นมัธยมศึกษาปีที่ 4';
-    case 'ม.5': return 'ชั้นมัธยมศึกษาปีที่ 5';
-    case 'ม.6': return 'ชั้นมัธยมศึกษาปีที่ 6';
     default: return `ชั้น ${g}`;
   }
 };

@@ -2792,7 +2792,7 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                 <span>บัตรนักเรียน</span>
               </button>
 
-              {user.role === 'admin' ? (
+              {user.role === 'admin' && (
                 <button
                   onClick={handleOpenAddStudent}
                   className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 shadow-xs shrink-0 active:scale-95 cursor-pointer"
@@ -2800,11 +2800,6 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                   <UserPlus className="w-3.5 h-3.5" />
                   <span>เพิ่ม</span>
                 </button>
-              ) : (
-                <div className="px-2.5 py-1 bg-slate-50 text-slate-500 text-[11px] rounded-xl border border-slate-200 flex items-center gap-1 shrink-0">
-                  <Shield className="w-3.5 h-3.5 text-slate-400" />
-                  <span>View Only</span>
-                </div>
               )}
             </div>
           </div>

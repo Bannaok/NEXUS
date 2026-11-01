@@ -40,7 +40,7 @@ export interface SchoolAdminAccount {
 export type GradeLevel = 
   | 'อ.1' | 'อ.2' | 'อ.3' 
   | 'ป.1' | 'ป.2' | 'ป.3' | 'ป.4' | 'ป.5' | 'ป.6' 
-  | 'ม.1' | 'ม.2' | 'ม.3' | 'ม.4' | 'ม.5' | 'ม.6';
+  | 'ม.1' | 'ม.2' | 'ม.3';
 
 export type ParentsMaritalStatus = 
   | 'อยู่ด้วยกัน' 
@@ -206,8 +206,9 @@ export interface DailyTracking {
   height: number; // cm
   bmi: number;
   bmiStatus?: 'ผอม' | 'สมส่วน' | 'ท้วม' | 'เริ่มอ้วน' | 'อ้วน';
-  milkStatus: 'ดื่มครบ' | 'ไม่ได้ดื่ม' | 'แพ้นม';
-  toothBrushStatus: 'แปรงฟันแล้ว' | 'ยังไม่ได้แปรง';
+  milkStatus?: 'ดื่มครบ' | 'ไม่ได้ดื่ม' | 'แพ้นม';
+  toothBrushStatus?: 'แปรงฟันแล้ว' | 'ยังไม่ได้แปรง';
+  milkTeethRecorded?: boolean;
 }
 
 export interface BehaviorScores {

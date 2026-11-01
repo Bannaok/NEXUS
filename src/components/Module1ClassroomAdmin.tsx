@@ -31,7 +31,8 @@ import {
   Printer,
   FileText,
   ChevronDown,
-  MoreVertical
+  MoreVertical,
+  User
 } from 'lucide-react';
 
 interface Module1Props {
@@ -95,6 +96,19 @@ export const getStudentGender = (student: Student): 'ชาย' | 'หญิง'
   return 'ชาย';
 };
 
+// Helper: Check if a DailyTracking record has Milk & Toothbrushing explicitly recorded in the Milk-Teeth page
+export const isMilkTeethRecorded = (rec?: DailyTracking): boolean => {
+  if (!rec) return false;
+  if (rec.milkTeethRecorded === true) return true;
+  if (!rec.milkStatus && !rec.toothBrushStatus) return false;
+  // Records with no weight/height were created directly from the Milk & Toothbrushing tab
+  if ((rec.weight || 0) === 0 && (rec.height || 0) === 0) return true;
+  // Or if the status was changed from the default values
+  if (rec.milkStatus && rec.milkStatus !== 'ดื่มครบ') return true;
+  if (rec.toothBrushStatus && rec.toothBrushStatus !== 'แปรงฟันแล้ว') return true;
+  return false;
+};
+
 // Helper: Determine student age for growth benchmarks
 export const getStudentApproxAge = (student: Student): number => {
   if (student.age && student.age > 0) return student.age;
@@ -118,9 +132,6 @@ export const getStudentApproxAge = (student: Student): number => {
   if (gl === 'ม.1') return 12;
   if (gl === 'ม.2') return 13;
   if (gl === 'ม.3') return 14;
-  if (gl === 'ม.4') return 15;
-  if (gl === 'ม.5') return 16;
-  if (gl === 'ม.6') return 17;
   return 10;
 };
 
@@ -398,7 +409,7 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
     const gradeOrder: GradeLevel[] = [
       'อ.1', 'อ.2', 'อ.3',
       'ป.1', 'ป.2', 'ป.3', 'ป.4', 'ป.5', 'ป.6',
-      'ม.1', 'ม.2', 'ม.3', 'ม.4', 'ม.5', 'ม.6'
+      'ม.1', 'ม.2', 'ม.3'
     ];
     const homeroomSet = new Set<string>();
     allMembers.forEach(m => {
@@ -621,8 +632,9 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
         height: 0,
         bmi: 0,
         bmiStatus: undefined,
-        milkStatus: existingRec?.milkStatus || 'ดื่มครบ',
-        toothBrushStatus: existingRec?.toothBrushStatus || 'แปรงฟันแล้ว'
+        milkStatus: existingRec?.milkTeethRecorded ? existingRec.milkStatus : undefined,
+        toothBrushStatus: existingRec?.milkTeethRecorded ? existingRec.toothBrushStatus : undefined,
+        milkTeethRecorded: existingRec?.milkTeethRecorded
       };
       onSaveDailyTracking(updatedRec);
     });
@@ -777,7 +789,7 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
     return schoolDaysList.filter(day => {
       const recordedCount = targetStudents.filter(st => {
         const rec = dailyTracking.find(d => d.date === day.date && d.studentId === st.id);
-        return rec !== undefined && Boolean(rec.milkStatus) && Boolean(rec.toothBrushStatus);
+        return isMilkTeethRecorded(rec);
       }).length;
       return recordedCount === targetStudents.length;
     }).length;
@@ -1431,6 +1443,7 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
                             isViewOnly={isViewOnly}
                             onSave={onSaveDailyTracking}
                             onShowToast={onShowToast}
+                            onOpenLightbox={onOpenLightbox}
                           />
                         );
                       })
@@ -1495,7 +1508,8 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
               bmi: existing?.bmi || 0,
               bmiStatus: existing?.bmiStatus || 'สมส่วน',
               milkStatus: existing?.milkStatus || 'ดื่มครบ',
-              toothBrushStatus: existing?.toothBrushStatus || 'แปรงฟันแล้ว'
+              toothBrushStatus: existing?.toothBrushStatus || 'แปรงฟันแล้ว',
+              milkTeethRecorded: true
             };
             onSaveDailyTracking(updated);
           });
@@ -1628,7 +1642,7 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
 
                             const recordedCount = milkTargetStudents.filter(st => {
                               const rec = dailyTracking.find(d => d.date === dateStr && d.studentId === st.id);
-                              return rec !== undefined && Boolean(rec.milkStatus) && Boolean(rec.toothBrushStatus);
+                              return isMilkTeethRecorded(rec);
                             }).length;
                             const isFullyCompleted = milkTargetStudents.length > 0 && recordedCount === milkTargetStudents.length;
 
@@ -1772,6 +1786,7 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
                             record={existingRecord}
                             isViewOnly={user.role === 'admin'}
                             onSave={onSaveDailyTracking}
+                            onOpenLightbox={onOpenLightbox}
                           />
                         );
                       })
@@ -2654,6 +2669,7 @@ interface TrackingRowProps {
   isViewOnly?: boolean;
   onSave: (record: DailyTracking) => void;
   onShowToast: (type: 'success' | 'warning' | 'error' | 'info', title: string, msg: string) => void;
+  onOpenLightbox?: (imageUrl: string, title: string, subtitle?: string) => void;
 }
 
 const WeightTrackingRow: React.FC<TrackingRowProps> = ({
@@ -2663,7 +2679,8 @@ const WeightTrackingRow: React.FC<TrackingRowProps> = ({
   record,
   isViewOnly = false,
   onSave,
-  onShowToast
+  onShowToast,
+  onOpenLightbox
 }) => {
   const [weight, setWeight] = useState<number>(record?.weight || 0);
   const [height, setHeight] = useState<number>(record?.height || 0);
@@ -2684,8 +2701,9 @@ const WeightTrackingRow: React.FC<TrackingRowProps> = ({
       height: h,
       bmi: computedBmi,
       bmiStatus: computedStatus,
-      milkStatus: record?.milkStatus || 'ดื่มครบ',
-      toothBrushStatus: record?.toothBrushStatus || 'แปรงฟันแล้ว'
+      milkStatus: record?.milkTeethRecorded ? record.milkStatus : undefined,
+      toothBrushStatus: record?.milkTeethRecorded ? record.toothBrushStatus : undefined,
+      milkTeethRecorded: record?.milkTeethRecorded
     };
     onSave(updated);
   };
@@ -2717,7 +2735,22 @@ const WeightTrackingRow: React.FC<TrackingRowProps> = ({
         </span>
       </td>
       <td className="py-2 px-1.5 sm:px-4">
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
+          <div
+            onClick={() => {
+              if (student.photoUrl && onOpenLightbox) {
+                onOpenLightbox(student.photoUrl, `${student.prefix}${student.firstName} ${student.lastName}`, `ชั้น ${student.gradeLevel} • เลขที่ ${index}`);
+              }
+            }}
+            className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full overflow-hidden shrink-0 border border-slate-300 bg-slate-100 flex items-center justify-center shadow-2xs ${student.photoUrl && onOpenLightbox ? 'cursor-pointer hover:opacity-85' : ''}`}
+            title={student.photoUrl ? 'คลิกเพื่อดูรูปภาพขนาดใหญ่' : 'รูปโปรไฟล์นักเรียน'}
+          >
+            {student.photoUrl ? (
+              <img src={student.photoUrl} alt="" className="w-full h-full object-cover" />
+            ) : (
+              <User className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-400" />
+            )}
+          </div>
           <span className="font-bold text-black text-[11px] sm:text-xs leading-snug break-words">
             {student.prefix}{student.firstName} {student.lastName}
           </span>
@@ -2779,6 +2812,7 @@ interface CleanTrackingRowProps {
   record?: DailyTracking;
   isViewOnly?: boolean;
   onSave: (record: DailyTracking) => void;
+  onOpenLightbox?: (imageUrl: string, title: string, subtitle?: string) => void;
 }
 
 const MilkTeethTrackingRowClean: React.FC<CleanTrackingRowProps> = ({
@@ -2787,7 +2821,8 @@ const MilkTeethTrackingRowClean: React.FC<CleanTrackingRowProps> = ({
   date,
   record,
   isViewOnly = false,
-  onSave
+  onSave,
+  onOpenLightbox
 }) => {
   const [milk, setMilk] = useState<'ดื่มครบ' | 'ไม่ได้ดื่ม' | 'แพ้นม'>(record?.milkStatus || 'ดื่มครบ');
   const [teeth, setTeeth] = useState<'แปรงฟันแล้ว' | 'ยังไม่ได้แปรง'>(record?.toothBrushStatus || 'แปรงฟันแล้ว');
@@ -2813,7 +2848,8 @@ const MilkTeethTrackingRowClean: React.FC<CleanTrackingRowProps> = ({
       bmi: record?.bmi || 0,
       bmiStatus: record?.bmiStatus || 'สมส่วน',
       milkStatus: mVal,
-      toothBrushStatus: tVal
+      toothBrushStatus: tVal,
+      milkTeethRecorded: true
     };
     onSave(updated);
   };
@@ -2826,7 +2862,22 @@ const MilkTeethTrackingRowClean: React.FC<CleanTrackingRowProps> = ({
         </span>
       </td>
       <td className="py-2.5 px-2 sm:px-4">
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
+          <div
+            onClick={() => {
+              if (student.photoUrl && onOpenLightbox) {
+                onOpenLightbox(student.photoUrl, `${student.prefix}${student.firstName} ${student.lastName}`, `ชั้น ${student.gradeLevel} • เลขที่ ${index}`);
+              }
+            }}
+            className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full overflow-hidden shrink-0 border border-slate-200 bg-slate-100 flex items-center justify-center shadow-2xs ${student.photoUrl && onOpenLightbox ? 'cursor-pointer hover:opacity-85' : ''}`}
+            title={student.photoUrl ? 'คลิกเพื่อดูรูปภาพขนาดใหญ่' : 'รูปโปรไฟล์นักเรียน'}
+          >
+            {student.photoUrl ? (
+              <img src={student.photoUrl} alt="" className="w-full h-full object-cover" />
+            ) : (
+              <User className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-slate-400" />
+            )}
+          </div>
           <span className="font-bold text-slate-800 text-[11px] sm:text-xs whitespace-normal break-words leading-snug">
             {student.prefix}{student.firstName} {student.lastName}
           </span>

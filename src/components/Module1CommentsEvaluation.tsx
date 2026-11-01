@@ -23,7 +23,8 @@ import {
   Star,
   Award,
   Layers,
-  Sparkles
+  Sparkles,
+  User
 } from 'lucide-react';
 
 interface Module1CommentsEvaluationProps {
@@ -65,7 +66,8 @@ export const Module1CommentsEvaluation: React.FC<Module1CommentsEvaluationProps>
   registeredHomeroomGrades = [],
   selectedGrade,
   onSelectGrade,
-  onShowToast
+  onShowToast,
+  onOpenLightbox
 }) => {
   const isReadOnly = user.role === 'admin';
 
@@ -104,7 +106,7 @@ export const Module1CommentsEvaluation: React.FC<Module1CommentsEvaluationProps>
     const order: GradeLevel[] = [
       'อ.1', 'อ.2', 'อ.3',
       'ป.1', 'ป.2', 'ป.3', 'ป.4', 'ป.5', 'ป.6',
-      'ม.1', 'ม.2', 'ม.3', 'ม.4', 'ม.5', 'ม.6'
+      'ม.1', 'ม.2', 'ม.3'
     ];
     return order.filter(g => gradesSet.has(g));
   }, [students, user.role, registeredHomeroomGrades]);
@@ -381,8 +383,33 @@ export const Module1CommentsEvaluation: React.FC<Module1CommentsEvaluationProps>
                         </span>
                       </td>
                       <td className="py-3 px-4 font-bold text-slate-800">
-                        {st.prefix}{st.firstName} {st.lastName}
-                        {st.nickname && <span className="text-slate-400 font-normal ml-1">({st.nickname})</span>}
+                        <div className="flex items-center gap-2.5">
+                          <div
+                            onClick={() => {
+                              if (st.photoUrl && onOpenLightbox) {
+                                onOpenLightbox(st.photoUrl, `${st.prefix}${st.firstName} ${st.lastName}`, `ชั้น ${st.gradeLevel} • เลขที่ ${st.rollNumber ?? (idx + 1)}`);
+                              }
+                            }}
+                            className={`w-8 h-8 rounded-full overflow-hidden shrink-0 border border-slate-200 bg-slate-100 flex items-center justify-center shadow-2xs ${st.photoUrl && onOpenLightbox ? 'cursor-pointer hover:opacity-85' : ''}`}
+                            title={st.photoUrl ? 'คลิกเพื่อดูรูปภาพขนาดใหญ่' : 'รูปโปรไฟล์นักเรียน'}
+                          >
+                            {st.photoUrl ? (
+                              <img src={st.photoUrl} alt="" className="w-full h-full object-cover" />
+                            ) : (
+                              <User className="w-4 h-4 text-slate-400" />
+                            )}
+                          </div>
+                          <div className="flex flex-col min-w-0">
+                            <span className="font-bold text-slate-800 text-xs">
+                              {st.prefix}{st.firstName} {st.lastName}
+                            </span>
+                            {st.nickname && (
+                              <span className="text-slate-400 font-normal text-[11px]">
+                                ({st.nickname})
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </td>
                       <td className="py-3 px-4 text-center">
                         {hasEvaluated ? (
@@ -440,11 +467,28 @@ export const Module1CommentsEvaluation: React.FC<Module1CommentsEvaluationProps>
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-fadeIn">
           <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-3xl overflow-hidden my-8">
             <div className="bg-gradient-to-r from-indigo-900 to-blue-900 px-6 py-5 text-white flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-bold">ประเมินพฤติกรรมและความคิดเห็น (8 ด้าน)</h3>
-                <p className="text-indigo-200 text-xs mt-0.5">
-                  นักเรียน: <span className="text-white font-bold">{selectedStudentForEval.prefix}{selectedStudentForEval.firstName} {selectedStudentForEval.lastName}</span> (ชั้น {selectedStudentForEval.gradeLevel}) | ภาคเรียนที่ {semester} ปีการศึกษา {academicYear}
-                </p>
+              <div className="flex items-center gap-3">
+                <div
+                  onClick={() => {
+                    if (selectedStudentForEval.photoUrl && onOpenLightbox) {
+                      onOpenLightbox(selectedStudentForEval.photoUrl, `${selectedStudentForEval.prefix}${selectedStudentForEval.firstName} ${selectedStudentForEval.lastName}`, `ชั้น ${selectedStudentForEval.gradeLevel}`);
+                    }
+                  }}
+                  className={`w-11 h-11 rounded-full overflow-hidden shrink-0 border-2 border-white/30 bg-white/10 flex items-center justify-center shadow-xs ${selectedStudentForEval.photoUrl && onOpenLightbox ? 'cursor-pointer hover:opacity-85' : ''}`}
+                  title={selectedStudentForEval.photoUrl ? 'คลิกเพื่อดูรูปภาพขนาดใหญ่' : 'รูปโปรไฟล์นักเรียน'}
+                >
+                  {selectedStudentForEval.photoUrl ? (
+                    <img src={selectedStudentForEval.photoUrl} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <User className="w-5 h-5 text-indigo-200" />
+                  )}
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold">ประเมินพฤติกรรมและความคิดเห็น (8 ด้าน)</h3>
+                  <p className="text-indigo-200 text-xs mt-0.5">
+                    นักเรียน: <span className="text-white font-bold">{selectedStudentForEval.prefix}{selectedStudentForEval.firstName} {selectedStudentForEval.lastName}</span> (ชั้น {selectedStudentForEval.gradeLevel}) | ภาคเรียนที่ {semester} ปีการศึกษา {academicYear}
+                  </p>
+                </div>
               </div>
               <button 
                 onClick={() => setSelectedStudentForEval(null)}

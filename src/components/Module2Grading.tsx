@@ -257,7 +257,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
     const gradeOrder: GradeLevel[] = [
       'อ.1', 'อ.2', 'อ.3',
       'ป.1', 'ป.2', 'ป.3', 'ป.4', 'ป.5', 'ป.6',
-      'ม.1', 'ม.2', 'ม.3', 'ม.4', 'ม.5', 'ม.6'
+      'ม.1', 'ม.2', 'ม.3'
     ];
     const homeroomSet = new Set<string>();
     allMembers.forEach(m => {

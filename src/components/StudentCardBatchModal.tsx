@@ -254,7 +254,6 @@ export const getGradeStageLabel = (gradeLevel: string): string => {
   if (['ป.1', 'ป.2', 'ป.3'].includes(g)) return 'ชั้นประถมศึกษาตอนต้น';
   if (['ป.4', 'ป.5', 'ป.6'].includes(g)) return 'ชั้นประถมศึกษาตอนปลาย';
   if (['ม.1', 'ม.2', 'ม.3'].includes(g)) return 'ชั้นมัธยมศึกษาตอนต้น';
-  if (['ม.4', 'ม.5', 'ม.6'].includes(g)) return 'ชั้นมัธยมศึกษาตอนปลาย';
   if (g.includes('อนุบาล')) return 'ชั้นอนุบาล';
   if (g.includes('ประถม')) return 'ชั้นประถมศึกษา';
   return `ชั้น${g}`;
