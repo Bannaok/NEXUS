@@ -1082,7 +1082,7 @@ export const Module4Assignments: React.FC<Module4Props> = ({
 
         {/* ปีการศึกษา (แสดงผลตามที่ Admin กำหนดในหน้าตั้งค่า) และปุ่มสร้างรายการ (+) */}
         <div className="flex items-center gap-2 shrink-0 ml-auto">
-          <div className="flex items-center gap-1.5 bg-white px-2.5 sm:px-3 py-1.5 rounded-xl border border-purple-300/90 shadow-2xs shrink-0">
+          <div className="hidden sm:flex items-center gap-1.5 bg-white px-2.5 sm:px-3 py-1.5 rounded-xl border border-purple-300/90 shadow-2xs shrink-0">
             <Sparkles className="w-3.5 h-3.5 text-purple-600 shrink-0" />
             <span className="text-xs font-bold text-slate-800 whitespace-nowrap">ปีการศึกษา {currentAcademicYear}</span>
           </div>
@@ -2156,7 +2156,7 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                     <span className="text-[10px] uppercase font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md font-mono">
                       {selectedTaskDetailModal.type === 'announcement' ? 'ประกาศข่าวสาร' : 'งานมอบหมาย'}
                     </span>
-                    <span className="text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-md font-mono">
+                    <span className="hidden sm:inline-block text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded-md font-mono">
                       ปีการศึกษา {selectedTaskDetailModal.academicYear || currentAcademicYear}
                     </span>
                   </div>

@@ -3,7 +3,8 @@ import {
   SchoolInfo, 
   MemberAccount, 
   UserSession,
-  GradeLevel
+  GradeLevel,
+  Student
 } from '../types';
 import { StorageService } from '../services/storage';
 import { 
@@ -16,7 +17,8 @@ import {
   UserCheck, 
   Lock,
   Phone,
-  Calendar
+  Calendar,
+  LogOut
 } from 'lucide-react';
 import { cleanTeacherName } from './ModuleDataOthers';
 
@@ -24,24 +26,28 @@ interface SettingsProps {
   user: UserSession;
   schoolInfo: SchoolInfo;
   members: MemberAccount[];
+  students?: Student[];
   onClose: () => void;
   onSaveSchoolInfo: (info: SchoolInfo) => void;
   onSaveMember: (member: MemberAccount) => void;
   onDeleteMember?: (id: string) => void;
   onShowToast: (type: 'success' | 'warning' | 'error' | 'info', title: string, msg: string) => void;
   onSaveUserSession?: (user: UserSession) => void;
+  onLogout?: () => void;
 }
 
 export const SettingsView: React.FC<SettingsProps> = ({
   user,
   schoolInfo,
   members,
+  students,
   onClose,
   onSaveSchoolInfo,
   onSaveMember,
   onDeleteMember,
   onShowToast,
-  onSaveUserSession
+  onSaveUserSession,
+  onLogout
 }) => {
   const [activeTab, setActiveTab] = useState<'profile' | 'school'>(user.role === 'admin' ? 'school' : 'profile');
 
@@ -61,6 +67,33 @@ export const SettingsView: React.FC<SettingsProps> = ({
   const [userGradeLevel, setUserGradeLevel] = useState<string>(
     (user.assignedGrade as string) || 'ป.1'
   );
+  const [userRoom, setUserRoom] = useState<string>(() => {
+    const foundMem = members.find(m => m.id === user.id || m.username.toLowerCase() === user.username.toLowerCase());
+    const rawRoom = user.assignedRoom || foundMem?.room || '1';
+    return rawRoom.toString().trim().replace(/^ห้อง\s*/, '') || '1';
+  });
+
+  // Dynamically detect rooms from students for the selected grade (and any grade with multiple rooms)
+  const allStudentsList = students && students.length > 0 ? students : StorageService.getStudents();
+  const availableRoomsForSelectedGrade = React.useMemo(() => {
+    const rooms = new Set<string>(['1']);
+    allStudentsList
+      .filter(s => (s.gradeLevel || '').trim() === userGradeLevel)
+      .forEach(s => {
+        const r = (s.room || '1').toString().trim().replace(/^ห้อง\s*/, '') || '1';
+        if (r) rooms.add(r);
+      });
+    // Also check if any member is already assigned to a room in this grade
+    members
+      .filter(m => (m.gradeLevel || '').trim() === userGradeLevel && m.room)
+      .forEach(m => {
+        const r = (m.room || '1').toString().trim().replace(/^ห้อง\s*/, '') || '1';
+        if (r) rooms.add(r);
+      });
+    if (userRoom) rooms.add(userRoom);
+    return Array.from(rooms).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [allStudentsList, members, userGradeLevel, userRoom]);
+
   const [userLearningGroup, setUserLearningGroup] = useState<string>(
     user.learningGroup || 'กลุ่มสาระการเรียนรู้ภาษาไทย'
   );
@@ -201,6 +234,9 @@ export const SettingsView: React.FC<SettingsProps> = ({
     const cleanLast = userLastName.trim();
     const full = `${userPrefix.trim()}${cleanFirst}${cleanLast ? ` ${cleanLast}` : ''}`.trim();
 
+    const normalizedRoom = (userRoom || '1').toString().trim().replace(/^ห้อง\s*/, '') || '1';
+    const isHomeroom = userGradeLevel !== 'ไม่ได้เป็นครูประจำชั้น';
+
     const updatedUser: UserSession = {
       ...user,
       prefix: userPrefix.trim(),
@@ -208,7 +244,8 @@ export const SettingsView: React.FC<SettingsProps> = ({
       lastName: cleanLast,
       fullName: full || user.fullName,
       phone: userPhone,
-      assignedGrade: userGradeLevel === 'ไม่ได้เป็นครูประจำชั้น' ? undefined : userGradeLevel,
+      assignedGrade: isHomeroom ? userGradeLevel : undefined,
+      assignedRoom: isHomeroom ? normalizedRoom : undefined,
       learningGroup: userLearningGroup,
       avatarUrl: userAvatarUrl
     };
@@ -229,13 +266,14 @@ export const SettingsView: React.FC<SettingsProps> = ({
         lastName: userLastName,
         fullName: full || foundMem.fullName,
         phone: userPhone,
-        gradeLevel: (userGradeLevel === 'ไม่ได้เป็นครูประจำชั้น' ? undefined : userGradeLevel) as GradeLevel,
+        gradeLevel: (isHomeroom ? userGradeLevel : undefined) as GradeLevel,
+        room: isHomeroom ? normalizedRoom : undefined,
         learningGroup: userLearningGroup,
         avatarUrl: userAvatarUrl
       });
     }
 
-    // Also synchronize phone to matching Personnel record so leave requests and official forms have the phone
+    // Also synchronize phone & homeroom grade/room to matching Personnel record
     try {
       const allPersonnel = StorageService.getPersonnel();
       const matchedP = allPersonnel.find(p => 
@@ -249,14 +287,22 @@ export const SettingsView: React.FC<SettingsProps> = ({
           phone: userPhone || matchedP.phone,
           prefix: userPrefix || matchedP.prefix,
           firstName: userFirstName || matchedP.firstName,
-          lastName: userLastName || matchedP.lastName
+          lastName: userLastName || matchedP.lastName,
+          advisorGrade: isHomeroom ? (userGradeLevel as GradeLevel) : '',
+          advisorRoom: isHomeroom ? normalizedRoom : undefined
         });
       }
     } catch {
       // ignore sync errors
     }
 
-    onShowToast('success', 'บันทึกข้อมูลส่วนตัวสำเร็จ 🎉', 'อัปเดตข้อมูลส่วนตัว เบอร์โทรติดต่อ และรูปโปรไฟล์เรียบร้อยแล้ว');
+    onShowToast(
+      'success',
+      'บันทึกข้อมูลส่วนตัวสำเร็จ 🎉',
+      isHomeroom
+        ? `อัปเดตข้อมูลครูประจำชั้น ${userGradeLevel} ห้อง ${normalizedRoom} เรียบร้อยแล้ว`
+        : 'อัปเดตข้อมูลส่วนตัว เบอร์โทรติดต่อ และรูปโปรไฟล์เรียบร้อยแล้ว'
+    );
   };
 
   return (
@@ -276,14 +322,31 @@ export const SettingsView: React.FC<SettingsProps> = ({
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl transition-colors cursor-pointer"
-            title="ปิดหน้าต่างตั้งค่า"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            {onLogout && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onLogout();
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+                title="ออกจากระบบ"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>ออกจากระบบ</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl transition-colors cursor-pointer"
+              title="ปิดหน้าต่างตั้งค่า"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Sub Tabs Bar */}
@@ -320,7 +383,20 @@ export const SettingsView: React.FC<SettingsProps> = ({
             </button>
           )}
 
-          {/* Google Sheets tab removed (Developer only) */}
+          {onLogout && (
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onLogout();
+              }}
+              className="ml-auto px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 active:scale-95 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer border border-rose-200 shrink-0"
+              title="ออกจากระบบ"
+            >
+              <LogOut className="w-3.5 h-3.5 text-rose-600" />
+              <span>ออกจากระบบ</span>
+            </button>
+          )}
         </div>
 
         {/* Modal Body Content */}
@@ -469,13 +545,27 @@ export const SettingsView: React.FC<SettingsProps> = ({
 
                 {/* 3. Grade & Learning Group */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
+                  <div className="space-y-2">
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
                       ครูประจำชั้นระดับชั้น *
                     </label>
                     <select
                       value={userGradeLevel}
-                      onChange={(e) => setUserGradeLevel(e.target.value)}
+                      onChange={(e) => {
+                        const nextGrade = e.target.value;
+                        setUserGradeLevel(nextGrade);
+                        // Check if current room exists in the newly selected grade; if not, default to '1'
+                        const nextRooms = new Set<string>(['1']);
+                        allStudentsList
+                          .filter(s => (s.gradeLevel || '').trim() === nextGrade)
+                          .forEach(s => {
+                            const r = (s.room || '1').toString().trim().replace(/^ห้อง\s*/, '') || '1';
+                            if (r) nextRooms.add(r);
+                          });
+                        if (!nextRooms.has(userRoom)) {
+                          setUserRoom('1');
+                        }
+                      }}
                       className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 font-semibold bg-white cursor-pointer"
                     >
                       <option value="อ.1">ชั้นอนุบาล 1 (อ.1)</option>
@@ -495,6 +585,45 @@ export const SettingsView: React.FC<SettingsProps> = ({
                       <option value="ม.6">ชั้นมัธยมศึกษาปีที่ 6 (ม.6)</option>
                       <option value="ไม่ได้เป็นครูประจำชั้น">ไม่ได้เป็นครูประจำชั้น</option>
                     </select>
+
+                    {userGradeLevel !== 'ไม่ได้เป็นครูประจำชั้น' && (
+                      <div className="pt-1">
+                        <label className="block text-[11px] font-bold text-indigo-700 mb-1.5">
+                          เลือกห้องประจำชั้น ({userGradeLevel}) *
+                        </label>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {availableRoomsForSelectedGrade.map(rm => {
+                            const isSelected = userRoom === rm;
+                            const countInRoom = allStudentsList.filter(
+                              s =>
+                                (s.gradeLevel || '').trim() === userGradeLevel &&
+                                ((s.room || '1').toString().trim().replace(/^ห้อง\s*/, '') || '1') === rm
+                            ).length;
+                            return (
+                              <button
+                                key={rm}
+                                type="button"
+                                onClick={() => setUserRoom(rm)}
+                                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border flex items-center gap-1.5 ${
+                                  isSelected
+                                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                                    : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/50'
+                                }`}
+                              >
+                                <span>ห้อง {rm}</span>
+                                <span
+                                  className={`text-[10px] px-1.5 py-0.5 rounded-md font-semibold ${
+                                    isSelected ? 'bg-indigo-500 text-indigo-100' : 'bg-slate-100 text-slate-500'
+                                  }`}
+                                >
+                                  {countInRoom} คน
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div>

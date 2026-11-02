@@ -29,7 +29,8 @@ import {
   CheckCircle2,
   Award,
   BookOpen,
-  Loader2
+  Loader2,
+  ChevronDown
 } from 'lucide-react';
 import { StorageService } from '../services/storage';
 import { ThreeReportsModal } from './ThreeReportsModal';
@@ -230,6 +231,9 @@ export const Module7Reports: React.FC<Module7Props> = ({
   const [milkTeethModal, setMilkTeethModal] = useState<{ grade: GradeLevel; type: 'milk' | 'teeth' } | null>(null);
   const [milkTeethSelectedMonthKey, setMilkTeethSelectedMonthKey] = useState<string | 'all'>('all');
 
+  // Mobile ปพ.5 dropdown state
+  const [openPp5Grade, setOpenPp5Grade] = useState<GradeLevel | null>(null);
+
   // Synchronize live grades, subjects, dailyTracking, attendance, students, and personnel from storage or props
   const effectiveStudents = useMemo(() => {
     const localStudents = StorageService.getStudents();
@@ -261,6 +265,54 @@ export const Module7Reports: React.FC<Module7Props> = ({
     const local = StorageService.getAttendance();
     return (local && local.length > 0) ? local : attendance;
   }, [attendance, attendancePopupGrade]);
+
+  const normalizeRoom = (r?: string) => (r || '1').toString().trim().replace(/^ห้อง\s*/, '') || '1';
+
+  // Selected room for reports & print modals (defaults to member's assignedRoom if applicable, else '1')
+  const [selectedRoom, setSelectedRoom] = useState<string>(() => {
+    if (user.role === 'member' && user.assignedRoom) {
+      return normalizeRoom(user.assignedRoom);
+    }
+    return '1';
+  });
+
+  const [selectedRoomByGrade, setSelectedRoomByGrade] = useState<Record<string, string>>(() => {
+    if (user.role === 'member' && user.assignedGrade && user.assignedRoom) {
+      return { [user.assignedGrade]: normalizeRoom(user.assignedRoom) };
+    }
+    return {};
+  });
+
+  // ดึงรายการห้องจากรายชื่อนักเรียนในหน้าข้อมูลนักเรียน (หากมีนักเรียนห้อง 2 จะแสดงห้อง 2 หากไม่มีจะแสดงเฉพาะห้อง 1)
+  const getRoomsForGrade = (grade: GradeLevel | null): string[] => {
+    if (!grade) return ['1'];
+    const rooms = new Set<string>(['1']);
+    (effectiveStudents || [])
+      .filter(s => s.gradeLevel === grade)
+      .forEach(s => rooms.add(normalizeRoom(s.room)));
+    return Array.from(rooms).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  };
+
+  const getSelectedRoomForGrade = (grade: GradeLevel | null): string => {
+    if (!grade) return normalizeRoom(selectedRoom);
+    const rooms = getRoomsForGrade(grade);
+    const saved = selectedRoomByGrade[grade];
+    if (saved && rooms.includes(normalizeRoom(saved))) {
+      return normalizeRoom(saved);
+    }
+    if (rooms.includes(normalizeRoom(selectedRoom))) {
+      return normalizeRoom(selectedRoom);
+    }
+    return rooms[0] || '1';
+  };
+
+  const handleSelectRoomForGrade = (grade: GradeLevel | null, rm: string) => {
+    const norm = normalizeRoom(rm);
+    setSelectedRoom(norm);
+    if (grade) {
+      setSelectedRoomByGrade(prev => ({ ...prev, [grade]: norm }));
+    }
+  };
 
   // Orientation state for แปรงฟัน, ดื่มนม, เช็กชื่อ (Default is always 'portrait' แนวตั้ง)
   const [reportOrientation, setReportOrientation] = useState<'portrait' | 'landscape'>('portrait');
@@ -309,15 +361,25 @@ export const Module7Reports: React.FC<Module7Props> = ({
     return list.length > 0 ? list : personnel;
   }, [personnel, activePopupGrade]);
 
-  // Auto-detect homeroom teacher when popup grade changes
+  // Auto-detect homeroom teacher when popup grade or selectedRoom changes
   React.useEffect(() => {
     const targetGrade = attendancePopupGrade || assessmentPopupGrade || threeReportsPopupGrade || milkTeethModal?.grade;
     if (targetGrade) {
-      // 1. Homeroom Teacher: Match advisorGrade, position, or current grade list
-      const advisor = personnel.find(p => 
-        p.advisorGrade === targetGrade || 
-        (p.position && (p.position.includes(`ประจำชั้น ${targetGrade}`) || p.position.includes(`(${targetGrade})`)))
-      ) || currentGradeAdvisors[0] || personnel[0];
+      const targetRm = normalizeRoom(selectedRoom);
+      const rooms = getRoomsForGrade(targetGrade);
+      if (!rooms.includes(targetRm)) {
+        setSelectedRoom(rooms[0] || '1');
+      }
+
+      // 1. Homeroom Teacher: Match advisorGrade + advisorRoom first, then advisorGrade
+      const advisor =
+        personnel.find(p => p.advisorGrade === targetGrade && normalizeRoom(p.advisorRoom) === targetRm) ||
+        personnel.find(p => 
+          p.advisorGrade === targetGrade || 
+          (p.position && (p.position.includes(`ประจำชั้น ${targetGrade}`) || p.position.includes(`(${targetGrade})`)))
+        ) ||
+        currentGradeAdvisors[0] ||
+        personnel[0];
       
       if (advisor) {
         setSelectedAdvisorId(advisor.id);
@@ -328,7 +390,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
         setSelectedAcademicHeadId(academicPersonnelList[0].id);
       }
     }
-  }, [attendancePopupGrade, assessmentPopupGrade, threeReportsPopupGrade, milkTeethModal, personnel, academicPersonnelList, selectedAcademicHeadId, currentGradeAdvisors]);
+  }, [attendancePopupGrade, assessmentPopupGrade, threeReportsPopupGrade, milkTeethModal, selectedRoom, personnel, academicPersonnelList, selectedAcademicHeadId, currentGradeAdvisors]);
 
   // 100 School Days for Milk & Teeth (matching Module 1)
   const milkTeethSchoolDaysList = useMemo(() => {
@@ -469,38 +531,63 @@ export const Module7Reports: React.FC<Module7Props> = ({
     });
   };
 
-  // Filter students for selected grade in main roster view (sorted by rollNumber 1 -> last)
+  // Filter students for selected grade & room in main roster view (sorted by rollNumber 1 -> last)
   const gradeStudents = useMemo(() => {
+    const targetRm = normalizeRoom(selectedRoom);
     return selectedGrade 
-      ? sortStudentsByRoll(effectiveStudents.filter(s => s.gradeLevel === selectedGrade))
+      ? sortStudentsByRoll(
+          effectiveStudents.filter(
+            s => s.gradeLevel === selectedGrade && normalizeRoom(s.room) === targetRm
+          )
+        )
       : [];
-  }, [effectiveStudents, selectedGrade]);
+  }, [effectiveStudents, selectedGrade, selectedRoom]);
 
-  // Advisor teacher assigned to selected grade
+  // Advisor teacher assigned to selected grade & room
   const classAdvisor = useMemo(() => {
     if (!selectedGrade) return null;
-    return effectivePersonnel.find(p => p.advisorGrade === selectedGrade) || null;
-  }, [effectivePersonnel, selectedGrade]);
+    const targetRm = normalizeRoom(selectedRoom);
+    return (
+      effectivePersonnel.find(p => p.advisorGrade === selectedGrade && normalizeRoom(p.advisorRoom) === targetRm) ||
+      effectivePersonnel.find(p => p.advisorGrade === selectedGrade) ||
+      null
+    );
+  }, [effectivePersonnel, selectedGrade, selectedRoom]);
 
-  // Filter students for popup grade (เช็กชื่อ - sorted by rollNumber 1 -> last)
+  // Filter students for popup grade & room (เช็กชื่อ - sorted by rollNumber 1 -> last)
   const popupGradeStudents = useMemo(() => {
+    const targetRm = normalizeRoom(selectedRoom);
     return attendancePopupGrade
-      ? sortStudentsByRoll(effectiveStudents.filter(s => s.gradeLevel === attendancePopupGrade))
+      ? sortStudentsByRoll(
+          effectiveStudents.filter(
+            s => s.gradeLevel === attendancePopupGrade && normalizeRoom(s.room) === targetRm
+          )
+        )
       : [];
-  }, [effectiveStudents, attendancePopupGrade]);
+  }, [effectiveStudents, attendancePopupGrade, selectedRoom]);
 
-  // Advisor teacher for popup grade
+  // Advisor teacher for popup grade & room
   const popupClassAdvisor = useMemo(() => {
     if (!attendancePopupGrade) return null;
-    return effectivePersonnel.find(p => p.advisorGrade === attendancePopupGrade) || null;
-  }, [effectivePersonnel, attendancePopupGrade]);
+    const targetRm = normalizeRoom(selectedRoom);
+    return (
+      effectivePersonnel.find(p => p.advisorGrade === attendancePopupGrade && normalizeRoom(p.advisorRoom) === targetRm) ||
+      effectivePersonnel.find(p => p.advisorGrade === attendancePopupGrade) ||
+      null
+    );
+  }, [effectivePersonnel, attendancePopupGrade, selectedRoom]);
 
-  // Filter students for assessment popup grade (sorted by rollNumber 1 -> last)
+  // Filter students for assessment popup grade & room (sorted by rollNumber 1 -> last)
   const assessmentGradeStudents = useMemo(() => {
+    const targetRm = normalizeRoom(selectedRoom);
     return assessmentPopupGrade
-      ? sortStudentsByRoll(effectiveStudents.filter(s => s.gradeLevel === assessmentPopupGrade))
+      ? sortStudentsByRoll(
+          effectiveStudents.filter(
+            s => s.gradeLevel === assessmentPopupGrade && normalizeRoom(s.room) === targetRm
+          )
+        )
       : [];
-  }, [effectiveStudents, assessmentPopupGrade]);
+  }, [effectiveStudents, assessmentPopupGrade, selectedRoom]);
 
   // Filter subjects for assessment popup grade: Pull academic subjects (!isActivity) registered by teaching members of that grade
   const assessmentGradeSubjects = useMemo(() => {
@@ -525,6 +612,12 @@ export const Module7Reports: React.FC<Module7Props> = ({
       list = effectiveSubjects.filter(s => !s.isActivity && s.gradeLevel === assessmentPopupGrade);
     }
 
+    // Prefer subjects matching the selectedRoom if any exist for that room
+    const roomMatched = list.filter(s => normalizeRoom(s.room) === normalizeRoom(selectedRoom));
+    if (roomMatched.length > 0) {
+      list = roomMatched;
+    }
+
     // Filter subjects where member registered to teach
     const registered = list.filter(s => 
       Boolean(s.teacherId && s.teacherId.trim() !== '') || 
@@ -539,7 +632,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
       if (cmp !== 0) return cmp;
       return (a.name || '').localeCompare(b.name || '', 'th');
     });
-  }, [effectiveSubjects, assessmentPopupGrade, selectedSemester, selectedYear]);
+  }, [effectiveSubjects, assessmentPopupGrade, selectedSemester, selectedYear, selectedRoom]);
 
   // Filter activities (isActivity === true) for assessment popup grade
   const assessmentGradeActivities = useMemo(() => {
@@ -562,6 +655,11 @@ export const Module7Reports: React.FC<Module7Props> = ({
     // 3. If still empty, match grade only
     if (list.length === 0) {
       list = effectiveSubjects.filter(s => Boolean(s.isActivity) && s.gradeLevel === assessmentPopupGrade);
+    }
+
+    const roomMatchedActs = list.filter(s => normalizeRoom(s.room) === normalizeRoom(selectedRoom));
+    if (roomMatchedActs.length > 0) {
+      list = roomMatchedActs;
     }
 
     // Also include any activity records recorded in effectiveGrades for students of this grade in this semester/year
@@ -627,7 +725,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
       if (cmp !== 0) return cmp;
       return (a.name || '').localeCompare(b.name || '', 'th');
     });
-  }, [effectiveSubjects, effectiveGrades, assessmentGradeStudents, assessmentPopupGrade, selectedSemester, selectedYear]);
+  }, [effectiveSubjects, effectiveGrades, assessmentGradeStudents, assessmentPopupGrade, selectedSemester, selectedYear, selectedRoom]);
 
   // Chunk subjects into sets of 5 (5 วิชา ต่อ 1 แผ่น A4 แนวตั้ง)
   const assessmentSubjectChunks = useMemo(() => {
@@ -757,6 +855,11 @@ export const Module7Reports: React.FC<Module7Props> = ({
       yearList = effectiveSubjects.filter(s => !s.isActivity && s.gradeLevel === assessmentPopupGrade);
     }
 
+    const roomMatchedYear = yearList.filter(s => normalizeRoom(s.room) === normalizeRoom(selectedRoom));
+    if (roomMatchedYear.length > 0) {
+      yearList = roomMatchedYear;
+    }
+
     const registered = yearList.filter(s =>
       Boolean(s.teacherId && s.teacherId.trim() !== '') ||
       Boolean(s.teacherName && s.teacherName.trim() !== '')
@@ -787,7 +890,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
       if (cmp !== 0) return cmp;
       return (a.name || '').localeCompare(b.name || '', 'th');
     });
-  }, [effectiveSubjects, assessmentPopupGrade, isAssessmentP1ToP6, selectedYear, assessmentGradeSubjects]);
+  }, [effectiveSubjects, assessmentPopupGrade, isAssessmentP1ToP6, selectedYear, assessmentGradeSubjects, selectedRoom]);
 
   const extractRecordNumericScore = (rec?: GradeRecord): number | null => {
     if (!rec) return null;
@@ -1270,7 +1373,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
         {/* Right Side: Academic Year, Semester, and Adjacent Primary/Secondary Toggle */}
         <div className="flex items-center gap-2 flex-wrap">
           {user.role === 'admin' ? (
-            <>
+            <div className="hidden sm:flex items-center gap-2">
               <select
                 value={adminSelectedYear}
                 onChange={(e) => setAdminSelectedYear(e.target.value)}
@@ -1289,9 +1392,9 @@ export const Module7Reports: React.FC<Module7Props> = ({
                 <option value="1">ภาคเรียนที่ 1</option>
                 <option value="2">ภาคเรียนที่ 2</option>
               </select>
-            </>
+            </div>
           ) : (
-            <div className="px-3 py-2 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold whitespace-nowrap">
+            <div className="hidden sm:block px-3 py-2 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold whitespace-nowrap">
               ภาคเรียนที่ {selectedSemester} • ปีการศึกษา {selectedYear}
             </div>
           )}
@@ -1344,199 +1447,327 @@ export const Module7Reports: React.FC<Module7Props> = ({
       */}
       {!selectedGrade ? (
         <div className="space-y-2">
-          {/* Orientation Selector Toolbar for แปรงฟัน, ดื่มนม, เช็กชื่อ */}
-          <div className="bg-white px-3.5 py-2 rounded-xl border border-slate-200/90 shadow-2xs flex flex-wrap items-center justify-between gap-2.5 text-xs">
-            <div className="flex items-center gap-2 text-slate-700 font-semibold">
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              <span>รูปแบบเอกสารรายงาน (แปรงฟัน / ดื่มนม / เช็กชื่อ):</span>
-              <span className="text-[11px] text-slate-400 font-normal hidden sm:inline">
-                (ค่าเริ่มต้นเป็นแนวตั้งเสมอ สามารถเลือกเป็นแนวนอนได้)
-              </span>
-            </div>
-
-            <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200">
-              <button
-                type="button"
-                onClick={() => setReportOrientation('portrait')}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                  reportOrientation === 'portrait'
-                    ? 'bg-white text-emerald-800 shadow-xs'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-                title="ค่าเริ่มต้น: กระดาษ A4 แนวตั้ง (210 × 297 มม.)"
-              >
-                <FileText className="w-3.5 h-3.5" />
-                <span>แนวตั้ง (เริ่มต้น)</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setReportOrientation('landscape')}
-                className={`px-3 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                  reportOrientation === 'landscape'
-                    ? 'bg-white text-emerald-800 shadow-xs'
-                    : 'text-slate-500 hover:text-slate-800'
-                }`}
-                title="เลือกพิมพ์/ดูแบบกระดาษ A4 แนวนอน (297 × 210 มม.)"
-              >
-                <FileText className="w-3.5 h-3.5 rotate-90" />
-                <span>แนวนอน</span>
-              </button>
-            </div>
-          </div>
 
           {currentGradeList.map((g) => {
-            const studentCount = studentCountByGrade[g] || 0;
-            const hasStudents = studentCount > 0;
+            const roomsForG = getRoomsForGrade(g);
+            const activeRoomForG = getSelectedRoomForGrade(g);
+            const roomStudentCount = (effectiveStudents || []).filter(
+              s => s.gradeLevel === g && normalizeRoom(s.room) === activeRoomForG
+            ).length;
+            const totalGradeStudents = studentCountByGrade[g] || 0;
+            const hasStudents = roomStudentCount > 0 || totalGradeStudents > 0;
 
             return (
               <div
                 key={g}
-                className={`w-full p-3 sm:p-3.5 rounded-xl border transition-all flex items-center justify-between gap-3 group ${
+                className={`w-full rounded-xl border transition-all overflow-hidden group ${
                   hasStudents
                     ? 'bg-white hover:bg-purple-50/40 border-slate-200 hover:border-purple-300 shadow-xs'
                     : 'bg-slate-100/60 border-slate-200/70 opacity-55 hover:opacity-85 transition-opacity'
                 }`}
               >
-                {/* Clickable Grade Item to go directly to student roster */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedGrade(g);
-                    setSearchTerm('');
-                  }}
-                  className="flex items-center gap-3.5 cursor-pointer flex-1 text-left"
-                >
-                  <div className={`w-10 h-10 rounded-xl font-bold flex items-center justify-center text-sm transition-colors shrink-0 ${
-                    hasStudents
-                      ? 'bg-purple-100 text-purple-700 group-hover:bg-purple-600 group-hover:text-white'
-                      : 'bg-slate-200 text-slate-400'
-                  }`}>
-                    {g}
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className={`text-sm font-bold transition-colors ${
-                        hasStudents
-                          ? 'text-slate-800 group-hover:text-purple-700'
-                          : 'text-slate-500 font-semibold'
-                      }`}>
-                        {getGradeFullName(g)}
-                      </span>
-                      {hasStudents ? (
-                        <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-200">
-                          {studentCount} คน
-                        </span>
-                      ) : (
-                        <span className="px-2 py-0.5 rounded-full bg-slate-200/80 text-slate-500 text-[10px] font-medium border border-slate-300/60">
-                          ไม่มีนักเรียน
-                        </span>
-                      )}
-                    </div>
-                    <div className={`text-[11px] ${hasStudents ? 'text-slate-400' : 'text-slate-400'}`}>
-                      {hasStudents ? 'คลิกเพื่อดูตารางรายชื่อนักเรียน' : 'ไม่มีข้อมูลนักเรียนในชั้นนี้ (จากหน้าข้อมูล/อื่นๆ)'}
-                    </div>
-                  </div>
-                </button>
-
-                {/* Right Action: Dedicated "(3)รายงาน", "วัดผล", "เช็กชื่อ", "ดื่มนม", and "แปรงฟัน" Buttons -> Opens Pop-up Modals */}
-                <div className={`flex items-center gap-2 shrink-0 flex-wrap ${!hasStudents ? 'opacity-75' : ''}`}>
-                  {/* Dedicated "(3)รายงาน" Button */}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setThreeReportsPopupGrade(g);
-                    }}
-                    className={`px-3 py-2 rounded-xl text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer ${
-                      hasStudents ? 'bg-teal-600 hover:bg-teal-700' : 'bg-slate-400 hover:bg-teal-600'
-                    }`}
-                    title="เปิด Pop-up รายงานประเมิน 3 เล่ม (การอ่านคิดวิเคราะห์เขียน, คุณลักษณะอันพึงประสงค์, สมรรถนะสำคัญ)"
-                  >
-                    <BookOpen className="w-4 h-4" />
-                    <span>(3)รายงาน</span>
-                  </button>
-
-                  {/* Dedicated "วัดผล" Button */}
-                  {/* Dedicated "วัดผล" Button */}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setAssessmentPopupGrade(g);
-                      setAssessmentSelectedChunkIndex(0);
-                    }}
-                    className={`px-3.5 py-2 rounded-xl text-white font-bold text-[13px] flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer ${
-                      hasStudents ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-slate-400 hover:bg-indigo-600'
-                    }`}
-                    title="เปิด Pop-up ตารางคะแนนวัดผลกระดาษ A4 แนวตั้ง (5 วิชาต่อแผ่น)"
-                  >
-                    <Award className="w-4 h-4" />
-                    <span>วัดผล</span>
-                  </button>
-
-                  {/* Dedicated "เช็กชื่อ" Button */}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setAttendancePopupGrade(g);
-                      setPopupSelectedMonthKey('all');
-                    }}
-                    className={`px-3.5 py-2 rounded-xl text-white font-bold text-[13px] flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer ${
-                      hasStudents ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-slate-400 hover:bg-emerald-600'
-                    }`}
-                    title="เปิด Pop-up ตารางเช็กชื่อกระดาษ A4 แนวตั้ง (แสดงครบทุกวันรวมเสาร์-อาทิตย์สีแดง)"
-                  >
-                    <ClipboardCheck className="w-4 h-4" />
-                    <span>เช็กชื่อ</span>
-                  </button>
-
-                  {/* Dedicated "ดื่มนม" Button */}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setMilkTeethModal({ grade: g, type: 'milk' });
-                      setMilkTeethSelectedMonthKey('all');
-                    }}
-                    className={`px-3.5 py-2 rounded-xl text-white font-bold text-[13px] flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer ${
-                      hasStudents ? 'bg-amber-600 hover:bg-amber-700' : 'bg-slate-400 hover:bg-amber-600'
-                    }`}
-                    title="เปิด Pop-up รายงานสรุปการดื่มนมโรงเรียน ขนาด A4 แนวตั้ง (ดึงจากหน้าธุรการ)"
-                  >
-                    <span>🥛</span>
-                    <span>ดื่มนม</span>
-                  </button>
-
-                  {/* Dedicated "แปรงฟัน" Button */}
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setMilkTeethModal({ grade: g, type: 'teeth' });
-                      setMilkTeethSelectedMonthKey('all');
-                    }}
-                    className={`px-3.5 py-2 rounded-xl text-white font-bold text-[13px] flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer ${
-                      hasStudents ? 'bg-sky-600 hover:bg-sky-700' : 'bg-slate-400 hover:bg-sky-600'
-                    }`}
-                    title="เปิด Pop-up รายงานสรุปการแปรงฟันหลังอาหาร ขนาด A4 แนวตั้ง (ดึงจากหน้าธุรการ)"
-                  >
-                    <span>🪥</span>
-                    <span>แปรงฟัน</span>
-                  </button>
-
+                <div className="w-full p-3 sm:p-3.5 flex items-center justify-between gap-3">
+                  {/* Clickable Grade Item to go directly to student roster */}
                   <button
                     type="button"
                     onClick={() => {
+                      handleSelectRoomForGrade(g, activeRoomForG);
                       setSelectedGrade(g);
                       setSearchTerm('');
                     }}
-                    className="p-2 hover:bg-slate-100 text-slate-400 hover:text-purple-600 rounded-lg transition-colors cursor-pointer"
-                    title="ดูรายชื่อนักเรียน"
+                    className="flex items-center gap-3.5 cursor-pointer flex-1 text-left min-w-0"
                   >
-                    <ChevronRight className="w-5 h-5" />
+                    <div className={`w-10 h-10 rounded-xl font-bold flex items-center justify-center text-sm transition-colors shrink-0 ${
+                      hasStudents
+                        ? 'bg-purple-100 text-purple-700 group-hover:bg-purple-600 group-hover:text-white'
+                        : 'bg-slate-200 text-slate-400'
+                    }`}>
+                      {g}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`text-sm font-bold transition-colors ${
+                          hasStudents
+                            ? 'text-slate-800 group-hover:text-purple-700'
+                            : 'text-slate-500 font-semibold'
+                        }`}>
+                          <span className="sm:hidden">{g}</span>
+                          <span className="hidden sm:inline">{getGradeFullName(g)}</span>
+                        </span>
+                        {roomStudentCount > 0 ? (
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold border border-emerald-200 shrink-0">
+                            {roomStudentCount} คน
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full bg-slate-200/80 text-slate-500 text-[10px] font-medium border border-slate-300/60 shrink-0">
+                            ไม่มีนักเรียน
+                          </span>
+                        )}
+                      </div>
+                      {roomStudentCount > 0 && (
+                        <div className="text-[11px] text-slate-400 truncate">
+                          คลิกเพื่อดูตารางรายชื่อนักเรียน
+                        </div>
+                      )}
+                    </div>
                   </button>
+
+                  {/* DESKTOP Action Buttons (hidden on mobile, visible on sm and up) */}
+                  <div className={`hidden sm:flex items-center gap-2 shrink-0 ${!hasStudents ? 'opacity-75' : ''}`}>
+                    {/* ปุ่มเลือกห้อง */}
+                    <div
+                      onClick={(e) => e.stopPropagation()}
+                      className="flex items-center"
+                    >
+                      <select
+                        value={activeRoomForG}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          handleSelectRoomForGrade(g, e.target.value);
+                        }}
+                        className="px-3 py-2 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-300 font-bold text-xs cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-500/30 shadow-2xs transition-all"
+                        title="กดเพื่อเลือกห้องเรียน (เชื่อมโยงกับรายชื่อนักเรียน)"
+                      >
+                        {roomsForG.map(rm => {
+                          const rmCount = (effectiveStudents || []).filter(
+                            st => st.gradeLevel === g && normalizeRoom(st.room) === rm
+                          ).length;
+                          return (
+                            <option key={rm} value={rm}>
+                              ห้อง {rm}{roomsForG.length > 1 ? ` (${rmCount} คน)` : ''}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+
+                    {/* Dedicated "(3)รายงาน" Button */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSelectRoomForGrade(g, activeRoomForG);
+                        setThreeReportsPopupGrade(g);
+                      }}
+                      className={`px-3 py-2 rounded-xl text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer ${
+                        hasStudents ? 'bg-teal-600 hover:bg-teal-700' : 'bg-slate-400 hover:bg-teal-600'
+                      }`}
+                      title="เปิด Pop-up รายงานประเมิน 3 เล่ม (การอ่านคิดวิเคราะห์เขียน, คุณลักษณะอันพึงประสงค์, สมรรถนะสำคัญ)"
+                    >
+                      <BookOpen className="w-4 h-4" />
+                      <span>(3)รายงาน</span>
+                    </button>
+
+                    {/* Dedicated "วัดผล" Button */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSelectRoomForGrade(g, activeRoomForG);
+                        setAssessmentPopupGrade(g);
+                        setAssessmentSelectedChunkIndex(0);
+                      }}
+                      className={`px-3.5 py-2 rounded-xl text-white font-bold text-[13px] flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer ${
+                        hasStudents ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-slate-400 hover:bg-indigo-600'
+                      }`}
+                      title="เปิด Pop-up ตารางคะแนนวัดผลกระดาษ A4 แนวตั้ง (5 วิชาต่อแผ่น)"
+                    >
+                      <Award className="w-4 h-4" />
+                      <span>วัดผล</span>
+                    </button>
+
+                    {/* Dedicated "เช็กชื่อ" Button */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSelectRoomForGrade(g, activeRoomForG);
+                        setAttendancePopupGrade(g);
+                        setPopupSelectedMonthKey('all');
+                      }}
+                      className={`px-3.5 py-2 rounded-xl text-white font-bold text-[13px] flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer ${
+                        hasStudents ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-slate-400 hover:bg-emerald-600'
+                      }`}
+                      title="เปิด Pop-up ตารางเช็กชื่อกระดาษ A4 แนวตั้ง (แสดงครบทุกวันรวมเสาร์-อาทิตย์สีแดง)"
+                    >
+                      <ClipboardCheck className="w-4 h-4" />
+                      <span>เช็กชื่อ</span>
+                    </button>
+
+                    {/* Dedicated "ดื่มนม" Button */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSelectRoomForGrade(g, activeRoomForG);
+                        setMilkTeethModal({ grade: g, type: 'milk' });
+                        setMilkTeethSelectedMonthKey('all');
+                      }}
+                      className={`px-3.5 py-2 rounded-xl text-white font-bold text-[13px] flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer ${
+                        hasStudents ? 'bg-amber-600 hover:bg-amber-700' : 'bg-slate-400 hover:bg-amber-600'
+                      }`}
+                      title="เปิด Pop-up รายงานสรุปการดื่มนมโรงเรียน ขนาด A4 แนวตั้ง (ดึงจากหน้าธุรการ)"
+                    >
+                      <span>🥛</span>
+                      <span>ดื่มนม</span>
+                    </button>
+
+                    {/* Dedicated "แปรงฟัน" Button */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSelectRoomForGrade(g, activeRoomForG);
+                        setMilkTeethModal({ grade: g, type: 'teeth' });
+                        setMilkTeethSelectedMonthKey('all');
+                      }}
+                      className={`px-3.5 py-2 rounded-xl text-white font-bold text-[13px] flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer ${
+                        hasStudents ? 'bg-sky-600 hover:bg-sky-700' : 'bg-slate-400 hover:bg-sky-600'
+                      }`}
+                      title="เปิด Pop-up รายงานสรุปการแปรงฟันหลังอาหาร ขนาด A4 แนวตั้ง (ดึงจากหน้าธุรการ)"
+                    >
+                      <span>🪥</span>
+                      <span>แปรงฟัน</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleSelectRoomForGrade(g, activeRoomForG);
+                        setSelectedGrade(g);
+                        setSearchTerm('');
+                      }}
+                      className="p-2 hover:bg-slate-100 text-slate-400 hover:text-purple-600 rounded-lg transition-colors cursor-pointer"
+                      title="ดูรายชื่อนักเรียน"
+                    >
+                      <ChevronRight className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  {/* MOBILE Action Controls (visible only on mobile) */}
+                  <div className="flex sm:hidden items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                    {/* Room Dropdown stays at original position */}
+                    <select
+                      value={activeRoomForG}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        handleSelectRoomForGrade(g, e.target.value);
+                      }}
+                      className="px-2 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-300 font-bold text-xs cursor-pointer focus:outline-none shadow-2xs"
+                      title="กดเพื่อเลือกห้องเรียน"
+                    >
+                      {roomsForG.map(rm => (
+                        <option key={rm} value={rm}>
+                          ห้อง {rm}
+                        </option>
+                      ))}
+                    </select>
+
+                    {/* Toggle "ปพ.5" Menu Button */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenPp5Grade(prev => prev === g ? null : g);
+                      }}
+                      className={`px-2.5 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1 shadow-2xs transition-all active:scale-95 cursor-pointer ${
+                        openPp5Grade === g
+                          ? 'bg-purple-700 text-white ring-2 ring-purple-300'
+                          : 'bg-purple-600 hover:bg-purple-700 text-white'
+                      }`}
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>ปพ.5</span>
+                      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${openPp5Grade === g ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleSelectRoomForGrade(g, activeRoomForG);
+                        setSelectedGrade(g);
+                        setSearchTerm('');
+                      }}
+                      className="p-1.5 hover:bg-slate-100 text-slate-400 hover:text-purple-600 rounded-lg transition-colors cursor-pointer"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
+
+                {/* Collapsible Mobile Dropdown for "ปพ.5" */}
+                {openPp5Grade === g && (
+                  <div className="sm:hidden bg-purple-50/80 border-t border-purple-100 p-2.5 flex flex-wrap items-center justify-around gap-2 animate-in fade-in slide-in-from-top-1 duration-150">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSelectRoomForGrade(g, activeRoomForG);
+                        setThreeReportsPopupGrade(g);
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg bg-teal-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs active:scale-95 cursor-pointer"
+                    >
+                      <BookOpen className="w-3.5 h-3.5" />
+                      <span>(3)รายงาน</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSelectRoomForGrade(g, activeRoomForG);
+                        setAssessmentPopupGrade(g);
+                        setAssessmentSelectedChunkIndex(0);
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg bg-indigo-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs active:scale-95 cursor-pointer"
+                    >
+                      <Award className="w-3.5 h-3.5" />
+                      <span>วัดผล</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSelectRoomForGrade(g, activeRoomForG);
+                        setAttendancePopupGrade(g);
+                        setPopupSelectedMonthKey('all');
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs active:scale-95 cursor-pointer"
+                    >
+                      <ClipboardCheck className="w-3.5 h-3.5" />
+                      <span>เช็กชื่อ</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSelectRoomForGrade(g, activeRoomForG);
+                        setMilkTeethModal({ grade: g, type: 'milk' });
+                        setMilkTeethSelectedMonthKey('all');
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg bg-amber-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs active:scale-95 cursor-pointer"
+                    >
+                      <span>🥛</span>
+                      <span>ดื่มนม</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSelectRoomForGrade(g, activeRoomForG);
+                        setMilkTeethModal({ grade: g, type: 'teeth' });
+                        setMilkTeethSelectedMonthKey('all');
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg bg-sky-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs active:scale-95 cursor-pointer"
+                    >
+                      <span>🪥</span>
+                      <span>แปรงฟัน</span>
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -1547,15 +1778,39 @@ export const Module7Reports: React.FC<Module7Props> = ({
         */
         <div className="space-y-4">
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-            {/* Header with Grade Title & Clean Action Buttons (No search box, No A4 text) */}
+            {/* Header with Grade Title, Room Selection Dropdown & Clean Action Buttons */}
             <div className="p-3.5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 no-print bg-slate-50/50">
-              <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2.5 flex-wrap">
                 <span className="text-sm font-bold text-slate-800">
                   {selectedGrade ? getGradeFullName(selectedGrade).replace(/^ชั้น\s*/, '') : ''}
+                  {selectedGrade ? ` ห้อง ${normalizeRoom(selectedRoom)}` : ''}
                 </span>
                 <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200">
                   รวม {gradeStudents.length} คน
                 </span>
+
+                {/* ปุ่มเลือกห้องแบบเลื่อนลงมาให้เลือก (Dropdown) */}
+                {selectedGrade && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-bold text-slate-700">เลือกห้อง:</span>
+                    <select
+                      value={normalizeRoom(selectedRoom)}
+                      onChange={(e) => handleSelectRoomForGrade(selectedGrade, e.target.value)}
+                      className="px-3 py-1.5 rounded-xl bg-white hover:bg-purple-50 text-purple-900 border border-purple-300 text-xs font-bold cursor-pointer focus:outline-none focus:ring-2 focus:ring-purple-500/30 shadow-2xs transition-colors"
+                    >
+                      {getRoomsForGrade(selectedGrade).map(rm => {
+                        const rmCnt = (effectiveStudents || []).filter(
+                          st => st.gradeLevel === selectedGrade && normalizeRoom(st.room) === rm
+                        ).length;
+                        return (
+                          <option key={rm} value={rm}>
+                            ห้อง {rm}{getRoomsForGrade(selectedGrade).length > 1 ? ` (${rmCnt} คน)` : ''}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-1.5 flex-wrap">
@@ -1842,9 +2097,25 @@ export const Module7Reports: React.FC<Module7Props> = ({
               </div>
             </div>
 
-            {/* Dedicated Personnel Selectors Bar (No-Print) */}
+            {/* Dedicated Personnel & Room Selectors Bar (No-Print) */}
             <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs no-print">
               <div className="flex items-center gap-4 flex-wrap">
+                {/* Room Selector Dropdown (เมื่อกดปุ่มห้องจะเลื่อนลงมาให้เลือก) */}
+                <div className="flex items-center gap-1.5">
+                  <span className="font-bold text-slate-700 whitespace-nowrap">เลือกห้อง:</span>
+                  <select
+                    value={normalizeRoom(selectedRoom)}
+                    onChange={(e) => handleSelectRoomForGrade(attendancePopupGrade, e.target.value)}
+                    className="text-xs px-3 py-1 rounded-xl border border-emerald-300 font-bold bg-white text-emerald-900 cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-500/20 shadow-2xs"
+                  >
+                    {getRoomsForGrade(attendancePopupGrade).map(rm => (
+                      <option key={rm} value={rm}>
+                        ห้อง {rm}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 <div className="flex items-center gap-1.5">
                   <span className="font-bold text-slate-700 whitespace-nowrap">ครูผู้ประจำชั้น:</span>
                   <select
@@ -1854,7 +2125,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
                   >
                     {currentGradeAdvisors.map(p => (
                       <option key={p.id} value={p.id}>
-                        {p.prefix}{p.firstName} {p.lastName} {p.advisorGrade ? `(ประจำชั้น ${p.advisorGrade})` : ''}
+                        {p.prefix}{p.firstName} {p.lastName} {p.advisorGrade ? `(ประจำชั้น ${p.advisorGrade}${p.advisorRoom ? ` ห้อง ${p.advisorRoom}` : ''})` : ''}
                       </option>
                     ))}
                   </select>
@@ -1954,7 +2225,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
 
                         {/* Line 3: เดือน, ปีการศึกษา, ภาคเรียน, ชั้น */}
                         <div className="text-xs font-bold text-black mt-0.5">
-                          เดือน{group.monthName}&nbsp;&nbsp;&nbsp;&nbsp;ปีการศึกษา {selectedYear}&nbsp;&nbsp;&nbsp;&nbsp;ภาคเรียนที่ {selectedSemester}&nbsp;&nbsp;&nbsp;&nbsp;{getGradeCleanName(attendancePopupGrade)}
+                          เดือน{group.monthName}&nbsp;&nbsp;&nbsp;&nbsp;ปีการศึกษา {selectedYear}&nbsp;&nbsp;&nbsp;&nbsp;ภาคเรียนที่ {selectedSemester}&nbsp;&nbsp;&nbsp;&nbsp;{getGradeCleanName(attendancePopupGrade)}{getRoomsForGrade(attendancePopupGrade).length > 1 || normalizeRoom(selectedRoom) !== '1' ? ` ห้อง ${normalizeRoom(selectedRoom)}` : ''}
                         </div>
                       </div>
 
@@ -2400,6 +2671,22 @@ export const Module7Reports: React.FC<Module7Props> = ({
                   </button>
                 </div>
 
+                {/* Room Selector Dropdown (เมื่อกดปุ่มห้องจะเลื่อนลงมาให้เลือก) */}
+                <div className="flex items-center gap-1.5">
+                  <span className="font-bold text-slate-700 whitespace-nowrap">เลือกห้อง:</span>
+                  <select
+                    value={normalizeRoom(selectedRoom)}
+                    onChange={(e) => handleSelectRoomForGrade(assessmentPopupGrade, e.target.value)}
+                    className="text-xs px-3 py-1 rounded-xl border border-indigo-300 font-bold bg-white text-indigo-900 cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500/20 shadow-2xs"
+                  >
+                    {getRoomsForGrade(assessmentPopupGrade).map(rm => (
+                      <option key={rm} value={rm}>
+                        ห้อง {rm}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 <div className="flex items-center gap-1.5">
                   <span className="font-bold text-slate-700 whitespace-nowrap">ครูผู้ประจำชั้น:</span>
                   <select
@@ -2409,7 +2696,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
                   >
                     {currentGradeAdvisors.map(p => (
                       <option key={p.id} value={p.id}>
-                        {p.prefix}{p.firstName} {p.lastName} {p.advisorGrade ? `(ประจำชั้น ${p.advisorGrade})` : ''}
+                        {p.prefix}{p.firstName} {p.lastName} {p.advisorGrade ? `(ประจำชั้น ${p.advisorGrade}${p.advisorRoom ? ` ห้อง ${p.advisorRoom}` : ''})` : ''}
                       </option>
                     ))}
                   </select>
@@ -2497,7 +2784,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
                         โรงเรียน{schoolInfo.schoolName ? schoolInfo.schoolName.replace(/^โรงเรียน\s*/, '') : '...................................................'} {schoolInfo.affiliation ? `สังกัด${schoolInfo.affiliation}` : ''}
                       </div>
                       <div className="text-xs font-bold text-black mt-0.5">
-                        ปีการศึกษา {selectedYear}&nbsp;&nbsp;&nbsp;&nbsp;ภาคเรียนที่ {selectedSemester}&nbsp;&nbsp;&nbsp;&nbsp;{getGradeCleanName(assessmentPopupGrade)}
+                        ปีการศึกษา {selectedYear}&nbsp;&nbsp;&nbsp;&nbsp;ภาคเรียนที่ {selectedSemester}&nbsp;&nbsp;&nbsp;&nbsp;{getGradeCleanName(assessmentPopupGrade)}{getRoomsForGrade(assessmentPopupGrade).length > 1 || normalizeRoom(selectedRoom) !== '1' ? ` ห้อง ${normalizeRoom(selectedRoom)}` : ''}
                       </div>
                     </div>
 
@@ -2715,9 +3002,9 @@ export const Module7Reports: React.FC<Module7Props> = ({
                     </div>
                     <div className="text-xs font-bold text-black mt-0.5">
                       {isAssessmentP1ToP6 ? (
-                        <>ปีการศึกษา {selectedYear}&nbsp;&nbsp;&nbsp;&nbsp;{getGradeCleanName(assessmentPopupGrade)}</>
+                        <>ปีการศึกษา {selectedYear}&nbsp;&nbsp;&nbsp;&nbsp;{getGradeCleanName(assessmentPopupGrade)}{getRoomsForGrade(assessmentPopupGrade).length > 1 || normalizeRoom(selectedRoom) !== '1' ? ` ห้อง ${normalizeRoom(selectedRoom)}` : ''}</>
                       ) : (
-                        <>ปีการศึกษา {selectedYear}&nbsp;&nbsp;&nbsp;&nbsp;ภาคเรียนที่ {selectedSemester}&nbsp;&nbsp;&nbsp;&nbsp;{getGradeCleanName(assessmentPopupGrade)}</>
+                        <>ปีการศึกษา {selectedYear}&nbsp;&nbsp;&nbsp;&nbsp;ภาคเรียนที่ {selectedSemester}&nbsp;&nbsp;&nbsp;&nbsp;{getGradeCleanName(assessmentPopupGrade)}{getRoomsForGrade(assessmentPopupGrade).length > 1 || normalizeRoom(selectedRoom) !== '1' ? ` ห้อง ${normalizeRoom(selectedRoom)}` : ''}</>
                       )}
                     </div>
                   </div>
@@ -2925,7 +3212,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
 
                         {/* Line 3: เดือน, ปีการศึกษา, ภาคเรียน, ชั้น */}
                         <div className="text-xs font-bold text-black mt-0.5">
-                          ปีการศึกษา {selectedYear}&nbsp;&nbsp;&nbsp;&nbsp;ภาคเรียนที่ {selectedSemester}&nbsp;&nbsp;&nbsp;&nbsp;{getGradeCleanName(assessmentPopupGrade)}
+                          ปีการศึกษา {selectedYear}&nbsp;&nbsp;&nbsp;&nbsp;ภาคเรียนที่ {selectedSemester}&nbsp;&nbsp;&nbsp;&nbsp;{getGradeCleanName(assessmentPopupGrade)}{getRoomsForGrade(assessmentPopupGrade).length > 1 || normalizeRoom(selectedRoom) !== '1' ? ` ห้อง ${normalizeRoom(selectedRoom)}` : ''}
                         </div>
                       </div>
 
@@ -3113,6 +3400,9 @@ export const Module7Reports: React.FC<Module7Props> = ({
           isOpen={!!threeReportsPopupGrade}
           onClose={() => setThreeReportsPopupGrade(null)}
           grade={threeReportsPopupGrade}
+          selectedRoom={selectedRoom}
+          onSelectRoom={(rm) => handleSelectRoomForGrade(threeReportsPopupGrade, rm)}
+          availableRooms={getRoomsForGrade(threeReportsPopupGrade)}
           selectedYear={selectedYear}
           selectedSemester={selectedSemester}
           students={effectiveStudents}
@@ -3146,11 +3436,17 @@ export const Module7Reports: React.FC<Module7Props> = ({
           ? milkTeethMonthGroups
           : milkTeethMonthGroups.filter(g => g.monthKey === milkTeethSelectedMonthKey);
 
+        const targetRm = normalizeRoom(selectedRoom);
         const targetStudents = sortStudentsByRoll(
-          effectiveStudents.filter(s => s.gradeLevel === targetGrade)
+          effectiveStudents.filter(
+            s => s.gradeLevel === targetGrade && normalizeRoom(s.room) === targetRm
+          )
         );
 
-        const advisor = selectedAdvisor || personnel.find(p => p.advisorGrade === targetGrade);
+        const advisor =
+          selectedAdvisor ||
+          personnel.find(p => p.advisorGrade === targetGrade && normalizeRoom(p.advisorRoom) === targetRm) ||
+          personnel.find(p => p.advisorGrade === targetGrade);
         const advisorDisplayName = advisor ? `${advisor.prefix || ''}${advisor.firstName || ''} ${advisor.lastName || ''}`.trim() : '...........................................................';
 
         return (
@@ -3250,9 +3546,29 @@ export const Module7Reports: React.FC<Module7Props> = ({
                 </div>
               </div>
 
-              {/* Dedicated Personnel Selectors Bar (No-Print) */}
+              {/* Dedicated Personnel & Room Selectors Bar (No-Print) */}
               <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs no-print">
                 <div className="flex items-center gap-4 flex-wrap">
+                  {/* Room Selector Dropdown (เมื่อกดปุ่มห้องจะเลื่อนลงมาให้เลือก) */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-bold text-slate-700 whitespace-nowrap">เลือกห้อง:</span>
+                    <select
+                      value={normalizeRoom(selectedRoom)}
+                      onChange={(e) => handleSelectRoomForGrade(targetGrade, e.target.value)}
+                      className={`text-xs px-3 py-1 rounded-xl border font-bold bg-white cursor-pointer focus:outline-none focus:ring-2 shadow-2xs ${
+                        reportType === 'milk'
+                          ? 'border-amber-300 text-amber-900 focus:ring-amber-500/20'
+                          : 'border-sky-300 text-sky-900 focus:ring-sky-500/20'
+                      }`}
+                    >
+                      {getRoomsForGrade(targetGrade).map(rm => (
+                        <option key={rm} value={rm}>
+                          ห้อง {rm}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
                   <div className="flex items-center gap-1.5">
                     <span className="font-bold text-slate-700 whitespace-nowrap">ครูผู้ประจำชั้น:</span>
                     <select
@@ -3262,7 +3578,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
                     >
                       {currentGradeAdvisors.map(p => (
                         <option key={p.id} value={p.id}>
-                          {p.prefix}{p.firstName} {p.lastName} {p.advisorGrade ? `(ประจำชั้น ${p.advisorGrade})` : ''}
+                          {p.prefix}{p.firstName} {p.lastName} {p.advisorGrade ? `(ประจำชั้น ${p.advisorGrade}${p.advisorRoom ? ` ห้อง ${p.advisorRoom}` : ''})` : ''}
                         </option>
                       ))}
                     </select>
@@ -3331,7 +3647,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
 
                         {/* Line 4: Month, Semester, Year, Grade */}
                         <div className="text-xs font-bold text-black mt-0.5">
-                          {group.monthTitle}&nbsp;&nbsp;&nbsp;&nbsp;ภาคเรียนที่ {selectedSemester}&nbsp;&nbsp;&nbsp;&nbsp;ปีการศึกษา {selectedYear}&nbsp;&nbsp;&nbsp;&nbsp;{getGradeCleanName(targetGrade)}
+                          {group.monthTitle}&nbsp;&nbsp;&nbsp;&nbsp;ภาคเรียนที่ {selectedSemester}&nbsp;&nbsp;&nbsp;&nbsp;ปีการศึกษา {selectedYear}&nbsp;&nbsp;&nbsp;&nbsp;{getGradeCleanName(targetGrade)}{getRoomsForGrade(targetGrade).length > 1 || normalizeRoom(selectedRoom) !== '1' ? ` ห้อง ${normalizeRoom(selectedRoom)}` : ''}
                         </div>
                       </div>
 

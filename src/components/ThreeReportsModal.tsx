@@ -33,6 +33,9 @@ interface ThreeReportsModalProps {
   isOpen: boolean;
   onClose: () => void;
   grade: GradeLevel;
+  selectedRoom?: string;
+  onSelectRoom?: (room: string) => void;
+  availableRooms?: string[];
   selectedYear: string;
   selectedSemester: string;
   students: Student[];
@@ -114,6 +117,9 @@ export const ThreeReportsModal: React.FC<ThreeReportsModalProps> = ({
   isOpen,
   onClose,
   grade,
+  selectedRoom: propSelectedRoom,
+  onSelectRoom,
+  availableRooms: propAvailableRooms,
   selectedYear,
   selectedSemester,
   students,
@@ -130,6 +136,23 @@ export const ThreeReportsModal: React.FC<ThreeReportsModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
+  const normalizeRoom = (r?: string) => (r || '1').toString().trim().replace(/^ห้อง\s*/, '') || '1';
+  const [localRoom, setLocalRoom] = useState<string>(normalizeRoom(propSelectedRoom));
+  const activeRoom = propSelectedRoom ? normalizeRoom(propSelectedRoom) : normalizeRoom(localRoom);
+  const handleSelectRoom = (rm: string) => {
+    setLocalRoom(rm);
+    if (onSelectRoom) onSelectRoom(rm);
+  };
+
+  const roomsForGrade = useMemo(() => {
+    if (propAvailableRooms && propAvailableRooms.length > 0) return propAvailableRooms;
+    const set = new Set<string>(['1']);
+    students
+      .filter(s => s.gradeLevel === grade)
+      .forEach(s => set.add(normalizeRoom(s.room)));
+    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [propAvailableRooms, students, grade]);
+
   // 3 Primary Tabs
   const [activeTab, setActiveTab] = useState<'readingWriting' | 'characteristics' | 'competencies'>('readingWriting');
 
@@ -145,9 +168,13 @@ export const ThreeReportsModal: React.FC<ThreeReportsModalProps> = ({
   const [charSubView, setCharSubView] = useState<'overview' | 'individual'>('overview');
   const [selectedStudentId, setSelectedStudentId] = useState<string>('all');
 
-  // Filter students for this grade (sorted by rollNumber 1 -> last)
+  // Filter students for this grade & room (sorted by rollNumber 1 -> last)
   const classStudents = useMemo(() => {
-    return [...students.filter(s => s.gradeLevel === grade)].sort((a, b) => {
+    return [
+      ...students.filter(
+        s => s.gradeLevel === grade && normalizeRoom(s.room) === activeRoom
+      )
+    ].sort((a, b) => {
       const rollA = Number(a.rollNumber);
       const rollB = Number(b.rollNumber);
       const hasRollA = !isNaN(rollA) && rollA > 0;
@@ -159,7 +186,7 @@ export const ThreeReportsModal: React.FC<ThreeReportsModalProps> = ({
       if (!hasRollA && hasRollB) return 1;
       return (a.studentCode || '').localeCompare(b.studentCode || '', undefined, { numeric: true });
     });
-  }, [students, grade]);
+  }, [students, grade, activeRoom]);
 
   // Set default student selection to 'all' if not set
   React.useEffect(() => {
@@ -464,7 +491,7 @@ export const ThreeReportsModal: React.FC<ThreeReportsModalProps> = ({
         โรงเรียน{schoolInfo.schoolName ? schoolInfo.schoolName.replace(/^โรงเรียน\s*/, '') : '...................................................'} {schoolInfo.affiliation ? `สังกัด${schoolInfo.affiliation}` : ''}
       </div>
       <div className="text-xs font-bold text-black mt-0.5">
-        ปีการศึกษา {selectedYear}&nbsp;&nbsp;&nbsp;&nbsp;ภาคเรียนที่ {selectedSemester}&nbsp;&nbsp;&nbsp;&nbsp;{getGradeCleanName(grade)}{subDetail ? `\u00A0\u00A0\u00A0\u00A0${subDetail}` : ''}
+        ปีการศึกษา {selectedYear}&nbsp;&nbsp;&nbsp;&nbsp;ภาคเรียนที่ {selectedSemester}&nbsp;&nbsp;&nbsp;&nbsp;{getGradeCleanName(grade)}{roomsForGrade.length > 1 || activeRoom !== '1' ? ` ห้อง ${activeRoom}` : ''}{subDetail ? `\u00A0\u00A0\u00A0\u00A0${subDetail}` : ''}
       </div>
     </div>
   );
@@ -1348,8 +1375,23 @@ export const ThreeReportsModal: React.FC<ThreeReportsModalProps> = ({
 
         {/* Sub-bar Controls (No-Print) */}
         <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs no-print">
-          {/* LEFT SIDE: Homeroom Teacher & Academic Head + Tab 2 Options */}
+          {/* LEFT SIDE: Room Selector, Homeroom Teacher & Academic Head + Tab 2 Options */}
           <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-1.5">
+              <span className="font-bold text-slate-700">เลือกห้อง:</span>
+              <select
+                value={activeRoom}
+                onChange={(e) => handleSelectRoom(e.target.value)}
+                className="text-xs px-2.5 py-1 rounded-xl border border-teal-300 font-bold bg-white text-teal-800 cursor-pointer focus:outline-none focus:ring-2 focus:ring-teal-500/20 shadow-2xs"
+              >
+                {roomsForGrade.map(rm => (
+                  <option key={rm} value={rm}>
+                    ห้อง {rm}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <div className="flex items-center gap-1.5">
               <span className="font-bold text-slate-700">ครูผู้ประจำชั้น:</span>
               <select
@@ -1359,7 +1401,7 @@ export const ThreeReportsModal: React.FC<ThreeReportsModalProps> = ({
               >
                 {currentGradeAdvisors.map(p => (
                   <option key={p.id} value={p.id}>
-                    {p.prefix}{p.firstName} {p.lastName} {p.advisorGrade ? `(ประจำชั้น ${p.advisorGrade})` : ''}
+                    {p.prefix}{p.firstName} {p.lastName} {p.advisorGrade ? `(ประจำชั้น ${p.advisorGrade}${p.advisorRoom ? ` ห้อง ${p.advisorRoom}` : ''})` : ''}
                   </option>
                 ))}
               </select>

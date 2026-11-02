@@ -43,7 +43,6 @@ import { LoginPage } from './components/LoginPage';
 import { LightboxModal } from './components/LightboxModal';
 import { DeveloperConsole } from './components/DeveloperConsole';
 import { Toast } from './components/Toast';
-import { MobileBottomNav } from './components/MobileBottomNav';
 
 export default function App() {
   // Global State
@@ -158,14 +157,22 @@ export default function App() {
         return;
       }
 
+      const expectedRoom = matchedMemberObj
+        ? (matchedMemberObj.room || (matchedMemberObj.gradeLevel ? '1' : undefined))
+        : currentSession.assignedRoom;
+      const expectedGrade = matchedMemberObj ? matchedMemberObj.gradeLevel : currentSession.assignedGrade;
+
       if (
         resolvedSchoolId !== currentSession.schoolId ||
-        (matchedSchool?.schoolName && matchedSchool.schoolName !== currentSession.schoolName)
+        (matchedSchool?.schoolName && matchedSchool.schoolName !== currentSession.schoolName) ||
+        (matchedMemberObj && (expectedGrade !== currentSession.assignedGrade || expectedRoom !== currentSession.assignedRoom))
       ) {
         const updatedSession: UserSession = {
           ...currentSession,
           schoolId: resolvedSchoolId,
-          schoolName: matchedSchool?.schoolName || currentSession.schoolName
+          schoolName: matchedSchool?.schoolName || currentSession.schoolName,
+          assignedGrade: expectedGrade,
+          assignedRoom: expectedRoom
         };
         StorageService.setSession(updatedSession);
         setUser(updatedSession);
@@ -709,7 +716,7 @@ export default function App() {
       />
 
       {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-24 sm:pb-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-2.5 sm:px-6 lg:px-8 py-2 sm:py-6 pb-36 sm:pb-6">
         {effectiveTab === 'dashboard' && (
           <DashboardView
             user={user}
@@ -880,12 +887,14 @@ export default function App() {
           user={user}
           schoolInfo={schoolInfo}
           members={tenantMembers}
+          students={students}
           onClose={() => setActiveTab(previousTab || 'dashboard')}
           onSaveSchoolInfo={handleSaveSchoolInfo}
           onSaveMember={handleSaveMember}
           onDeleteMember={handleDeleteMember}
           onShowToast={showToast}
           onSaveUserSession={handleSaveUserSession}
+          onLogout={handleLogout}
         />
       )}
 
@@ -905,17 +914,6 @@ export default function App() {
           </div>
         </div>
       </footer>
-
-      {/* Mobile Bottom Navigation Bar (md:hidden) */}
-      <MobileBottomNav
-        activeTab={activeTab}
-        onSelectTab={handleSelectTab}
-        pendingTasksCount={pendingTasksCount}
-        user={user}
-        onOpenSettings={() => handleSelectTab('settings')}
-        disableAssignments={disableAssignments}
-        disableDocuments={disableDocuments}
-      />
 
 
       {/* Lightbox Modal */}

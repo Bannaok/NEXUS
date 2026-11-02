@@ -512,6 +512,11 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
     if (user.role === 'admin' && registeredHomeroomGrades.length > 0) return registeredHomeroomGrades[0];
     return 'ป.1';
   });
+  const normalizeRoom = (r?: string) => (r || '').replace(/^ห้อง\s*/i, '').trim() || '1';
+  const [selectedRoom, setSelectedRoom] = useState<string>(() => {
+    if (user.role === 'member' && user.assignedRoom) return normalizeRoom(user.assignedRoom);
+    return '1';
+  });
   const [weightCalendarMonthIdx, setWeightCalendarMonthIdx] = useState<number>(0);
 
   // Date for Milk & Teeth
@@ -527,6 +532,19 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
   const [isMilkCalendarOpen, setIsMilkCalendarOpen] = useState<boolean>(false);
   const [milkCalMonthIdx, setMilkCalMonthIdx] = useState<number>(0);
   const milkCalendarRef = React.useRef<HTMLDivElement>(null);
+
+  const getRoomsForGrade = React.useCallback((g: string): string[] => {
+    if (!g || g === 'ALL') return ['1'];
+    const roomSet = new Set<string>(['1']);
+    students
+      .filter(s => (s.gradeLevel || '').trim() === g)
+      .forEach(s => {
+        roomSet.add(normalizeRoom(s.room));
+      });
+    return Array.from(roomSet).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [students]);
+
+  const availableRoomsForGrade = useMemo(() => getRoomsForGrade(gradeFilter), [getRoomsForGrade, gradeFilter]);
 
   const [isWeightCalendarOpen, setIsWeightCalendarOpen] = useState<boolean>(false);
   const [weightCalMonthIdx, setWeightCalMonthIdx] = useState<number>(0);
@@ -561,6 +579,7 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
     if (user.role === 'member' && user.assignedGrade) {
       setGradeFilter(user.assignedGrade);
       setMilkTeethGradeFilter(user.assignedGrade);
+      setSelectedRoom(normalizeRoom(user.assignedRoom));
     } else if (user.role === 'admin' && registeredHomeroomGrades.length > 0) {
       if (!registeredHomeroomGrades.includes(gradeFilter as GradeLevel)) {
         setGradeFilter(registeredHomeroomGrades[0]);
@@ -569,7 +588,13 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
         setMilkTeethGradeFilter(registeredHomeroomGrades[0]);
       }
     }
-  }, [user.role, user.assignedGrade, registeredHomeroomGrades]);
+  }, [user.role, user.assignedGrade, user.assignedRoom, registeredHomeroomGrades]);
+
+  useEffect(() => {
+    if (user.role === 'admin' && !availableRoomsForGrade.includes(selectedRoom)) {
+      setSelectedRoom(availableRoomsForGrade[0] || '1');
+    }
+  }, [availableRoomsForGrade, selectedRoom, user.role]);
 
   const handleAdminSelectGrade = (nextGrade: string) => {
     setGradeFilter(nextGrade);
@@ -728,7 +753,7 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
   // Filtered students for active session table
   const displayedStudents = (gradeFilter === 'ALL' 
     ? students 
-    : students.filter(s => s.gradeLevel === gradeFilter)
+    : students.filter(s => s.gradeLevel === gradeFilter && normalizeRoom(s.room) === normalizeRoom(selectedRoom))
   ).sort((a, b) => {
     if (a.gradeLevel !== b.gradeLevel) {
       return a.gradeLevel.localeCompare(b.gradeLevel);
@@ -879,7 +904,7 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
   const completedDaysCount = useMemo(() => {
     const targetStudents = milkTeethGradeFilter === 'ALL'
       ? students
-      : students.filter(s => s.gradeLevel === milkTeethGradeFilter);
+      : students.filter(s => s.gradeLevel === milkTeethGradeFilter && normalizeRoom(s.room) === normalizeRoom(selectedRoom));
 
     if (targetStudents.length === 0) return 0;
 
@@ -890,7 +915,7 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
       }).length;
       return recordedCount === targetStudents.length;
     }).length;
-  }, [schoolDaysList, milkTeethGradeFilter, students, dailyTracking]);
+  }, [schoolDaysList, milkTeethGradeFilter, selectedRoom, students, dailyTracking]);
 
   const handleSaveAllActiveSession = () => {
     if (!activeSession) return;
@@ -982,206 +1007,36 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
                   ))}
                 </select>
               )}
+
+              {availableRoomsForGrade.length > 1 && (
+                <div className="flex items-center gap-1 bg-white px-2 py-1 rounded-xl border border-blue-300 shadow-2xs">
+                  <span className="text-[11px] font-bold text-blue-900 px-1">ห้อง:</span>
+                  {availableRoomsForGrade.map(rm => (
+                    <button
+                      key={rm}
+                      type="button"
+                      onClick={() => setSelectedRoom(rm)}
+                      className={`px-2 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        normalizeRoom(selectedRoom) === rm
+                          ? 'bg-blue-600 text-white shadow-2xs'
+                          : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+                      }`}
+                    >
+                      ห้อง {rm}
+                    </button>
+                  ))}
+                </div>
+              )}
             </>
           ) : (
-            <div className="px-3 py-2 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold whitespace-nowrap">
+            <div className="hidden sm:block px-3 py-2 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold whitespace-nowrap">
               ภาคเรียนที่ {effectiveSemester} • ปีการศึกษา {effectiveAcademicYear}
             </div>
           )}
 
-          {/* Action Button "+" for creating new weight recording session with Floating Popover Calendar (Member only) */}
-          {adminSubTab === 'weight' && !activeSessionMode && user.role !== 'admin' && (
-            <div className="relative" ref={weightCalendarRef}>
-              <button
-                type="button"
-                onClick={handleOpenCreateSessionModal}
-                className="p-2 sm:px-3 sm:py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs flex items-center justify-center shadow-xs transition-all cursor-pointer active:scale-95 shrink-0"
-                title="สร้างรายการที่จะกรอกน้ำหนัก/ส่วนสูงใหม่"
-              >
-                <Plus className="w-4 h-4 stroke-[3]" />
-              </button>
-
-            {/* Floating Popover Calendar matching Attendance & Savings EXACTLY */}
-            {isWeightCalendarOpen && (() => {
-              const currentMonthGroup = daysGroupedByMonth[weightCalMonthIdx] || daysGroupedByMonth[0];
-              const [yyyy, mm] = currentMonthGroup ? currentMonthGroup.monthKey.split('-') : ['2026', '05'];
-              const yearNum = parseInt(yyyy, 10);
-              const monthIdx = parseInt(mm, 10) - 1;
-              const daysInMonth = new Date(yearNum, monthIdx + 1, 0).getDate();
-              const firstDayOfWeek = new Date(yearNum, monthIdx, 1).getDay();
-              const schoolDaysMap = new Map(schoolDaysList.map(d => [d.date, d]));
-              const weightTargetStudents = gradeFilter === 'ALL'
-                ? students
-                : students.filter(s => (s.gradeLevel || '').trim() === gradeFilter);
-
-              return (
-                <div className="absolute top-full right-0 mt-2 z-50 bg-white rounded-2xl shadow-2xl border border-slate-200 p-2.5 sm:p-3 w-64 sm:w-72 animate-in fade-in slide-in-from-top-2">
-                  {/* Header showing active semester and academic year */}
-                  <div className="pb-1.5 mb-2 border-b border-slate-100 flex items-center justify-between text-[11px] font-bold text-sky-900 bg-sky-50/80 px-2.5 py-1 rounded-xl">
-                    <span>ปฏิทินเวลาเรียน 100 วัน</span>
-                    <span className="bg-white px-2 py-0.5 rounded-lg border border-sky-200 text-sky-800 font-mono shadow-2xs">
-                      ภาคเรียนที่ {effectiveSemester}/{effectiveAcademicYear}
-                    </span>
-                  </div>
-
-                  {/* Month / Year header with Prev/Next buttons */}
-                  <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-                    <button
-                      type="button"
-                      disabled={weightCalMonthIdx <= 0}
-                      onClick={() => setWeightCalMonthIdx(prev => Math.max(0, prev - 1))}
-                      className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg cursor-pointer disabled:opacity-30"
-                      title="เดือนก่อนหน้า"
-                    >
-                      <ChevronLeft className="w-4 h-4" />
-                    </button>
-
-                    <div className="font-bold text-xs text-slate-800">
-                      {currentMonthGroup ? currentMonthGroup.monthTitle : ''}
-                    </div>
-
-                    <button
-                      type="button"
-                      disabled={weightCalMonthIdx >= daysGroupedByMonth.length - 1}
-                      onClick={() => setWeightCalMonthIdx(prev => Math.min(daysGroupedByMonth.length - 1, prev + 1))}
-                      className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg cursor-pointer disabled:opacity-30"
-                      title="เดือนถัดไป"
-                    >
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
-                  </div>
-
-                  {/* Quick Month Switcher */}
-                  {daysGroupedByMonth.length > 0 && (
-                    <div className="flex items-center justify-between gap-1 py-1.5 border-b border-slate-100 overflow-x-auto scrollbar-none">
-                      {daysGroupedByMonth.map((group, idx) => (
-                        <button
-                          key={group.monthKey}
-                          type="button"
-                          onClick={() => setWeightCalMonthIdx(idx)}
-                          className={`text-[10px] px-2 py-0.5 rounded-md font-bold transition-colors cursor-pointer shrink-0 ${
-                            weightCalMonthIdx === idx
-                              ? 'bg-sky-600 text-white shadow-2xs'
-                              : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
-                          }`}
-                        >
-                          {group.shortMonthLabel}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Days of Week Header */}
-                  <div className="grid grid-cols-7 gap-1 text-center py-1.5 text-[10px] font-bold text-slate-400 border-b border-slate-100">
-                    <span className="text-rose-500">อา</span>
-                    <span>จ</span>
-                    <span>อ</span>
-                    <span>พ</span>
-                    <span>พฤ</span>
-                    <span>ศ</span>
-                    <span className="text-rose-500">ส</span>
-                  </div>
-
-                  {/* Days Grid */}
-                  <div className="grid grid-cols-7 gap-1 py-2">
-                    {Array.from({ length: firstDayOfWeek }).map((_, idx) => (
-                      <div key={`pad-${idx}`} className="h-8 w-full" />
-                    ))}
-
-                    {Array.from({ length: daysInMonth }).map((_, idx) => {
-                      const dayNum = idx + 1;
-                      const dateStr = `${yyyy}-${mm}-${String(dayNum).padStart(2, '0')}`;
-                      const schoolDayItem = schoolDaysMap.get(dateStr);
-                      const is100SchoolDay = Boolean(schoolDayItem);
-                      const existingSession = sessions.find(s => s.date === dateStr);
-                      const isExisting = Boolean(existingSession);
-
-                      const recordedCount = weightTargetStudents.filter(st => {
-                        const rec = dailyTracking.find(d => d.date === dateStr && d.studentId === st.id);
-                        return rec !== undefined && (rec.weight > 0 || rec.height > 0);
-                      }).length;
-                      const isFullyRecorded = weightTargetStudents.length > 0 && recordedCount === weightTargetStudents.length;
-
-                      if (is100SchoolDay) {
-                        if (isFullyRecorded || isExisting) {
-                          return (
-                            <button
-                              key={dateStr}
-                              type="button"
-                              onClick={() => {
-                                handleSelectCalendarDay(dateStr);
-                                setIsWeightCalendarOpen(false);
-                              }}
-                              className="h-8 w-full rounded-lg text-[11px] font-mono font-bold flex flex-col items-center justify-center relative transition-all cursor-pointer shadow-2xs bg-emerald-500 hover:bg-emerald-600 text-white border border-emerald-600"
-                              title={`มีรายการบันทึกแล้ว: ${formatThaiDate(dateStr)}`}
-                            >
-                              <span className="leading-tight">{dayNum}</span>
-                            </button>
-                          );
-                        }
-
-                        return (
-                          <button
-                            key={dateStr}
-                            type="button"
-                            onClick={() => {
-                              handleSelectCalendarDay(dateStr);
-                              setIsWeightCalendarOpen(false);
-                            }}
-                            className="h-8 w-full rounded-lg text-[11px] font-mono font-bold flex flex-col items-center justify-center relative transition-all cursor-pointer shadow-2xs bg-sky-100 hover:bg-sky-200 text-sky-900 border border-sky-300"
-                            title={`วันเรียนที่ ${schoolDayItem?.dayNumber}: คลิกเพื่อสร้าง/เปิดรายการ ${formatThaiDate(dateStr)}`}
-                          >
-                            <span className="leading-tight">{dayNum}</span>
-                          </button>
-                        );
-                      }
-
-                      return (
-                        <button
-                          key={dateStr}
-                          type="button"
-                          disabled
-                          className="h-8 w-full rounded-lg text-[11px] font-mono font-normal flex flex-col items-center justify-center bg-slate-100/70 text-slate-300 border border-slate-200/50 cursor-not-allowed opacity-50 select-none"
-                        >
-                          <span className="leading-tight">{dayNum}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Footer */}
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
-                    {schoolDaysList.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const today = new Date().toISOString().split('T')[0];
-                          const target = schoolDaysList.some(d => d.date === today) ? today : schoolDaysList[0].date;
-                          handleSelectCalendarDay(target);
-                          setIsWeightCalendarOpen(false);
-                        }}
-                        className="text-sky-600 hover:text-sky-800 font-bold hover:underline cursor-pointer"
-                      >
-                        สร้าง/เปิดวันเรียนวันนี้
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => setIsWeightCalendarOpen(false)}
-                      className="text-slate-400 hover:text-slate-600 cursor-pointer ml-auto text-xs"
-                    >
-                      ปิด
-                    </button>
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
-        )}
-
           {/* Top-Right Download Buttons for Milk & Teeth */}
           {adminSubTab === 'milkTeeth' && (
-            <div className="flex items-center gap-2">
+            <div className="hidden sm:flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => handleOpenMilkTeethReport('milk')}
@@ -1213,15 +1068,207 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
               /* LIST VIEW */
               <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
                 {user.role !== 'admin' && (
-                  <div className="p-3.5 bg-slate-50/90 border-b border-slate-200 flex items-center justify-between gap-2 flex-wrap text-xs">
-                    <div className="flex items-center gap-2">
-                      <Scale className="w-4 h-4 text-blue-600" />
-                      <span className="font-bold text-slate-800">
-                        รายการบันทึกน้ำหนักและส่วนสูง (ภาคเรียนที่ {effectiveSemester} ปีการศึกษา {effectiveAcademicYear})
+                  <div className="p-3 sm:p-3.5 bg-slate-50/90 border-b border-slate-200 flex items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Scale className="w-4 h-4 text-blue-600 shrink-0" />
+                      <span className="font-bold text-slate-800 truncate">
+                        รายการบันทึกน้ำหนักและส่วนสูง<span className="hidden sm:inline"> (ภาคเรียนที่ {effectiveSemester} ปีการศึกษา {effectiveAcademicYear})</span>
                       </span>
                     </div>
-                    <div className="px-3 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold shadow-2xs">
-                      ชั้น {user.assignedGrade || 'ป.1'} (ครูประจำชั้น)
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {/* Class Badge: Hidden on Mobile View */}
+                      <div className="hidden sm:block px-3 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold shadow-2xs">
+                        ชั้น {user.assignedGrade || 'ป.1'} (ครูประจำชั้น)
+                      </div>
+
+                      {/* Action Button "+" for creating new weight recording session with Floating Popover Calendar */}
+                      <div className="relative" ref={weightCalendarRef}>
+                        <button
+                          type="button"
+                          onClick={handleOpenCreateSessionModal}
+                          className="p-1.5 sm:px-3 sm:py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs flex items-center justify-center shadow-xs transition-all cursor-pointer active:scale-95 shrink-0"
+                          title="สร้างรายการที่จะกรอกน้ำหนัก/ส่วนสูงใหม่"
+                        >
+                          <Plus className="w-4 h-4 stroke-[3]" />
+                        </button>
+
+                        {/* Floating Popover Calendar matching Attendance & Savings EXACTLY */}
+                        {isWeightCalendarOpen && (() => {
+                          const currentMonthGroup = daysGroupedByMonth[weightCalMonthIdx] || daysGroupedByMonth[0];
+                          const [yyyy, mm] = currentMonthGroup ? currentMonthGroup.monthKey.split('-') : ['2026', '05'];
+                          const yearNum = parseInt(yyyy, 10);
+                          const monthIdx = parseInt(mm, 10) - 1;
+                          const daysInMonth = new Date(yearNum, monthIdx + 1, 0).getDate();
+                          const firstDayOfWeek = new Date(yearNum, monthIdx, 1).getDay();
+                          const schoolDaysMap = new Map(schoolDaysList.map(d => [d.date, d]));
+                          const weightTargetStudents = gradeFilter === 'ALL'
+                            ? students
+                            : students.filter(s => (s.gradeLevel || '').trim() === gradeFilter);
+
+                          return (
+                            <div className="absolute top-full right-0 mt-2 z-50 bg-white rounded-2xl shadow-2xl border border-slate-200 p-2.5 sm:p-3 w-64 sm:w-72 animate-in fade-in slide-in-from-top-2">
+                              {/* Header showing active semester and academic year */}
+                              <div className="pb-1.5 mb-2 border-b border-slate-100 flex items-center justify-between text-[11px] font-bold text-sky-900 bg-sky-50/80 px-2.5 py-1 rounded-xl">
+                                <span>ปฏิทินเวลาเรียน 100 วัน</span>
+                                <span className="bg-white px-2 py-0.5 rounded-lg border border-sky-200 text-sky-800 font-mono shadow-2xs">
+                                  ภาคเรียนที่ {effectiveSemester}/{effectiveAcademicYear}
+                                </span>
+                              </div>
+
+                              {/* Month / Year header with Prev/Next buttons */}
+                              <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                                <button
+                                  type="button"
+                                  disabled={weightCalMonthIdx <= 0}
+                                  onClick={() => setWeightCalMonthIdx(prev => Math.max(0, prev - 1))}
+                                  className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg cursor-pointer disabled:opacity-30"
+                                  title="เดือนก่อนหน้า"
+                                >
+                                  <ChevronLeft className="w-4 h-4" />
+                                </button>
+
+                                <div className="font-bold text-xs text-slate-800">
+                                  {currentMonthGroup ? currentMonthGroup.monthTitle : ''}
+                                </div>
+
+                                <button
+                                  type="button"
+                                  disabled={weightCalMonthIdx >= daysGroupedByMonth.length - 1}
+                                  onClick={() => setWeightCalMonthIdx(prev => Math.min(daysGroupedByMonth.length - 1, prev + 1))}
+                                  className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg cursor-pointer disabled:opacity-30"
+                                  title="เดือนถัดไป"
+                                >
+                                  <ChevronRight className="w-4 h-4" />
+                                </button>
+                              </div>
+
+                              {/* Quick Month Switcher */}
+                              {daysGroupedByMonth.length > 0 && (
+                                <div className="flex items-center justify-between gap-1 py-1.5 border-b border-slate-100 overflow-x-auto scrollbar-none">
+                                  {daysGroupedByMonth.map((group, idx) => (
+                                    <button
+                                      key={group.monthKey}
+                                      type="button"
+                                      onClick={() => setWeightCalMonthIdx(idx)}
+                                      className={`text-[10px] px-2 py-0.5 rounded-md font-bold transition-colors cursor-pointer shrink-0 ${
+                                        weightCalMonthIdx === idx
+                                          ? 'bg-sky-600 text-white shadow-2xs'
+                                          : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                                      }`}
+                                    >
+                                      {group.shortMonthLabel}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Days of Week Header */}
+                              <div className="grid grid-cols-7 gap-1 text-center py-1.5 text-[10px] font-bold text-slate-400 border-b border-slate-100">
+                                <span className="text-rose-500">อา</span>
+                                <span>จ</span>
+                                <span>อ</span>
+                                <span>พ</span>
+                                <span>พฤ</span>
+                                <span>ศ</span>
+                                <span className="text-rose-500">ส</span>
+                              </div>
+
+                              {/* Days Grid */}
+                              <div className="grid grid-cols-7 gap-1 py-2">
+                                {Array.from({ length: firstDayOfWeek }).map((_, idx) => (
+                                  <div key={`pad-${idx}`} className="h-8 w-full" />
+                                ))}
+
+                                {Array.from({ length: daysInMonth }).map((_, idx) => {
+                                  const dayNum = idx + 1;
+                                  const dateStr = `${yyyy}-${mm}-${String(dayNum).padStart(2, '0')}`;
+                                  const schoolDayItem = schoolDaysMap.get(dateStr);
+                                  const is100SchoolDay = Boolean(schoolDayItem);
+                                  const existingSession = sessions.find(s => s.date === dateStr);
+                                  const isExisting = Boolean(existingSession);
+
+                                  const recordedCount = weightTargetStudents.filter(st => {
+                                    const rec = dailyTracking.find(d => d.date === dateStr && d.studentId === st.id);
+                                    return rec !== undefined && (rec.weight > 0 || rec.height > 0);
+                                  }).length;
+                                  const isFullyRecorded = weightTargetStudents.length > 0 && recordedCount === weightTargetStudents.length;
+
+                                  if (is100SchoolDay) {
+                                    if (isFullyRecorded || isExisting) {
+                                      return (
+                                        <button
+                                          key={dateStr}
+                                          type="button"
+                                          onClick={() => {
+                                            handleSelectCalendarDay(dateStr);
+                                            setIsWeightCalendarOpen(false);
+                                          }}
+                                          className="h-8 w-full rounded-lg text-[11px] font-mono font-bold flex flex-col items-center justify-center relative transition-all cursor-pointer shadow-2xs bg-emerald-500 hover:bg-emerald-600 text-white border border-emerald-600"
+                                          title={`มีรายการบันทึกแล้ว: ${formatThaiDate(dateStr)}`}
+                                        >
+                                          <span className="leading-tight">{dayNum}</span>
+                                        </button>
+                                      );
+                                    }
+
+                                    return (
+                                      <button
+                                        key={dateStr}
+                                        type="button"
+                                        onClick={() => {
+                                          handleSelectCalendarDay(dateStr);
+                                          setIsWeightCalendarOpen(false);
+                                        }}
+                                        className="h-8 w-full rounded-lg text-[11px] font-mono font-bold flex flex-col items-center justify-center relative transition-all cursor-pointer shadow-2xs bg-sky-100 hover:bg-sky-200 text-sky-900 border border-sky-300"
+                                        title={`วันเรียนที่ ${schoolDayItem?.dayNumber}: คลิกเพื่อสร้าง/เปิดรายการ ${formatThaiDate(dateStr)}`}
+                                      >
+                                        <span className="leading-tight">{dayNum}</span>
+                                      </button>
+                                    );
+                                  }
+
+                                  return (
+                                    <button
+                                      key={dateStr}
+                                      type="button"
+                                      disabled
+                                      className="h-8 w-full rounded-lg text-[11px] font-mono font-normal flex flex-col items-center justify-center bg-slate-100/70 text-slate-300 border border-slate-200/50 cursor-not-allowed opacity-50 select-none"
+                                    >
+                                      <span className="leading-tight">{dayNum}</span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+
+                              {/* Footer */}
+                              <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
+                                {schoolDaysList.length > 0 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const today = new Date().toISOString().split('T')[0];
+                                      const target = schoolDaysList.some(d => d.date === today) ? today : schoolDaysList[0].date;
+                                      handleSelectCalendarDay(target);
+                                      setIsWeightCalendarOpen(false);
+                                    }}
+                                    className="text-sky-600 hover:text-sky-800 font-bold hover:underline cursor-pointer"
+                                  >
+                                    สร้าง/เปิดวันเรียนวันนี้
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => setIsWeightCalendarOpen(false)}
+                                  className="text-slate-400 hover:text-slate-600 cursor-pointer ml-auto text-xs"
+                                >
+                                  ปิด
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1521,12 +1568,12 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
                 <div className="flex items-center gap-2.5 flex-wrap self-end sm:self-auto">
                   <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-1">
                     {user.role !== 'admin' && (
-                      <>
+                      <div className="hidden sm:flex items-center gap-1.5">
                         <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap mr-1">ชั้น:</span>
                         <span className="px-3 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold shadow-2xs">
                           {user.assignedGrade || 'ป.1'} (ครูประจำชั้น)
                         </span>
-                      </>
+                      </div>
                     )}
 
                     {/* Download PDF button */}
@@ -1615,7 +1662,7 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
       {adminSubTab === 'milkTeeth' && (() => {
         const targetStudents = milkTeethGradeFilter === 'ALL'
           ? students
-          : students.filter(s => s.gradeLevel === milkTeethGradeFilter);
+          : students.filter(s => s.gradeLevel === milkTeethGradeFilter && normalizeRoom(s.room) === normalizeRoom(selectedRoom));
 
         const currentMilkDateIdx = schoolDaysList.findIndex(d => d.date === milkTeethDate);
 
@@ -1698,7 +1745,7 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
                     const schoolDaysMap = new Map(schoolDaysList.map(d => [d.date, d]));
                     const milkTargetStudents = milkTeethGradeFilter === 'ALL'
                       ? students
-                      : students.filter(s => s.gradeLevel === milkTeethGradeFilter);
+                      : students.filter(s => s.gradeLevel === milkTeethGradeFilter && normalizeRoom(s.room) === normalizeRoom(selectedRoom));
 
                     return (
                       <div className="absolute top-full left-0 mt-2 z-50 bg-white rounded-2xl shadow-2xl border border-slate-200 p-2.5 sm:p-3 w-64 sm:w-72 animate-in fade-in slide-in-from-top-2">
@@ -1876,14 +1923,14 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
             {/* Student Table Box */}
             <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
               {user.role !== 'admin' && (
-                <div className="px-4 py-3.5 bg-slate-50/80 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2">
+                <div className="hidden sm:flex px-4 py-3.5 bg-slate-50/80 border-b border-slate-200 items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center gap-2.5">
                     <Activity className="w-5 h-5 text-emerald-600" />
                     <div>
                       <span className="text-xs sm:text-sm font-bold text-slate-800">
                         บันทึกดื่มนมและแปรงฟัน (ชั้น {milkTeethGradeFilter === 'ALL' ? 'ทุกระดับชั้น' : milkTeethGradeFilter})
                       </span>
-                      <span className="text-xs text-slate-500 ml-2 font-medium">
+                      <span className="text-xs text-slate-500 ml-2 font-medium hidden sm:inline">
                         (ปีการศึกษา {effectiveAcademicYear} ภาคเรียนที่ {effectiveSemester})
                       </span>
                     </div>
@@ -1996,6 +2043,8 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
           personnel={personnel}
           registeredHomeroomGrades={registeredHomeroomGrades}
           selectedGrade={gradeFilter}
+          selectedRoom={selectedRoom}
+          onSelectRoom={setSelectedRoom}
           selectedAcademicYear={effectiveAcademicYear}
           selectedSemester={effectiveSemester}
           onSelectGrade={handleAdminSelectGrade}
@@ -2408,10 +2457,11 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
         const effectiveMilkTeethGrade = user.role === 'member' && user.assignedGrade
           ? user.assignedGrade
           : milkTeethGradeFilter;
+        const modalMilkRooms = getRoomsForGrade(effectiveMilkTeethGrade);
 
         const previewMilkTeethStudents = (effectiveMilkTeethGrade === 'ALL'
           ? students
-          : students.filter(s => s.gradeLevel === effectiveMilkTeethGrade)
+          : students.filter(s => s.gradeLevel === effectiveMilkTeethGrade && normalizeRoom(s.room) === normalizeRoom(selectedRoom))
         ).sort((a, b) => {
           if (a.gradeLevel !== b.gradeLevel) return a.gradeLevel.localeCompare(b.gradeLevel);
           if (a.rollNumber !== undefined && b.rollNumber !== undefined) return a.rollNumber - b.rollNumber;
@@ -2448,6 +2498,26 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
                 </div>
 
                 <div className="flex items-center gap-2 flex-wrap">
+                  {effectiveMilkTeethGrade !== 'ALL' && modalMilkRooms.length > 1 && (
+                    <div className="flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-xl border border-slate-200">
+                      <span className="text-[11px] font-bold text-slate-600 px-1">เลือกห้อง:</span>
+                      {modalMilkRooms.map(rm => (
+                        <button
+                          key={rm}
+                          type="button"
+                          onClick={() => setSelectedRoom(rm)}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                            normalizeRoom(selectedRoom) === rm
+                              ? 'bg-emerald-600 text-white shadow-2xs'
+                              : 'bg-white text-slate-700 hover:bg-slate-200 border border-slate-200'
+                          }`}
+                        >
+                          ห้อง {rm}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
                   {/* Action Download/Print Button */}
                   <button
                     type="button"
@@ -2607,10 +2677,11 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
         const effectivePreviewGrade = user.role === 'member' && user.assignedGrade
           ? user.assignedGrade
           : pdfPreviewGradeFilter;
+        const modalPreviewRooms = getRoomsForGrade(effectivePreviewGrade);
 
         const previewStudents = (effectivePreviewGrade === 'ALL'
           ? students
-          : students.filter(s => s.gradeLevel === effectivePreviewGrade)
+          : students.filter(s => s.gradeLevel === effectivePreviewGrade && normalizeRoom(s.room) === normalizeRoom(selectedRoom))
         ).sort((a, b) => {
           if (a.gradeLevel !== b.gradeLevel) return a.gradeLevel.localeCompare(b.gradeLevel);
           if (a.rollNumber !== undefined && b.rollNumber !== undefined) return a.rollNumber - b.rollNumber;
@@ -2666,7 +2737,27 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
                     </div>
                   ) : (
                     <div className="px-3 py-1 bg-slate-800 text-white text-xs font-bold rounded-xl border border-slate-700">
-                      ระดับชั้น: {user.assignedGrade || 'ป.1'}
+                      ระดับชั้น: {user.assignedGrade || 'ป.1'} ห้อง {normalizeRoom(selectedRoom)}
+                    </div>
+                  )}
+
+                  {effectivePreviewGrade !== 'ALL' && modalPreviewRooms.length > 1 && (
+                    <div className="flex items-center gap-1 bg-slate-800 px-2 py-1 rounded-xl border border-slate-700">
+                      <span className="text-[11px] font-bold text-slate-300 px-1">เลือกห้อง:</span>
+                      {modalPreviewRooms.map(rm => (
+                        <button
+                          key={rm}
+                          type="button"
+                          onClick={() => setSelectedRoom(rm)}
+                          className={`px-2 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                            normalizeRoom(selectedRoom) === rm
+                              ? 'bg-emerald-500 text-white'
+                              : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                          }`}
+                        >
+                          ห้อง {rm}
+                        </button>
+                      ))}
                     </div>
                   )}
 

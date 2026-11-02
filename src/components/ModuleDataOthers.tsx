@@ -2235,6 +2235,30 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
   const [newCustomFieldKey, setNewCustomFieldKey] = useState('');
   const [newCustomFieldValue, setNewCustomFieldValue] = useState('');
 
+  const normalizeRoom = (r?: string) => (r || '').replace(/^ห้อง\s*/i, '').trim() || '1';
+  const [selectedStudentRoom, setSelectedStudentRoom] = useState<string>('ALL');
+
+  const availableRoomsForSelectedGrade = useMemo(() => {
+    const roomSet = new Set<string>();
+    students.forEach(s => {
+      const matchG = selectedGrade === 'ประถม'
+        ? primaryGrades.includes(s.gradeLevel as GradeLevel)
+        : selectedGrade === 'มัธยม'
+        ? secondaryGrades.includes(s.gradeLevel as GradeLevel)
+        : s.gradeLevel === selectedGrade;
+      if (matchG) {
+        roomSet.add(normalizeRoom(s.room));
+      }
+    });
+    return Array.from(roomSet).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [students, selectedGrade, primaryGrades, secondaryGrades]);
+
+  useEffect(() => {
+    if (selectedStudentRoom !== 'ALL' && !availableRoomsForSelectedGrade.includes(selectedStudentRoom)) {
+      setSelectedStudentRoom('ALL');
+    }
+  }, [availableRoomsForSelectedGrade, selectedStudentRoom]);
+
   // Sorted and filtered students
   const filteredStudents = students.filter(student => {
     let matchGrade = true;
@@ -2245,12 +2269,13 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
     } else {
       matchGrade = student.gradeLevel === selectedGrade;
     }
+    const matchRoom = selectedStudentRoom === 'ALL' || normalizeRoom(student.room) === normalizeRoom(selectedStudentRoom);
     const matchQuery = 
       (student.firstName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (student.lastName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (student.studentCode ? student.studentCode.toLowerCase().includes(searchQuery.toLowerCase()) : false) ||
       (student.nickname ? student.nickname.toLowerCase().includes(searchQuery.toLowerCase()) : false);
-    return matchGrade && matchQuery;
+    return matchGrade && matchRoom && matchQuery;
   });
 
   const sortedStudents = [...filteredStudents].sort((a, b) => {
@@ -2716,66 +2741,73 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
     <div className="space-y-6">
       {/* Top Banner / Navigation for ข้อมูล/อื่นๆ */}
       <div className="bg-blue-50/90 p-3.5 rounded-2xl border border-blue-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="grid grid-cols-2 sm:flex sm:flex-wrap sm:items-center gap-2 w-full sm:w-auto">
-          <button
-            onClick={() => setActiveSubTab('students')}
-            className={`w-full sm:w-auto h-10 px-3.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-              activeSubTab === 'students'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'bg-white text-slate-700 hover:bg-slate-100 border border-blue-200/80'
-            }`}
-          >
-            <Users className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">1. ข้อมูลนักเรียน ({students.length})</span>
-          </button>
+        <div className="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2 w-full sm:w-auto">
+          {/* Mobile Row 1: Student & Personnel */}
+          <div className="grid grid-cols-2 gap-1.5 sm:contents">
+            <button
+              onClick={() => setActiveSubTab('students')}
+              className={`w-full sm:w-auto h-9 sm:h-10 px-2 sm:px-3.5 rounded-xl text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1.5 sm:gap-2 transition-all cursor-pointer ${
+                activeSubTab === 'students'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'bg-white text-slate-700 hover:bg-slate-100 border border-blue-200/80'
+              }`}
+            >
+              <Users className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">1. ข้อมูลนักเรียน ({students.length})</span>
+            </button>
 
-          <button
-            onClick={() => setActiveSubTab('personnel')}
-            className={`w-full sm:w-auto h-10 px-3.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-              activeSubTab === 'personnel'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'bg-white text-slate-700 hover:bg-slate-100 border border-blue-200/80'
-            }`}
-          >
-            <Smile className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">2. ข้อมูลบุคลากร ({personnel.length})</span>
-          </button>
+            <button
+              onClick={() => setActiveSubTab('personnel')}
+              className={`w-full sm:w-auto h-9 sm:h-10 px-2 sm:px-3.5 rounded-xl text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1.5 sm:gap-2 transition-all cursor-pointer ${
+                activeSubTab === 'personnel'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'bg-white text-slate-700 hover:bg-slate-100 border border-blue-200/80'
+              }`}
+            >
+              <Smile className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">2. ข้อมูลบุคลากร ({personnel.length})</span>
+            </button>
+          </div>
 
-          <button
-            onClick={() => setActiveSubTab('school')}
-            className={`w-full sm:w-auto h-10 px-3.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-              activeSubTab === 'school'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'bg-white text-slate-700 hover:bg-slate-100 border border-blue-200/80'
-            }`}
-          >
-            <Building2 className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">3. ข้อมูลโรงเรียน</span>
-          </button>
+          {/* Mobile Row 2: School Info, Leave, Duty - Equal 3 columns */}
+          <div className="grid grid-cols-3 gap-1.5 sm:contents">
+            <button
+              onClick={() => setActiveSubTab('school')}
+              className={`w-full sm:w-auto h-9 sm:h-10 px-1 sm:px-3.5 rounded-xl text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1 sm:gap-2 transition-all cursor-pointer ${
+                activeSubTab === 'school'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'bg-white text-slate-700 hover:bg-slate-100 border border-blue-200/80'
+              }`}
+            >
+              <Building2 className="w-3.5 h-3.5 shrink-0" />
+              <span className="sm:hidden truncate">3. ข้อมูล รร.</span>
+              <span className="hidden sm:inline truncate">3. ข้อมูลโรงเรียน</span>
+            </button>
 
-          <button
-            onClick={() => setActiveSubTab('leave')}
-            className={`w-full sm:w-auto h-10 px-3.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-              activeSubTab === 'leave'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'bg-white text-slate-700 hover:bg-slate-100 border border-blue-200/80'
-            }`}
-          >
-            <Calendar className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">4. ระบบลา</span>
-          </button>
+            <button
+              onClick={() => setActiveSubTab('leave')}
+              className={`w-full sm:w-auto h-9 sm:h-10 px-1 sm:px-3.5 rounded-xl text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1 sm:gap-2 transition-all cursor-pointer ${
+                activeSubTab === 'leave'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'bg-white text-slate-700 hover:bg-slate-100 border border-blue-200/80'
+              }`}
+            >
+              <Calendar className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">4. ระบบลา</span>
+            </button>
 
-          <button
-            onClick={() => setActiveSubTab('duty')}
-            className={`col-span-2 sm:col-span-1 w-full sm:w-auto h-10 px-3.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-              activeSubTab === 'duty'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'bg-white text-slate-700 hover:bg-slate-100 border border-blue-200/80'
-            }`}
-          >
-            <Shield className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">5. ครูเวร</span>
-          </button>
+            <button
+              onClick={() => setActiveSubTab('duty')}
+              className={`w-full sm:w-auto h-9 sm:h-10 px-1 sm:px-3.5 rounded-xl text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1 sm:gap-2 transition-all cursor-pointer ${
+                activeSubTab === 'duty'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'bg-white text-slate-700 hover:bg-slate-100 border border-blue-200/80'
+              }`}
+            >
+              <Shield className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">5. ครูเวร</span>
+            </button>
+          </div>
         </div>
 
 
@@ -2787,7 +2819,8 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
           {/* Filter Bar */}
           <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-wrap items-center justify-between gap-2.5">
             <div className="flex items-center gap-2 flex-wrap flex-1 min-w-0">
-              <div className="relative min-w-[200px] sm:min-w-[220px]">
+              {/* Search input - Hidden on mobile, visible on desktop */}
+              <div className="hidden sm:block relative min-w-[200px] sm:min-w-[220px]">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
@@ -2798,8 +2831,34 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                 />
               </div>
 
-              {/* Grade Filter Category & Pill buttons */}
-              <div className="flex items-center gap-1.5 flex-wrap py-1">
+              {/* Mobile Grade Dropdown Select */}
+              <div className="sm:hidden w-full">
+                <select
+                  value={selectedGrade === 'ประถม' || selectedGrade === 'มัธยม' ? 'ป.1' : selectedGrade}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (primaryGrades.includes(val as GradeLevel)) {
+                      setGradeCategory('primary');
+                    } else if (secondaryGrades.includes(val as GradeLevel)) {
+                      setGradeCategory('secondary');
+                    }
+                    setSelectedGrade(val);
+                    if (isBatchGradeEditMode) {
+                      handleOpenPromotionMode(val);
+                    }
+                  }}
+                  className="w-full text-xs font-bold px-3 py-2 rounded-xl border border-blue-200 bg-blue-50/90 text-blue-900 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs cursor-pointer"
+                >
+                  {gradeOptions.map(g => (
+                    <option key={g} value={g}>
+                      ชั้น {g}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Desktop Grade Filter Category & Pill buttons */}
+              <div className="hidden sm:flex items-center gap-1.5 flex-wrap py-1">
                 {/* Primary / Secondary Category Toggles */}
                 <div className="flex items-center bg-slate-100 p-0.5 rounded-xl mr-1">
                   <button
@@ -2836,6 +2895,7 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                     key={g}
                     onClick={() => {
                       setSelectedGrade(g);
+                      setSelectedStudentRoom('ALL');
                       if (isBatchGradeEditMode) {
                         handleOpenPromotionMode(g);
                       }
@@ -2851,6 +2911,38 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                 ))}
 
               </div>
+
+              {/* Room Filter Buttons when grade has multiple rooms */}
+              {availableRoomsForSelectedGrade.length > 1 && (
+                <div className="flex items-center gap-1 bg-blue-50/80 px-2 py-1 rounded-xl border border-blue-200">
+                  <span className="text-[11px] font-bold text-blue-900 px-1">ห้อง:</span>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedStudentRoom('ALL')}
+                    className={`px-2 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      selectedStudentRoom === 'ALL'
+                        ? 'bg-blue-600 text-white shadow-2xs'
+                        : 'bg-white text-blue-700 hover:bg-blue-100 border border-blue-200'
+                    }`}
+                  >
+                    ทุกห้อง
+                  </button>
+                  {availableRoomsForSelectedGrade.map(rm => (
+                    <button
+                      key={rm}
+                      type="button"
+                      onClick={() => setSelectedStudentRoom(rm)}
+                      className={`px-2 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        selectedStudentRoom === rm
+                          ? 'bg-blue-600 text-white shadow-2xs'
+                          : 'bg-white text-blue-700 hover:bg-blue-100 border border-blue-200'
+                      }`}
+                    >
+                      ห้อง {rm}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-2 flex-wrap shrink-0">
@@ -3335,7 +3427,8 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Desktop Personnel Grid */}
+          <div className="hidden sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {personnel.map((person, idx) => (
               <div
                 key={person.id}
@@ -3455,6 +3548,40 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
               </div>
             ))}
           </div>
+
+          {/* Mobile Personnel List: Shows ONLY Photo, Name, and Position */}
+          <div className="sm:hidden grid grid-cols-1 gap-2.5">
+            {personnel.map((person) => (
+              <div
+                key={person.id}
+                className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-2xs flex items-center gap-3"
+              >
+                <div
+                  onClick={() => {
+                    if (person.avatarUrl) {
+                      onOpenLightbox(person.avatarUrl, `${person.prefix}${person.firstName} ${person.lastName}`, person.position);
+                    }
+                  }}
+                  className="w-12 h-14 rounded-xl bg-blue-50 border border-blue-100 overflow-hidden flex items-center justify-center shrink-0 cursor-pointer"
+                >
+                  {person.avatarUrl ? (
+                    <img src={person.avatarUrl} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <Smile className="w-6 h-6 text-blue-500" />
+                  )}
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <h4 className="font-bold text-xs text-slate-800 truncate">
+                    {person.prefix}{person.firstName} {person.lastName}
+                  </h4>
+                  <p className="text-[11px] text-blue-600 font-medium truncate mt-0.5">
+                    {person.position}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -3483,63 +3610,13 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
             }}
           >
             <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200/90 space-y-2">
-              <label className="block text-xs font-bold text-slate-700">
-                1. ตราสัญลักษณ์ / โลโก้โรงเรียน (อัปโหลดรูปภาพจากอุปกรณ์)
-              </label>
-              <div className="flex items-center gap-4 pt-1">
-                <div
-                  onClick={() => {
-                    const input = document.createElement('input');
-                    input.type = 'file';
-                    input.accept = 'image/*';
-                    input.onchange = (e: any) => {
-                      const file = e.target?.files?.[0];
-                      if (!file) return;
-                      const reader = new FileReader();
-                      reader.onload = (ev) => {
-                        const img = new Image();
-                        img.onload = () => {
-                          const canvas = document.createElement('canvas');
-                          const MAX = 400;
-                          let w = img.width;
-                          let h = img.height;
-                          if (w > h) { if (w > MAX) { h *= MAX / w; w = MAX; } }
-                          else { if (h > MAX) { w *= MAX / h; h = MAX; } }
-                          canvas.width = w;
-                          canvas.height = h;
-                          const ctx = canvas.getContext('2d');
-                          if (ctx) {
-                            ctx.drawImage(img, 0, 0, w, h);
-                            const dataUrl = canvas.toDataURL('image/png');
-                            setEditingSchoolInfo(prev => ({ ...prev, logoUrl: dataUrl }));
-                            onShowToast('success', 'อัปโหลดสำเร็จ', 'อัปโหลดตราสัญลักษณ์โรงเรียนเรียบร้อยแล้ว');
-                          }
-                        };
-                        img.src = ev.target?.result as string;
-                      };
-                      reader.readAsDataURL(file);
-                    };
-                    input.click();
-                  }}
-                  className="w-16 h-16 rounded-2xl bg-white border-2 border-dashed border-slate-300 hover:border-blue-500 flex items-center justify-center cursor-pointer overflow-hidden shrink-0 shadow-2xs group relative"
-                  title="คลิกเพื่อเลือกไฟล์ตราสัญลักษณ์โรงเรียน"
-                >
-                  {editingSchoolInfo.logoUrl ? (
-                    <>
-                      <img src={editingSchoolInfo.logoUrl} alt="logo" className="w-full h-full object-contain p-1" />
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[9px] font-bold">
-                        เปลี่ยนรูป
-                      </div>
-                    </>
-                  ) : (
-                    <Upload className="w-5 h-5 text-blue-500" />
-                  )}
-                </div>
-
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
+              {user.role === 'admin' ? (
+                <>
+                  <label className="block text-xs font-bold text-slate-700">
+                    1. ตราสัญลักษณ์ / โลโก้โรงเรียน (อัปโหลดรูปภาพจากอุปกรณ์)
+                  </label>
+                  <div className="flex items-center gap-4 pt-1">
+                    <div
                       onClick={() => {
                         const input = document.createElement('input');
                         input.type = 'file';
@@ -3573,25 +3650,94 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                         };
                         input.click();
                       }}
-                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-2xs transition-colors cursor-pointer"
+                      className="w-16 h-16 rounded-2xl bg-white border-2 border-dashed border-slate-300 hover:border-blue-500 flex items-center justify-center cursor-pointer overflow-hidden shrink-0 shadow-2xs group relative"
+                      title="คลิกเพื่อเลือกไฟล์ตราสัญลักษณ์โรงเรียน"
                     >
-                      เลือกไฟล์ตราสัญลักษณ์
-                    </button>
-                    {editingSchoolInfo.logoUrl && (
-                      <button
-                        type="button"
-                        onClick={() => setEditingSchoolInfo(prev => ({ ...prev, logoUrl: '' }))}
-                        className="px-2.5 py-1.5 bg-white border border-slate-200 hover:bg-rose-50 text-slate-600 hover:text-rose-600 text-xs font-medium rounded-xl transition-colors cursor-pointer"
-                      >
-                        ลบรูป
-                      </button>
-                    )}
+                      {editingSchoolInfo.logoUrl ? (
+                        <>
+                          <img src={editingSchoolInfo.logoUrl} alt="logo" className="w-full h-full object-contain p-1" />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[9px] font-bold">
+                            เปลี่ยนรูป
+                          </div>
+                        </>
+                      ) : (
+                        <Upload className="w-5 h-5 text-blue-500" />
+                      )}
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const input = document.createElement('input');
+                            input.type = 'file';
+                            input.accept = 'image/*';
+                            input.onchange = (e: any) => {
+                              const file = e.target?.files?.[0];
+                              if (!file) return;
+                              const reader = new FileReader();
+                              reader.onload = (ev) => {
+                                const img = new Image();
+                                img.onload = () => {
+                                  const canvas = document.createElement('canvas');
+                                  const MAX = 400;
+                                  let w = img.width;
+                                  let h = img.height;
+                                  if (w > h) { if (w > MAX) { h *= MAX / w; w = MAX; } }
+                                  else { if (h > MAX) { w *= MAX / h; h = MAX; } }
+                                  canvas.width = w;
+                                  canvas.height = h;
+                                  const ctx = canvas.getContext('2d');
+                                  if (ctx) {
+                                    ctx.drawImage(img, 0, 0, w, h);
+                                    const dataUrl = canvas.toDataURL('image/png');
+                                    setEditingSchoolInfo(prev => ({ ...prev, logoUrl: dataUrl }));
+                                    onShowToast('success', 'อัปโหลดสำเร็จ', 'อัปโหลดตราสัญลักษณ์โรงเรียนเรียบร้อยแล้ว');
+                                  }
+                                };
+                                img.src = ev.target?.result as string;
+                              };
+                              reader.readAsDataURL(file);
+                            };
+                            input.click();
+                          }}
+                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-2xs transition-colors cursor-pointer"
+                        >
+                          เลือกไฟล์ตราสัญลักษณ์
+                        </button>
+                        {editingSchoolInfo.logoUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setEditingSchoolInfo(prev => ({ ...prev, logoUrl: '' }))}
+                            className="px-2.5 py-1.5 bg-white border border-slate-200 hover:bg-rose-50 text-slate-600 hover:text-rose-600 text-xs font-medium rounded-xl transition-colors cursor-pointer"
+                          >
+                            ลบรูป
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-400">
+                        รองรับไฟล์ JPG, PNG, WebP (ระบบจะปรับขนาดภาพให้อัตโนมัติ)
+                      </p>
+                    </div>
                   </div>
-                  <p className="text-[10px] text-slate-400">
-                    รองรับไฟล์ JPG, PNG, WebP (ระบบจะปรับขนาดภาพให้อัตโนมัติ)
-                  </p>
+                </>
+              ) : (
+                /* Member View: Shows ONLY the logo itself, no text label, non-interactive */
+                <div className="flex items-center justify-center p-2">
+                  {editingSchoolInfo.logoUrl ? (
+                    <img
+                      src={editingSchoolInfo.logoUrl}
+                      alt="ตราสัญลักษณ์โรงเรียน"
+                      className="w-20 h-20 sm:w-24 sm:h-24 object-contain"
+                    />
+                  ) : (
+                    <div className="w-16 h-16 rounded-2xl bg-white border border-slate-200 flex items-center justify-center text-slate-400 text-xs font-semibold">
+                      ไม่มีโลโก้
+                    </div>
+                  )}
                 </div>
-              </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -4593,12 +4739,31 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">ห้อง</label>
-                    <input
-                      type="text"
-                      value={studentFormData.room}
-                      onChange={(e) => setStudentFormData(prev => ({ ...prev, room: e.target.value }))}
-                      className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200"
-                    />
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-1">
+                        {['1', '2', '3'].map(rm => (
+                          <button
+                            key={rm}
+                            type="button"
+                            onClick={() => setStudentFormData(prev => ({ ...prev, room: rm }))}
+                            className={`flex-1 py-1.5 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
+                              normalizeRoom(studentFormData.room) === rm
+                                ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                                : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                            }`}
+                          >
+                            ห้อง {rm}
+                          </button>
+                        ))}
+                      </div>
+                      <input
+                        type="text"
+                        value={studentFormData.room}
+                        onChange={(e) => setStudentFormData(prev => ({ ...prev, room: e.target.value }))}
+                        placeholder="ระบุเลขห้อง เช่น 1, 2, 3"
+                        className="w-full text-xs px-3 py-1.5 rounded-xl border border-slate-200"
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -5817,14 +5982,15 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
               <div className="flex items-center gap-2.5 flex-wrap">
                 <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
                   <Calendar className="w-4 h-4 text-blue-600" />
-                  <span>ระบบการลาของบุคลากร</span>
+                  <span className="hidden sm:inline">ระบบการลาของบุคลากร</span>
+                  <span className="sm:hidden">ระบบลา</span>
                 </h3>
                 {isAdmin ? (
                   <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
                     <span>👑 สิทธิ์ผู้ดูแลระบบ: เห็นรายการของทุกคน</span>
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 text-blue-800 border border-blue-200">
+                  <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-blue-50 text-blue-800 border border-blue-200">
                     <span>👤 สิทธิ์สมาชิก: เห็นเฉพาะของตนเอง ({formatThaiPersonName(user.fullName || 'ผู้ใช้งาน')})</span>
                   </span>
                 )}
@@ -5884,12 +6050,13 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer active:scale-95"
             >
               <Users className="w-3.5 h-3.5" />
-              <span>+ ยื่นคำขอลา</span>
+              <span className="hidden sm:inline">+ ยื่นคำขอลา</span>
+              <span className="sm:hidden">ยื่นคำขอ</span>
             </button>
           </div>
 
-          {/* Filter Bar (Round 1 / Round 2 & Teacher & Status) */}
-          <div className="bg-white p-3.5 rounded-2xl border border-slate-200/90 shadow-2xs flex flex-wrap items-center justify-between gap-3">
+          {/* Filter Bar (Round 1 / Round 2 & Teacher & Status) - Hidden on Mobile */}
+          <div className="hidden sm:flex bg-white p-3.5 rounded-2xl border border-slate-200/90 shadow-2xs flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2.5">
               {/* Leave Evaluation Round Filter (Replaced Fiscal Year with ครั้งที่ 1 / ครั้งที่ 2) */}
               <div className="flex items-center gap-2 flex-wrap">
@@ -5981,12 +6148,12 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
               <table className="w-full text-left text-xs border-collapse">
                  <thead>
                   <tr className="bg-slate-50/90 border-b border-slate-200 text-slate-600 font-bold uppercase text-[11px] tracking-wider">
-                    <th className="py-3 px-4">ผู้ขอลา</th>
-                    <th className="py-3 px-3 text-center">ประเภทการลา</th>
-                    <th className="py-3 px-3 text-center">ลากี่วัน</th>
-                    <th className="py-3 px-3 text-center">รอบการลา & สถิติสะสม</th>
+                    <th className="py-3 px-2 sm:px-4">ผู้ขอลา</th>
+                    <th className="py-3 px-2 sm:px-3 text-center whitespace-nowrap">ประเภทการลา</th>
+                    <th className="py-3 px-3 text-center hidden sm:table-cell">ลากี่วัน</th>
+                    <th className="py-3 px-3 text-center hidden sm:table-cell">รอบการลา & สถิติสะสม</th>
                     <th className="py-3 px-4 hidden sm:table-cell">เหตุผลการลา</th>
-                    <th className="py-3 px-3 text-right">จัดการ</th>
+                    <th className="py-3 px-2 sm:px-3 text-right">จัดการ</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -6014,22 +6181,22 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
 
                       return (
                         <tr key={req.id} className="hover:bg-blue-50/30 transition-colors">
-                          <td className="py-3 px-4">
+                          <td className="py-3 px-2 sm:px-4">
                             <div className="font-bold text-slate-800 flex items-center gap-1.5 flex-wrap">
                               <span>{formatThaiPersonName(req.teacherName)}</span>
                               {isOwner && (
-                                <span className="text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.2 rounded-md font-medium border border-blue-200">
+                                <span className="hidden sm:inline-block text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.2 rounded-md font-medium border border-blue-200">
                                   ของฉัน
                                 </span>
                               )}
                             </div>
                           </td>
-                          <td className="py-3 px-3 text-center">
-                            <span className="px-2.5 py-0.5 bg-purple-50 text-purple-700 rounded-md font-semibold text-[11px] border border-purple-200">
+                          <td className="py-3 px-2 sm:px-3 text-center whitespace-nowrap">
+                            <span className="px-2 sm:px-2.5 py-0.5 bg-purple-50 text-purple-700 rounded-md font-semibold text-[11px] border border-purple-200 whitespace-nowrap inline-block">
                               {req.leaveType}
                             </span>
                           </td>
-                          <td className="py-3 px-3 text-center font-medium text-slate-600">
+                          <td className="py-3 px-3 text-center font-medium text-slate-600 hidden sm:table-cell">
                             <span className="font-bold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200 inline-block">
                               {daysCount} วัน
                             </span>
@@ -6037,7 +6204,7 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                               ({formatIsoToThaiDisplay(req.startDate, 'short')} - {formatIsoToThaiDisplay(req.endDate, 'short')})
                             </div>
                           </td>
-                          <td className="py-3 px-3 text-center">
+                          <td className="py-3 px-3 text-center hidden sm:table-cell">
                             <div className="flex flex-col items-center gap-0.5">
                               <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-md font-bold text-[10px] border border-indigo-200">
                                 {stats.evalRoundLabel}
@@ -6196,7 +6363,7 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                   </button>
                 </>
               ) : (
-                <div className="px-3 py-2 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold whitespace-nowrap">
+                <div className="hidden sm:block px-3 py-2 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold whitespace-nowrap">
                   ภาคเรียนที่ {activeDutySem} • ปีการศึกษา {activeDutyYr}
                 </div>
               )}
@@ -6512,8 +6679,8 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
           )}
           {dutyLogSubView === 'fill' && (
             <div className="bg-white rounded-3xl border border-slate-200/90 shadow-sm p-4 sm:p-5 space-y-4 animate-in fade-in duration-150">
-              {/* Form Title & Overview Banner */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-slate-100">
+              {/* Form Title & Overview Banner - Hidden on Mobile */}
+              <div className="hidden sm:flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-slate-100">
                 <div className="flex items-center gap-2.5">
                   <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold shrink-0 border border-emerald-200/80 shadow-2xs">
                     <Shield className="w-5 h-5" />
@@ -6528,38 +6695,63 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
 
               {/* General Information Grid - Compact Date Button & Duty Teacher */}
               <div className="flex flex-col sm:flex-row sm:items-center gap-3 bg-slate-50/90 p-3.5 rounded-2xl border border-slate-200/90">
-                {/* Compact Date Selection Button */}
+                {/* Date Selection: Desktop 100-day Calendar button & Mobile Clean Current Date */}
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-[11px] font-bold text-slate-700 truncate">
-                      วันที่ปฏิบัติหน้าที่ (ปฏิทิน 100 วัน) *
-                    </label>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setIsDutyCalendarModalOpen(true)}
-                    className="w-full bg-white hover:bg-sky-50/80 border border-slate-200 hover:border-sky-300 p-2 rounded-xl flex items-center justify-between gap-2 transition-all cursor-pointer shadow-2xs group text-left"
-                    title="กดเพื่อเปิดปฏิทิน 100 วันสำหรับเลือกวันที่"
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-8 h-8 rounded-lg bg-sky-100 text-sky-700 flex items-center justify-center font-bold shrink-0 group-hover:scale-105 transition-transform">
-                        <Calendar className="w-4 h-4" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-xs font-bold text-slate-900 truncate">
-                          {getThaiDayName(dutyLogForm.date)}ที่ {formatThaiDate(dutyLogForm.date)}
+                  {/* Desktop Date Picker View */}
+                  <div className="hidden sm:block">
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[11px] font-bold text-slate-700 truncate">
+                        วันที่ปฏิบัติหน้าที่ (ปฏิทิน 100 วัน) *
+                      </label>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsDutyCalendarModalOpen(true)}
+                      className="w-full bg-white hover:bg-sky-50/80 border border-slate-200 hover:border-sky-300 p-2 rounded-xl flex items-center justify-between gap-2 transition-all cursor-pointer shadow-2xs group text-left"
+                      title="กดเพื่อเปิดปฏิทิน 100 วันสำหรับเลือกวันที่"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-8 h-8 rounded-lg bg-sky-100 text-sky-700 flex items-center justify-center font-bold shrink-0 group-hover:scale-105 transition-transform">
+                          <Calendar className="w-4 h-4" />
                         </div>
-                        <span className="text-[10px] text-emerald-700 font-semibold flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                          <span>วันเปิดเรียน 100 วันตาม Admin กำหนด</span>
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-slate-900 truncate">
+                            {getThaiDayName(dutyLogForm.date)}ที่ {formatThaiDate(dutyLogForm.date)}
+                          </div>
+                          <span className="text-[10px] text-emerald-700 font-semibold flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                            <span>วันเปิดเรียน 100 วันตาม Admin กำหนด</span>
+                          </span>
+                        </div>
+                      </div>
+                      <span className="px-2.5 py-1 bg-sky-600 hover:bg-sky-700 active:scale-95 text-white rounded-lg text-[11px] font-bold shrink-0 flex items-center gap-1 shadow-2xs transition-all">
+                        <Calendar className="w-3.5 h-3.5" />
+                        <span>เลือกปฏิทิน 100 วัน</span>
+                      </span>
+                    </button>
+                  </div>
+
+                  {/* Mobile Clean Current Date Display */}
+                  <div className="sm:hidden">
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">
+                      วันที่ปฏิบัติหน้าที่
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setIsDutyCalendarModalOpen(true)}
+                      className="w-full bg-white border border-slate-200 p-2.5 rounded-xl flex items-center justify-between gap-2 shadow-2xs cursor-pointer text-left hover:bg-slate-50"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Calendar className="w-4 h-4 text-blue-600 shrink-0" />
+                        <span className="text-xs font-bold text-slate-900 truncate">
+                          {getThaiDayName(dutyLogForm.date)}ที่ {formatThaiDate(dutyLogForm.date)}
                         </span>
                       </div>
-                    </div>
-                    <span className="px-2.5 py-1 bg-sky-600 hover:bg-sky-700 active:scale-95 text-white rounded-lg text-[11px] font-bold shrink-0 flex items-center gap-1 shadow-2xs transition-all">
-                      <Calendar className="w-3.5 h-3.5" />
-                      <span>เลือกปฏิทิน 100 วัน</span>
-                    </span>
-                  </button>
+                      <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-200 shrink-0">
+                        เปลี่ยนวัน
+                      </span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Duty Teacher Input */}
@@ -6791,12 +6983,12 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
           {/* VIEW 2: DUTY LOG HISTORY */}
           {dutyLogSubView === 'history' && (
             <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden space-y-0">
-              <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2">
-                <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+              <div className="p-3.5 sm:p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2">
+                <h3 className="hidden sm:flex text-sm font-bold text-slate-800 items-center gap-2">
                   <FileText className="w-4 h-4 text-blue-600" />
                   <span>ประวัติรายงานการปฏิบัติหน้าที่ครูเวรประจำวัน ({filteredDutyLogs.length} รายการ)</span>
                 </h3>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 ml-auto sm:ml-0">
                   <button
                     type="button"
                     onClick={() => {
@@ -6807,10 +6999,11 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                       setPreviewAllDutyLogs(true);
                       onShowToast('info', 'แสดงตัวอย่างรายงาน', 'เปิดหน้าตัวอย่างรายงานครูเวรทั้งหมดก่อนดาวน์โหลด/พิมพ์');
                     }}
-                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
+                    className="px-2.5 sm:px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    <span>ดาวน์โหลดทั้งหมด</span>
+                    <span className="hidden sm:inline">ดาวน์โหลดทั้งหมด</span>
+                    <span className="sm:hidden">ทั้งหมด</span>
                   </button>
                   <button
                     type="button"
@@ -6818,10 +7011,11 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                       resetDutyFormToLatestHistory();
                       setDutyLogSubView('fill');
                     }}
-                    className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-2xs transition-all cursor-pointer"
+                    className="px-2.5 sm:px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow-2xs transition-all cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
-                    <span>+ กรอกรายงานเวรใหม่</span>
+                    <span className="hidden sm:inline">+ กรอกรายงานเวรใหม่</span>
+                    <span className="sm:hidden">+ เพิ่ม</span>
                   </button>
                 </div>
               </div>
@@ -6830,11 +7024,11 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
                     <tr className="bg-slate-100/70 border-b border-slate-200 text-slate-600 font-bold uppercase text-[11px] tracking-wider">
-                      <th className="py-3 px-4 w-32">วันที่</th>
-                      <th className="py-3 px-4">ครูเวรผู้ปฏิบัติหน้าที่</th>
-                      <th className="py-3 px-3 w-28 text-center">จำนวนช่วงเวลา</th>
-                      <th className="py-3 px-4">สรุปความเรียบร้อย</th>
-                      <th className="py-3 px-3 text-right">จัดการ</th>
+                      <th className="py-3 px-2 sm:px-4 w-28 sm:w-32">วันที่</th>
+                      <th className="py-3 px-2 sm:px-4">ครูเวรผู้ปฏิบัติหน้าที่</th>
+                      <th className="py-3 px-3 w-28 text-center hidden sm:table-cell">จำนวนช่วงเวลา</th>
+                      <th className="py-3 px-4 hidden sm:table-cell">สรุปความเรียบร้อย</th>
+                      <th className="py-3 px-2 sm:px-3 text-right">จัดการ</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -6847,24 +7041,31 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                     ) : (
                       filteredDutyLogs.map((log) => (
                         <tr key={log.id} className="hover:bg-blue-50/30 transition-colors">
-                          <td className="py-3 px-4 font-bold text-blue-900 whitespace-nowrap">{log.date}</td>
-                          <td className="py-3 px-4 font-bold text-slate-800">{log.dutyTeacherName}</td>
-                          <td className="py-3 px-3 text-center font-bold">
+                          <td className="py-3 px-2 sm:px-4 font-bold text-blue-900 whitespace-nowrap">
+                            <span className="hidden sm:inline">{log.date}</span>
+                            <span className="sm:hidden">{formatIsoToThaiDisplay(log.date, 'short')}</span>
+                          </td>
+                          <td className="py-3 px-2 sm:px-4 font-bold text-slate-800">
+                            {log.dutyTeacherName}
+                          </td>
+                          <td className="py-3 px-3 text-center font-bold hidden sm:table-cell">
                             <span className="px-2.5 py-0.5 bg-blue-50 text-blue-800 rounded-lg text-[11px] border border-blue-200">
                               {log.timeSlots.length} ช่วงเวลา
                             </span>
                           </td>
-                          <td className="py-3 px-4 text-slate-600 truncate max-w-xs">{log.overallStatus}</td>
-                          <td className="py-3 px-3 text-right whitespace-nowrap">
-                            <div className="flex items-center justify-end gap-1.5">
+                          <td className="py-3 px-4 text-slate-600 truncate max-w-xs hidden sm:table-cell">
+                            {log.overallStatus}
+                          </td>
+                          <td className="py-3 px-2 sm:px-3 text-right whitespace-nowrap">
+                            <div className="flex items-center justify-end gap-1 sm:gap-1.5">
                               <button
                                 type="button"
                                 onClick={() => setPreviewDutyLog(log)}
-                                className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                                className="p-1.5 sm:px-2.5 sm:py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
                                 title="ดาวน์โหลดรายงาน A4"
                               >
-                                <Download className="w-4 h-4 shrink-0" />
-                                <span>ดาวน์โหลด</span>
+                                <Download className="w-3.5 h-3.5 shrink-0" />
+                                <span className="hidden sm:inline">ดาวน์โหลด</span>
                               </button>
                               <button
                                 type="button"

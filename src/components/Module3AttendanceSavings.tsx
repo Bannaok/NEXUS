@@ -384,7 +384,9 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
     return gradeOrder.filter(g => gradesSet.has(g));
   }, [homeroomMembers]);
 
-  // Selected date & grade level (synced from settings/user profile or homeroom teacher list)
+  const normalizeRoom = (r?: string) => (r || '1').toString().trim().replace(/^ห้อง\s*/, '') || '1';
+
+  // Selected date, grade level & room (synced from settings/user profile or homeroom teacher list)
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const initialGrade = useMemo(() => {
     if (user.role === 'admin') {
@@ -395,16 +397,39 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
   }, [user.role, user.assignedGrade, registeredHomeroomGrades]);
 
   const [selectedGrade, setSelectedGrade] = useState<GradeLevel>(initialGrade);
+  const [selectedRoom, setSelectedRoom] = useState<string>(() => {
+    if (user.role === 'member') {
+      return normalizeRoom(user.assignedRoom);
+    }
+    return '1';
+  });
+
+  const availableRoomsForGrade = useMemo(() => {
+    const rooms = new Set<string>(['1']);
+    students
+      .filter(s => s.gradeLevel === selectedGrade)
+      .forEach(s => rooms.add(normalizeRoom(s.room)));
+    homeroomMembers
+      .filter(m => m.gradeLevel === selectedGrade && m.room)
+      .forEach(m => rooms.add(normalizeRoom(m.room)));
+    return Array.from(rooms).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [students, homeroomMembers, selectedGrade]);
 
   React.useEffect(() => {
     if (user.role === 'admin') {
       if (registeredHomeroomGrades.length > 0 && !registeredHomeroomGrades.includes(selectedGrade)) {
         setSelectedGrade(registeredHomeroomGrades[0]);
       }
-    } else if (user.assignedGrade) {
-      setSelectedGrade(user.assignedGrade as GradeLevel);
+      if (!availableRoomsForGrade.includes(selectedRoom)) {
+        setSelectedRoom(availableRoomsForGrade[0] || '1');
+      }
+    } else {
+      if (user.assignedGrade) {
+        setSelectedGrade(user.assignedGrade as GradeLevel);
+      }
+      setSelectedRoom(normalizeRoom(user.assignedRoom));
     }
-  }, [user.role, user.assignedGrade, registeredHomeroomGrades]);
+  }, [user.role, user.assignedGrade, user.assignedRoom, registeredHomeroomGrades, availableRoomsForGrade]);
 
   // Attendance states for each student
   const [attendanceStates, setAttendanceStates] = useState<Record<string, { status: AttendanceStatus | ''; note: string }>>({});
@@ -951,38 +976,60 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
     return cells;
   }, [calViewYear, calViewMonth, activeSchoolDayDatesSet]);
 
-  // Dates with attendance issues (absent, leave, sick) for current selectedGrade (Red dot on calendar)
+  // Filter students by grade AND room, and sort by roll number (เลขที่)
+  const gradeStudents = useMemo(() => {
+    const targetRoom = normalizeRoom(selectedRoom);
+    return [
+      ...students.filter(
+        s => s.gradeLevel === selectedGrade && normalizeRoom(s.room) === targetRoom
+      )
+    ].sort((a, b) => {
+      if (a.rollNumber !== undefined && b.rollNumber !== undefined) {
+        return a.rollNumber - b.rollNumber;
+      }
+      if (a.rollNumber !== undefined) return -1;
+      if (b.rollNumber !== undefined) return 1;
+      return (a.studentCode || '').localeCompare(b.studentCode || '');
+    });
+  }, [students, selectedGrade, selectedRoom]);
+
+  const gradeStudentIdsSet = useMemo(() => new Set(gradeStudents.map(s => s.id)), [gradeStudents]);
+
+  // Dates with attendance issues (absent, leave, sick) for current selectedGrade & selectedRoom (Red dot on calendar)
   const datesWithAttendanceIssues = useMemo(() => {
     const set = new Set<string>();
     attendance.forEach(a => {
-      if (a.gradeLevel === selectedGrade && (a.status === 'absent' || a.status === 'leave' || a.status === 'sick')) {
+      if (
+        gradeStudentIdsSet.has(a.studentId) &&
+        (a.status === 'absent' || a.status === 'leave' || a.status === 'sick')
+      ) {
         set.add(a.date);
       }
     });
     return set;
-  }, [attendance, selectedGrade]);
+  }, [attendance, gradeStudentIdsSet]);
 
-  // Dates with withdrawals for current selectedGrade (Orange dot on calendar)
+  // Dates with withdrawals for current selectedGrade & selectedRoom (Orange dot on calendar)
   const datesWithWithdrawals = useMemo(() => {
     const set = new Set<string>();
     savings.forEach(s => {
-      if (s.gradeLevel === selectedGrade && s.type === 'withdrawal' && s.amount > 0) {
+      if (gradeStudentIdsSet.has(s.studentId) && s.type === 'withdrawal' && s.amount > 0) {
         set.add(s.date);
       }
     });
     return set;
-  }, [savings, selectedGrade]);
+  }, [savings, gradeStudentIdsSet]);
 
-  // Dates with deposits for current selectedGrade (Green dot on calendar)
+  // Dates with deposits for current selectedGrade & selectedRoom (Green dot on calendar)
   const datesWithDeposits = useMemo(() => {
     const set = new Set<string>();
     savings.forEach(s => {
-      if (s.gradeLevel === selectedGrade && s.type === 'deposit' && s.amount > 0) {
+      if (gradeStudentIdsSet.has(s.studentId) && s.type === 'deposit' && s.amount > 0) {
         set.add(s.date);
       }
     });
     return set;
-  }, [savings, selectedGrade]);
+  }, [savings, gradeStudentIdsSet]);
 
   // Available months from active school days for calendar quick month switcher
   const calendarAvailableMonths = useMemo(() => {
@@ -1005,19 +1052,7 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
     return Array.from(map.values());
   }, [activeSchoolDays]);
 
-  // Filter students by grade and sort by roll number (เลขที่)
-  const gradeStudents = useMemo(() => {
-    return [...students.filter(s => s.gradeLevel === selectedGrade)].sort((a, b) => {
-      if (a.rollNumber !== undefined && b.rollNumber !== undefined) {
-        return a.rollNumber - b.rollNumber;
-      }
-      if (a.rollNumber !== undefined) return -1;
-      if (b.rollNumber !== undefined) return 1;
-      return (a.studentCode || '').localeCompare(b.studentCode || '');
-    });
-  }, [students, selectedGrade]);
-
-  // Dates where ALL students in the selected class/grade have attendance recorded (เช็กเวลาเรียนครบทุกคนแล้ว ไม่ว่าจะมา ขาด ลา ป่วย)
+  // Dates where ALL students in the selected class/grade & room have attendance recorded
   const datesWithAllChecked = useMemo(() => {
     const set = new Set<string>();
     const totalStudents = gradeStudents.length;
@@ -1025,7 +1060,7 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
 
     const recordsByDate: Record<string, AttendanceRecord[]> = {};
     attendance.forEach(a => {
-      if (a.gradeLevel === selectedGrade && a.status) {
+      if (gradeStudentIdsSet.has(a.studentId) && a.status) {
         if (!recordsByDate[a.date]) recordsByDate[a.date] = [];
         recordsByDate[a.date].push(a);
       }
@@ -1038,7 +1073,7 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
     });
 
     return set;
-  }, [attendance, selectedGrade, gradeStudents]);
+  }, [attendance, gradeStudents, gradeStudentIdsSet]);
 
   const currentStudentModalIndex = useMemo(() => {
     if (!selectedStudentModal) return -1;
@@ -2048,21 +2083,45 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
               </select>
 
               {activeTab === 'main' && registeredHomeroomGrades.length > 0 && (
-                <select
-                  value={selectedGrade}
-                  onChange={(e) => setSelectedGrade(e.target.value as GradeLevel)}
-                  className="px-3 py-2 rounded-xl bg-white hover:bg-emerald-50 text-emerald-900 border border-emerald-300 text-xs font-bold outline-none cursor-pointer shadow-2xs transition-colors"
-                >
-                  {registeredHomeroomGrades.map(grade => (
-                    <option key={grade} value={grade}>
-                      {grade}
-                    </option>
-                  ))}
-                </select>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <select
+                    value={selectedGrade}
+                    onChange={(e) => {
+                      setSelectedGrade(e.target.value as GradeLevel);
+                      setSelectedRoom('1');
+                    }}
+                    className="px-3 py-2 rounded-xl bg-white hover:bg-emerald-50 text-emerald-900 border border-emerald-300 text-xs font-bold outline-none cursor-pointer shadow-2xs transition-colors"
+                  >
+                    {registeredHomeroomGrades.map(grade => (
+                      <option key={grade} value={grade}>
+                        {grade}
+                      </option>
+                    ))}
+                  </select>
+
+                  {availableRoomsForGrade.length > 1 && (
+                    <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-emerald-200 shadow-2xs">
+                      {availableRoomsForGrade.map(rm => (
+                        <button
+                          key={rm}
+                          type="button"
+                          onClick={() => setSelectedRoom(rm)}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                            normalizeRoom(selectedRoom) === rm
+                              ? 'bg-emerald-600 text-white shadow-2xs'
+                              : 'text-slate-600 hover:bg-emerald-50'
+                          }`}
+                        >
+                          ห้อง {rm}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
             </>
           ) : (
-            <div className="px-3 py-2 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold whitespace-nowrap">
+            <div className="hidden sm:block px-3 py-2 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold whitespace-nowrap">
               ภาคเรียนที่ {activeSemester} • ปีการศึกษา {activeAcademicYear}
             </div>
           )}
@@ -2106,7 +2165,7 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
                     {/* Header showing active semester and academic year */}
                     <div className="pb-1.5 mb-2 border-b border-slate-100 flex items-center justify-between text-[11px] font-bold text-sky-900 bg-sky-50/80 px-2.5 py-1 rounded-xl">
                       <span>ปฏิทินเวลาเรียน 100 วัน</span>
-                      <span className="bg-white px-2 py-0.5 rounded-lg border border-sky-200 text-sky-800 font-mono shadow-2xs">
+                      <span className="hidden sm:inline bg-white px-2 py-0.5 rounded-lg border border-sky-200 text-sky-800 font-mono shadow-2xs">
                         ภาคเรียนที่ {activeSemester}/{activeAcademicYear}
                       </span>
                     </div>
@@ -2337,7 +2396,10 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
                 title="ประวัติการถอนเงิน"
               >
                 <History className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                <span className="whitespace-nowrap text-[11px] sm:text-xs">ประวัติถอน</span>
+                <span className="whitespace-nowrap text-[11px] sm:text-xs">
+                  <span className="hidden sm:inline">ประวัติถอน</span>
+                  <span className="sm:hidden">ถอน</span>
+                </span>
                 {studentsWithWithdrawals.length > 0 && (
                   <span className="bg-rose-600 text-white text-[9px] min-w-3.5 h-3.5 px-1 flex items-center justify-center rounded-full font-mono font-bold leading-none shadow-2xs shrink-0">
                     {studentsWithWithdrawals.length}
@@ -2385,11 +2447,14 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
           <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
             <div className="px-4 py-2.5 bg-slate-50/80 border-b border-slate-200 flex items-center justify-between text-xs font-bold text-slate-800">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="px-2.5 py-0.5 bg-emerald-100 text-emerald-800 rounded-lg text-xs font-bold border border-emerald-200 font-mono">
-                  ชั้น {selectedGrade}
+                <span className="hidden sm:inline-block px-2.5 py-0.5 bg-emerald-100 text-emerald-800 rounded-lg text-xs font-bold border border-emerald-200 font-mono">
+                  ชั้น {selectedGrade}{availableRoomsForGrade.length > 1 || normalizeRoom(selectedRoom) !== '1' ? ` ห้อง ${normalizeRoom(selectedRoom)}` : ''}
                 </span>
                 {(() => {
-                  const teacher = homeroomMembers.find(m => m.gradeLevel === selectedGrade);
+                  const targetRoom = normalizeRoom(selectedRoom);
+                  const teacher =
+                    homeroomMembers.find(m => m.gradeLevel === selectedGrade && normalizeRoom(m.room) === targetRoom) ||
+                    homeroomMembers.find(m => m.gradeLevel === selectedGrade);
                   return teacher ? (
                     <span className="px-2.5 py-0.5 bg-indigo-50 text-indigo-800 rounded-lg text-[11px] font-bold border border-indigo-200/80 flex items-center gap-1">
                       <User className="w-3 h-3 text-indigo-600 shrink-0" />
@@ -2397,7 +2462,7 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
                     </span>
                   ) : null;
                 })()}
-                <span className="px-2 py-0.5 bg-sky-100 text-sky-800 rounded-lg text-[11px] font-bold border border-sky-200 font-mono">
+                <span className="hidden sm:inline-block px-2 py-0.5 bg-sky-100 text-sky-800 rounded-lg text-[11px] font-bold border border-sky-200 font-mono">
                   ภาคเรียนที่ {activeSemester}/{activeAcademicYear}
                 </span>
                 <span className="text-slate-700 font-medium hidden sm:inline">
@@ -2409,13 +2474,13 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
               </div>
             </div>
 
-            {/* Mobile View: Clean 2-column Table (ชื่อ - นามสกุล + ยอดออมสะสม) */}
+            {/* Mobile View: Clean 2-column Table (ชื่อ - นามสกุล + ยอดออม) */}
             <div className="block sm:hidden">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="bg-slate-50/90 border-b border-slate-200/80 text-slate-700 uppercase tracking-wider font-semibold">
                     <th className="py-2.5 px-3">ชื่อ - นามสกุล</th>
-                    <th className="py-2.5 px-3 text-right">ยอดออมสะสม</th>
+                    <th className="py-2.5 px-3 text-right">ยอดออม</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -2432,7 +2497,6 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
                     gradeStudents.map((student, idx) => {
                       const curState = attendanceStates[student.id] || { status: 'present', note: '' };
                       const balance = getStudentBalance(student.id);
-                      const todayDepositRec = getStudentTodayDepositRecord(student.id);
 
                       return (
                         <tr
@@ -2464,11 +2528,6 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
                                     {curState.status === 'present' ? 'ม' : curState.status === 'absent' ? 'ข' : curState.status === 'leave' ? 'ล' : 'ป'}
                                   </span>
                                 </div>
-                                {todayDepositRec && (
-                                  <span className="text-[10px] text-emerald-600 font-medium flex items-center gap-1 mt-0.5">
-                                    <span>ฝากวันนี้: ฿{todayDepositRec.amount.toLocaleString()}</span>
-                                  </span>
-                                )}
                               </div>
                             </div>
                           </td>
@@ -4165,7 +4224,7 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-slate-800">
-                    สรุปภาพรวม (ชั้น {selectedGrade})
+                    สรุปภาพรวม (ชั้น {selectedGrade}{availableRoomsForGrade.length > 1 || normalizeRoom(selectedRoom) !== '1' ? ` ห้อง ${normalizeRoom(selectedRoom)}` : ''})
                   </h3>
                 </div>
               </div>
@@ -4178,7 +4237,7 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
               </button>
             </div>
 
-            {/* Selectors Bar: ภาคเรียน และ ปีการศึกษา */}
+            {/* Selectors Bar: ภาคเรียน, ปีการศึกษา และปุ่มเลือกห้อง */}
             <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200/80 flex flex-wrap items-center justify-between gap-3 shrink-0">
               {user.role === 'admin' ? (
                 <div className="flex flex-wrap items-center gap-2">
@@ -4204,6 +4263,26 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
               ) : (
                 <div className="px-3 py-2 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold whitespace-nowrap">
                   ภาคเรียนที่ {activeSemester} • ปีการศึกษา {activeAcademicYear}
+                </div>
+              )}
+
+              {availableRoomsForGrade.length > 1 && (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-xs font-bold text-slate-600">เลือกห้อง:</span>
+                  {availableRoomsForGrade.map(rm => (
+                    <button
+                      key={rm}
+                      type="button"
+                      onClick={() => setSelectedRoom(rm)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                        normalizeRoom(selectedRoom) === rm
+                          ? 'bg-sky-600 text-white border-sky-600 shadow-2xs'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-sky-50'
+                      }`}
+                    >
+                      ห้อง {rm}
+                    </button>
+                  ))}
                 </div>
               )}
             </div>

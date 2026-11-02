@@ -29,7 +29,8 @@ import {
   ChevronDown,
   ChevronLeft,
   Maximize2,
-  Minimize2
+  Minimize2,
+  User
 } from 'lucide-react';
 
 // ==========================================
@@ -351,9 +352,17 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
   const [activeCategoryIndex, setActiveCategoryIndex] = useState<number>(0);
   const [isModalFullScreen, setIsModalFullScreen] = useState(false);
 
+  // 6. Mobile Rapid Grading Modal for Reading/Writing
+  const [mobileGradingStudent, setMobileGradingStudent] = useState<Student | null>(null);
+
+  // 7. Mobile Rapid Grading Modal for Competencies
+  const [evaluatingCompetencyStudent, setEvaluatingCompetencyStudent] = useState<Student | null>(null);
+
   // ==========================================
   // GRADE LEVEL & STUDENTS SELECTOR
   // ==========================================
+  const normalizeRoom = (r?: string) => (r || '').replace(/^ห้อง\s*/i, '').trim() || '1';
+
   const memberHomeroomGrade = useMemo<GradeLevel | undefined>(() => {
     if (user.role !== 'member') return undefined;
     const members = StorageService.getMembers();
@@ -361,6 +370,15 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
       m => m.id === user.id || m.username?.toLowerCase() === user.username?.toLowerCase()
     );
     return (matched?.gradeLevel || (user.assignedGrade as GradeLevel)) as GradeLevel | undefined;
+  }, [user]);
+
+  const memberHomeroomRoom = useMemo<string | undefined>(() => {
+    if (user.role !== 'member') return undefined;
+    const members = StorageService.getMembers();
+    const matched = members.find(
+      m => m.id === user.id || m.username?.toLowerCase() === user.username?.toLowerCase()
+    );
+    return normalizeRoom(matched?.room || user.assignedRoom);
   }, [user]);
 
   const availableGrades: GradeLevel[] = useMemo(() => {
@@ -373,17 +391,59 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
     return memberHomeroomGrade || currentGradeLevel;
   });
 
+  const [selectedRoom, setSelectedRoom] = useState<string>(() => {
+    return memberHomeroomRoom || '1';
+  });
+
+  const availableRoomsForGrade = useMemo<string[]>(() => {
+    const roomSet = new Set<string>(['1']);
+    students
+      .filter(s => s.gradeLevel === selectedGrade)
+      .forEach(s => roomSet.add(normalizeRoom(s.room)));
+    if (memberHomeroomRoom) roomSet.add(normalizeRoom(memberHomeroomRoom));
+    return Array.from(roomSet).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [students, selectedGrade, memberHomeroomRoom]);
+
   useEffect(() => {
     if (memberHomeroomGrade && availableGrades.includes(memberHomeroomGrade)) {
       setSelectedGrade(memberHomeroomGrade);
+      if (memberHomeroomRoom) setSelectedRoom(memberHomeroomRoom);
     } else if (currentGradeLevel && availableGrades.includes(currentGradeLevel)) {
       setSelectedGrade(currentGradeLevel);
     }
-  }, [currentGradeLevel, memberHomeroomGrade]);
+  }, [currentGradeLevel, memberHomeroomGrade, memberHomeroomRoom]);
 
-  // นักเรียนในระดับชั้นที่เลือก เรียงตามเลขที่ 1 -> สุดท้าย
+  useEffect(() => {
+    if (!availableRoomsForGrade.includes(selectedRoom)) {
+      setSelectedRoom(availableRoomsForGrade[0] || '1');
+    }
+  }, [availableRoomsForGrade, selectedRoom]);
+
+  // ตรวจสอบครูประจำชั้นของระดับชั้นและห้องที่เลือก
+  const homeroomTeachersOfSelected = useMemo(() => {
+    const members = StorageService.getMembers();
+    return members.filter(
+      m =>
+        m.gradeLevel === selectedGrade &&
+        normalizeRoom(m.room) === normalizeRoom(selectedRoom)
+    );
+  }, [selectedGrade, selectedRoom]);
+
+  const isHomeroomTeacherOfSelected = useMemo(() => {
+    if (isAdmin) return false;
+    return (
+      Boolean(memberHomeroomGrade) &&
+      memberHomeroomGrade === selectedGrade &&
+      normalizeRoom(memberHomeroomRoom) === normalizeRoom(selectedRoom)
+    );
+  }, [isAdmin, memberHomeroomGrade, memberHomeroomRoom, selectedGrade, selectedRoom]);
+
+  // เฉพาะครูประจำชั้น ป. และ ห้อง นั้นๆ เท่านั้นที่เป็นผู้กรอกได้
+  const isReadOnlyForUser = isLocked || isAdmin || !isHomeroomTeacherOfSelected;
+
+  // นักเรียนในระดับชั้นและห้องที่เลือก เรียงตามเลขที่ 1 -> สุดท้าย
   const classStudents = useMemo(() => {
-    return [...students.filter(s => s.gradeLevel === selectedGrade)].sort((a, b) => {
+    return [...students.filter(s => s.gradeLevel === selectedGrade && normalizeRoom(s.room) === normalizeRoom(selectedRoom))].sort((a, b) => {
       const rollA = Number(a.rollNumber);
       const rollB = Number(b.rollNumber);
       const hasRollA = !isNaN(rollA) && rollA > 0;
@@ -395,7 +455,41 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
       if (!hasRollA && hasRollB) return 1;
       return (a.studentCode || '').localeCompare(b.studentCode || '', undefined, { numeric: true });
     });
-  }, [students, selectedGrade]);
+  }, [students, selectedGrade, selectedRoom]);
+
+  // Mobile navigation handlers for Reading/Writing
+  const currentMobileGradingIndex = mobileGradingStudent
+    ? classStudents.findIndex(s => s.id === mobileGradingStudent.id)
+    : -1;
+
+  const handlePrevMobileGradingStudent = () => {
+    if (currentMobileGradingIndex > 0) {
+      setMobileGradingStudent(classStudents[currentMobileGradingIndex - 1]);
+    }
+  };
+
+  const handleNextMobileGradingStudent = () => {
+    if (currentMobileGradingIndex >= 0 && currentMobileGradingIndex < classStudents.length - 1) {
+      setMobileGradingStudent(classStudents[currentMobileGradingIndex + 1]);
+    }
+  };
+
+  // Mobile navigation handlers for Competencies
+  const currentCompGradingIndex = evaluatingCompetencyStudent
+    ? classStudents.findIndex(s => s.id === evaluatingCompetencyStudent.id)
+    : -1;
+
+  const handlePrevCompGradingStudent = () => {
+    if (currentCompGradingIndex > 0) {
+      setEvaluatingCompetencyStudent(classStudents[currentCompGradingIndex - 1]);
+    }
+  };
+
+  const handleNextCompGradingStudent = () => {
+    if (currentCompGradingIndex >= 0 && currentCompGradingIndex < classStudents.length - 1) {
+      setEvaluatingCompetencyStudent(classStudents[currentCompGradingIndex + 1]);
+    }
+  };
 
   // ==========================================
   // STUDENT ASSESSMENT DATA persistance
@@ -718,9 +812,10 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
   };
 
   // Get student assessment record strictly from saved 3-booklets data (never prefill from mock/subject grades)
-  const getStudentAssessment = (student: Student): StudentAssessmentRecord => {
+  const getStudentAssessment = (student: Student, sourceData?: Record<string, StudentAssessmentRecord>): StudentAssessmentRecord => {
     const key = getRecordKey(student.id);
-    const existing = assessmentData[key];
+    const dataSource = sourceData || assessmentData;
+    const existing = dataSource[key];
     if (existing) {
       if (!existing.indicatorScores) {
         existing.indicatorScores = {};
@@ -737,14 +832,77 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
     return createDefaultRecord(student);
   };
 
+  // Helper to sync assessment data to GradeRecords and localStorage
+  const syncAssessmentDataToGrades = (dataToSync: Record<string, StudentAssessmentRecord> = assessmentData) => {
+    if (isReadOnlyForUser) return;
+    try {
+      localStorage.setItem(ASSESSMENT_DATA_KEY, JSON.stringify(dataToSync));
+    } catch (e) {
+      console.error('Storage error', e);
+    }
+
+    const roomFilteredSubjects = subjects.filter(
+      s =>
+        s.gradeLevel === selectedGrade &&
+        normalizeRoom(s.room) === normalizeRoom(selectedRoom) &&
+        (!s.semester || s.semester === currentSemester)
+    );
+    const classSubjectIds = (
+      roomFilteredSubjects.length > 0
+        ? roomFilteredSubjects
+        : subjects.filter(s => s.gradeLevel === selectedGrade && (!s.semester || s.semester === currentSemester))
+    ).map(s => s.id);
+
+    if (classSubjectIds.length > 0 && onSaveGrades) {
+      const updatedGrades = [...grades];
+      let changesCount = 0;
+
+      classStudents.forEach(st => {
+        const assessment = getStudentAssessment(st, dataToSync);
+        const hasRW = hasStudentAnyRWScore(assessment);
+        const hasChar = hasStudentCharacteristicsScore(assessment);
+        const hasComp = hasStudentCompetencyScore(assessment);
+        if (!hasRW && !hasChar && !hasComp) return;
+
+        const rwLevel = hasRW ? calculateStudentLevel(assessment) : undefined;
+        const charLevel = hasChar ? (assessment.characteristics?.overallLevel ?? 0) : undefined;
+        const compLevel = hasComp ? (assessment.competency?.overallLevel ?? 0) : undefined;
+
+        classSubjectIds.forEach(subId => {
+          const sub = subjects.find(s => s.id === subId);
+          if (!sub) return;
+          const idx = updatedGrades.findIndex(g => 
+            g.studentId === st.id && 
+            g.subjectId === subId && 
+            g.semester === currentSemester
+          );
+
+          if (idx >= 0) {
+            updatedGrades[idx] = {
+              ...updatedGrades[idx],
+              ...(rwLevel !== undefined ? { readingWritingScore: rwLevel } : {}),
+              ...(charLevel !== undefined ? { desiredCharacteristicsScore: charLevel } : {}),
+              ...(compLevel !== undefined ? { competencyScore: compLevel } : {})
+            };
+            changesCount++;
+          }
+        });
+      });
+
+      if (changesCount > 0) {
+        onSaveGrades(updatedGrades);
+      }
+    }
+  };
+
   // Update single indicator score for student
   const updateIndicatorScore = (student: Student, indicatorId: string, rawVal: string | number, maxScore: number) => {
-    if (isLocked || isAdmin) return;
+    if (isReadOnlyForUser) return;
     const key = getRecordKey(student.id);
     const current = getStudentAssessment(student);
 
     const updatedScores = { ...current.indicatorScores };
-    if (rawVal === '' || rawVal === undefined || rawVal === null) {
+    if (rawVal === '' || rawVal === undefined || rawVal === null || rawVal === '-') {
       delete updatedScores[indicatorId];
     } else {
       const num = Number(rawVal);
@@ -764,11 +922,12 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
     } catch (e) {
       console.error(e);
     }
+    syncAssessmentDataToGrades(nextData);
   };
 
   // Update characteristic item
   const updateCharacteristic = (student: Student, itemKey: keyof Characteristics8Criteria, value: number) => {
-    if (isLocked || isAdmin) return;
+    if (isReadOnlyForUser) return;
     const key = getRecordKey(student.id);
     const current = getStudentAssessment(student);
     const updatedChar: Characteristics8Criteria = {
@@ -804,7 +963,7 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
 
   // Update competency item
   const updateCompetency = (student: Student, compKey: keyof Competency5Criteria, rawValue: string | number) => {
-    if (isLocked || isAdmin) return;
+    if (isReadOnlyForUser) return;
     const key = getRecordKey(student.id);
     const current = getStudentAssessment(student);
     const updatedComp: Competency5Criteria = { ...current.competency };
@@ -840,6 +999,7 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
     } catch (e) {
       console.error(e);
     }
+    syncAssessmentDataToGrades(nextData);
   };
 
   // Open characteristics modal
@@ -850,14 +1010,21 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
     const ch = curr.characteristics || {};
     const hasExisting = hasStudentCharacteristicsScore(curr);
     const initialSubScores: Record<string, number> = {};
-    CHARACTERISTICS_GROUPS.forEach(g => {
-      const parentVal = hasExisting && ch[g.itemKey] !== undefined ? ch[g.itemKey]! : 3;
-      g.indicators.forEach(ind => {
-        initialSubScores[ind.id] = hasExisting && ch.subScores && ch.subScores[ind.id] !== undefined
-          ? ch.subScores[ind.id]
-          : parentVal;
-      });
-    });
+    if (hasExisting) {
+      if (ch.subScores && Object.keys(ch.subScores).length > 0) {
+        Object.entries(ch.subScores).forEach(([k, v]) => {
+          if (typeof v === 'number') initialSubScores[k] = v;
+        });
+      } else {
+        CHARACTERISTICS_GROUPS.forEach(g => {
+          if (ch[g.itemKey] !== undefined) {
+            g.indicators.forEach(ind => {
+              initialSubScores[ind.id] = ch[g.itemKey]!;
+            });
+          }
+        });
+      }
+    }
     setModalSubScores(initialSubScores);
   };
 
@@ -890,30 +1057,31 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
     });
   };
 
-  // Helper to calculate a group's score from modalSubScores
-  const getGroupCalculatedScore = (grp: CharacteristicGroup, scores: Record<string, number>): number => {
-    if (grp.indicators.length === 0) return 3;
-    const vals = grp.indicators.map(ind => scores[ind.id] ?? 3);
-    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+  // Helper to calculate a group's score from modalSubScores (returns undefined if unrated)
+  const getGroupCalculatedScore = (grp: CharacteristicGroup, scores: Record<string, number>): number | undefined => {
+    const scoredInds = grp.indicators.filter(ind => typeof scores[ind.id] === 'number');
+    if (scoredInds.length === 0) return undefined;
+    const avg = scoredInds.reduce((sum, ind) => sum + scores[ind.id], 0) / scoredInds.length;
     return Math.round(avg);
   };
 
-  // Helper to calculate grand overall score from all 8 group scores
-  const getModalGrandOverallScore = (scores: Record<string, number>): number => {
-    const groupScores = CHARACTERISTICS_GROUPS.map(g => getGroupCalculatedScore(g, scores));
-    const avg = groupScores.reduce((a, b) => a + b, 0) / groupScores.length;
+  // Helper to calculate grand overall score from all 8 group scores (returns undefined if unrated)
+  const getModalGrandOverallScore = (scores: Record<string, number>): number | undefined => {
+    const groupScores = CHARACTERISTICS_GROUPS
+      .map(g => getGroupCalculatedScore(g, scores))
+      .filter((s): s is number => s !== undefined);
+    if (groupScores.length === 0) return undefined;
+    const avg = groupScores.reduce((sum, s) => sum + s, 0) / groupScores.length;
     return Math.round(avg);
   };
 
-  const handleSaveCharacteristicsEvaluation = (andNextStudent: boolean = false) => {
-    if (!evaluatingStudent) return;
-    if (isLocked || isAdmin) {
-      onShowToast('warning', isAdmin ? 'ไม่มีสิทธิ์บันทึก' : 'ภาคเรียนถูกล็อก', isAdmin ? 'ผู้ดูแลระบบ (Admin) ไม่สามารถกรอกหรือแก้ไขคะแนนนักเรียนได้' : 'ภาคเรียนนี้ถูกล็อกการบันทึก กรุณาติดต่อผู้ดูแลระบบ');
-      return;
-    }
+  const handleSaveCharacteristicsEvaluationSilently = (studentToSave: Student = evaluatingStudent!) => {
+    if (!studentToSave || isReadOnlyForUser) return;
+    const scoredKeys = Object.keys(modalSubScores).filter(k => typeof modalSubScores[k] === 'number');
+    if (scoredKeys.length === 0) return; // If unrated, don't overwrite
 
-    const key = getRecordKey(evaluatingStudent.id);
-    const curr = getStudentAssessment(evaluatingStudent);
+    const key = getRecordKey(studentToSave.id);
+    const curr = getStudentAssessment(studentToSave);
 
     const item1 = getGroupCalculatedScore(CHARACTERISTICS_GROUPS[0], modalSubScores);
     const item2 = getGroupCalculatedScore(CHARACTERISTICS_GROUPS[1], modalSubScores);
@@ -923,10 +1091,21 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
     const item6 = getGroupCalculatedScore(CHARACTERISTICS_GROUPS[5], modalSubScores);
     const item7 = getGroupCalculatedScore(CHARACTERISTICS_GROUPS[6], modalSubScores);
     const item8 = getGroupCalculatedScore(CHARACTERISTICS_GROUPS[7], modalSubScores);
-    const overallLevel = Math.round((item1 + item2 + item3 + item4 + item5 + item6 + item7 + item8) / 8);
+
+    const groupScores = [item1, item2, item3, item4, item5, item6, item7, item8].filter((v): v is number => v !== undefined);
+    const overallLevel = groupScores.length > 0
+      ? Math.round(groupScores.reduce((a, b) => a + b, 0) / groupScores.length)
+      : undefined;
 
     const updatedChar: Characteristics8Criteria = {
-      item1, item2, item3, item4, item5, item6, item7, item8,
+      item1: item1 ?? undefined,
+      item2: item2 ?? undefined,
+      item3: item3 ?? undefined,
+      item4: item4 ?? undefined,
+      item5: item5 ?? undefined,
+      item6: item6 ?? undefined,
+      item7: item7 ?? undefined,
+      item8: item8 ?? undefined,
       overallLevel,
       subScores: { ...modalSubScores },
       evaluated: true
@@ -946,6 +1125,25 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
     } catch (e) {
       console.error(e);
     }
+    syncAssessmentDataToGrades(nextData);
+  };
+
+  const handleSaveCharacteristicsEvaluation = (andNextStudent: boolean = false) => {
+    if (!evaluatingStudent) return;
+    if (isReadOnlyForUser) {
+      onShowToast(
+        'warning',
+        isAdmin ? 'ไม่มีสิทธิ์บันทึก' : !isHomeroomTeacherOfSelected ? 'เฉพาะครูประจำชั้นเท่านั้น' : 'ภาคเรียนถูกล็อก',
+        isAdmin
+          ? 'ผู้ดูแลระบบ (Admin) ไม่สามารถกรอกหรือแก้ไขคะแนนนักเรียนได้'
+          : !isHomeroomTeacherOfSelected
+          ? `เฉพาะครูประจำชั้น ${selectedGrade} ห้อง ${normalizeRoom(selectedRoom)} เท่านั้นที่สามารถกรอกประเมิน 3 เล่มของห้องนี้ได้`
+          : 'ภาคเรียนนี้ถูกล็อกการบันทึก กรุณาติดต่อผู้ดูแลระบบ'
+      );
+      return;
+    }
+
+    handleSaveCharacteristicsEvaluationSilently(evaluatingStudent);
 
     onShowToast('success', 'บันทึกเรียบร้อย', `บันทึกผลการประเมินคุณลักษณะ 8 ประการของ ${evaluatingStudent.prefix}${evaluatingStudent.firstName} ${evaluatingStudent.lastName} เรียบร้อยแล้ว`);
 
@@ -962,7 +1160,7 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
 
   // Quick fill characteristics
   const quickFillCharacteristics = (level: number) => {
-    if (isLocked || isAdmin) return;
+    if (isReadOnlyForUser) return;
     const nextData = { ...assessmentData };
     const allSubScores: Record<string, number> = {};
     CHARACTERISTICS_GROUPS.forEach(g => {
@@ -992,12 +1190,12 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
       console.error(e);
     }
     const label = level === 3 ? 'ดีเยี่ยม' : level === 2 ? 'ดี' : level === 1 ? 'ผ่าน' : 'ไม่ผ่าน';
-    onShowToast('success', 'บันทึกเรียบร้อย', `กำหนดคุณลักษณะ 8 ประการเป็นระดับ "${label}" ทุกคนในชั้น ${selectedGrade}`);
+    onShowToast('success', 'บันทึกเรียบร้อย', `กำหนดคุณลักษณะ 8 ประการเป็นระดับ "${label}" ทุกคนในชั้น ${selectedGrade} ห้อง ${normalizeRoom(selectedRoom)}`);
   };
 
   // Quick fill competencies
   const quickFillCompetencies = (level: number) => {
-    if (isLocked || isAdmin) return;
+    if (isReadOnlyForUser) return;
     const nextData = { ...assessmentData };
     classStudents.forEach(st => {
       const key = getRecordKey(st.id);
@@ -1018,67 +1216,25 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
       console.error(e);
     }
     const label = level === 3 ? 'ดีเยี่ยม' : level === 2 ? 'ดี' : level === 1 ? 'ผ่าน' : 'ไม่ผ่าน';
-    onShowToast('success', 'บันทึกเรียบร้อย', `กำหนดสมรรถนะสำคัญ 5 ด้านเป็นระดับ "${label}" ทุกคนในชั้น ${selectedGrade}`);
+    onShowToast('success', 'บันทึกเรียบร้อย', `กำหนดสมรรถนะสำคัญ 5 ด้านเป็นระดับ "${label}" ทุกคนในชั้น ${selectedGrade} ห้อง ${normalizeRoom(selectedRoom)}`);
   };
 
   // Save all and sync to GradeRecords
   const handleSaveAll = () => {
-    if (isLocked || isAdmin) {
-      onShowToast('warning', isAdmin ? 'ผู้ดูแลระบบไม่มีสิทธิ์บันทึก' : 'ภาคเรียนถูกล็อก', isAdmin ? 'ผู้ดูแลระบบ (Admin) สามารถกำหนดโครงสร้างตารางและเกณฑ์คะแนนได้เท่านั้น ไม่สามารถกรอก/บันทึกคะแนนนักเรียนได้' : 'ภาคเรียนนี้ถูกล็อกการบันทึก กรุณาติดต่อผู้ดูแลระบบ');
+    if (isReadOnlyForUser) {
+      onShowToast(
+        'warning',
+        isAdmin ? 'ผู้ดูแลระบบไม่มีสิทธิ์บันทึก' : !isHomeroomTeacherOfSelected ? 'เฉพาะครูประจำชั้นเท่านั้น' : 'ภาคเรียนถูกล็อก',
+        isAdmin
+          ? 'ผู้ดูแลระบบ (Admin) สามารถกำหนดโครงสร้างตารางและเกณฑ์คะแนนได้เท่านั้น ไม่สามารถกรอก/บันทึกคะแนนนักเรียนได้'
+          : !isHomeroomTeacherOfSelected
+          ? `เฉพาะครูประจำชั้น ${selectedGrade} ห้อง ${normalizeRoom(selectedRoom)} เท่านั้นที่เป็นผู้กรอกและบันทึกประเมิน 3 เล่มของห้องนี้`
+          : 'ภาคเรียนนี้ถูกล็อกการบันทึก กรุณาติดต่อผู้ดูแลระบบ'
+      );
       return;
     }
 
-    try {
-      localStorage.setItem(ASSESSMENT_DATA_KEY, JSON.stringify(assessmentData));
-    } catch (e) {
-      console.error('Storage error', e);
-    }
-
-    const classSubjectIds = subjects
-      .filter(s => s.gradeLevel === selectedGrade && (!s.semester || s.semester === currentSemester))
-      .map(s => s.id);
-
-    if (classSubjectIds.length > 0 && onSaveGrades) {
-      const updatedGrades = [...grades];
-      let changesCount = 0;
-
-      classStudents.forEach(st => {
-        const assessment = getStudentAssessment(st);
-        const hasRW = hasStudentAnyRWScore(assessment);
-        const hasChar = hasStudentCharacteristicsScore(assessment);
-        const hasComp = hasStudentCompetencyScore(assessment);
-        if (!hasRW && !hasChar && !hasComp) return;
-
-        const rwLevel = hasRW ? calculateStudentLevel(assessment) : undefined;
-        const charLevel = hasChar ? (assessment.characteristics.overallLevel ?? 0) : undefined;
-        const compLevel = hasComp ? (assessment.competency.overallLevel ?? 0) : undefined;
-
-        classSubjectIds.forEach(subId => {
-          const sub = subjects.find(s => s.id === subId);
-          if (!sub) return;
-          const idx = updatedGrades.findIndex(g => 
-            g.studentId === st.id && 
-            g.subjectId === subId && 
-            g.semester === currentSemester
-          );
-
-          if (idx >= 0) {
-            updatedGrades[idx] = {
-              ...updatedGrades[idx],
-              ...(rwLevel !== undefined ? { readingWritingScore: rwLevel } : {}),
-              ...(charLevel !== undefined ? { desiredCharacteristicsScore: charLevel } : {}),
-              ...(compLevel !== undefined ? { competencyScore: compLevel } : {})
-            };
-            changesCount++;
-          }
-        });
-      });
-
-      if (changesCount > 0) {
-        onSaveGrades(updatedGrades);
-      }
-    }
-
+    syncAssessmentDataToGrades(assessmentData);
     onShowToast('success', 'บันทึกผลการประเมิน 3 เล่มแล้ว 🎉', `บันทึกข้อมูลการประเมินชั้น ${selectedGrade} ภาคเรียนที่ ${currentSemester} เรียบร้อยแล้ว`);
   };
 
@@ -1221,50 +1377,99 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
     <div className="space-y-4">
       {/* 3 Main Navigation Buttons (ปุ่มกดทั้ง 3 หน้าตามที่ผู้ใช้กำหนด) */}
       <div className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-xs">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="p-1.5 bg-amber-100 text-amber-800 rounded-xl">
-                <FileText className="w-4 h-4 text-amber-700" />
-              </span>
-              <h2 className="text-sm sm:text-base font-bold text-slate-800">
-                ระบบประเมิน 3 เล่ม
-              </h2>
+        {/* Admin Bar: Top bar for Admin only (Members see their own class from main app bar) */}
+        {isAdmin && (
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="p-1.5 bg-amber-100 text-amber-800 rounded-xl">
+                  <FileText className="w-4 h-4 text-amber-700" />
+                </span>
+                <h2 className="text-sm sm:text-base font-bold text-slate-800">
+                  ระบบประเมิน 3 เล่ม
+                </h2>
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-amber-50 border border-amber-200 text-[11px] font-bold text-amber-900">
+                  ชั้น {selectedGrade} ห้อง {normalizeRoom(selectedRoom)}
+                  {homeroomTeachersOfSelected.length > 0 && (
+                    <span className="font-semibold text-amber-700">
+                      • ครูประจำชั้น: {homeroomTeachersOfSelected.map(t => t.fullName).join(', ')}
+                    </span>
+                  )}
+                </span>
+              </div>
             </div>
-          </div>
 
-          <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap justify-end">
-            {/* เลือกระดับชั้น */}
-            <div className="flex items-center gap-1.5 bg-slate-50 px-2.5 py-1.5 rounded-xl border border-slate-200">
-              <Users className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-              <span className="text-xs font-bold text-slate-700">ชั้น:</span>
-              <select
-                value={selectedGrade}
-                onChange={(e) => setSelectedGrade(e.target.value as GradeLevel)}
-                className="text-xs font-bold text-slate-800 bg-transparent focus:outline-none cursor-pointer"
+            <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap justify-end">
+              {/* เลือกระดับชั้น */}
+              <div className="flex items-center gap-1.5 bg-slate-50 px-2.5 py-1.5 rounded-xl border border-slate-200">
+                <Users className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                <span className="text-xs font-bold text-slate-700">ชั้น:</span>
+                <select
+                  value={selectedGrade}
+                  onChange={(e) => setSelectedGrade(e.target.value as GradeLevel)}
+                  className="text-xs font-bold text-slate-800 bg-transparent focus:outline-none cursor-pointer"
+                >
+                  {availableGrades.map(g => (
+                    <option key={g} value={g}>{g}</option>
+                  ))}
+                </select>
+              </div>
+
+              {availableRoomsForGrade.length > 1 && (
+                <div className="flex items-center gap-1 bg-slate-50 px-2 py-1 rounded-xl border border-slate-200">
+                  <span className="text-[11px] font-bold text-slate-600 px-1">ห้อง:</span>
+                  {availableRoomsForGrade.map(rm => (
+                    <button
+                      key={rm}
+                      type="button"
+                      onClick={() => setSelectedRoom(rm)}
+                      className={`px-2 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        normalizeRoom(selectedRoom) === rm
+                          ? 'bg-amber-600 text-white shadow-2xs'
+                          : 'bg-white text-slate-700 hover:bg-slate-200 border border-slate-200'
+                      }`}
+                    >
+                      ห้อง {rm}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* ปุ่มบันทึก */}
+              <button
+                type="button"
+                disabled={isReadOnlyForUser}
+                onClick={handleSaveAll}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-white shadow-xs transition-all flex items-center gap-1.5 active:scale-95 bg-amber-600 hover:bg-amber-700 cursor-pointer"
               >
-                {availableGrades.map(g => (
-                  <option key={g} value={g}>{g}</option>
-                ))}
-              </select>
+                <Save className="w-3.5 h-3.5" />
+                <span>บันทึกผลประเมิน</span>
+              </button>
             </div>
-
-            {/* ปุ่มบันทึก */}
-            <button
-              type="button"
-              disabled={isLocked || isAdmin}
-              onClick={handleSaveAll}
-              className={`px-4 py-2 rounded-xl text-xs font-bold text-white shadow-xs transition-all flex items-center gap-1.5 active:scale-95 ${
-                isLocked || isAdmin 
-                  ? 'bg-slate-400 cursor-not-allowed opacity-70' 
-                  : 'bg-amber-600 hover:bg-amber-700 cursor-pointer'
-              }`}
-            >
-              <Save className="w-3.5 h-3.5" />
-              <span>บันทึกผลประเมิน</span>
-            </button>
           </div>
-        </div>
+        )}
+
+        {!isAdmin && !isHomeroomTeacherOfSelected && (
+          <div className="mt-2.5 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-900">
+            <div className="flex items-center gap-2 font-semibold">
+              <span>
+                เฉพาะครูประจำชั้น <strong>{selectedGrade} ห้อง {normalizeRoom(selectedRoom)}</strong> เท่านั้นที่เป็นผู้กรอกผลประเมิน 3 เล่มของห้องนี้ (คุณกำลังเปิดดูในโหมดอ่านอย่างเดียว)
+              </span>
+            </div>
+            {memberHomeroomGrade && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedGrade(memberHomeroomGrade);
+                  setSelectedRoom(normalizeRoom(memberHomeroomRoom));
+                }}
+                className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] transition-colors cursor-pointer shrink-0"
+              >
+                สลับไปชั้นประจำชั้นของฉัน ({memberHomeroomGrade} ห้อง {normalizeRoom(memberHomeroomRoom)})
+              </button>
+            )}
+          </div>
+        )}
 
         {/* 3 Main Buttons (หน้านำทาง 3 หน้า) */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-3">
@@ -1343,124 +1548,209 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
         <div className="space-y-3">
           {/* Sub-tabs bar: Render tables dynamically + สรุปภาพรวม */}
           <div className="bg-white p-2.5 rounded-2xl border border-slate-200/90 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <span className="text-xs font-bold text-slate-600 px-1 hidden sm:inline">ตารางประเมิน:</span>
-              
-              {/* Dynamic Tables Sub-tabs: การอ่าน, คิดวิเคราะห์, การเขียน */}
-              {rwConfig.tables.map((tbl) => {
-                const isSelected = selectedTableId === tbl.id;
-                const label = cleanTitle(tbl.title);
+            {/* MOBILE VIEW SUB-TABS (sm:hidden) */}
+            <div className="flex flex-col gap-2 w-full sm:hidden">
+              {/* แถวที่ 1: การอ่าน, คิดวิเคราะห์, การเขียน ปรับให้เท่าๆกันเต็มบรรทัด */}
+              <div className="grid grid-cols-3 gap-1.5 w-full">
+                {rwConfig.tables.map((tbl) => {
+                  const isSelected = selectedTableId === tbl.id;
+                  const label = cleanTitle(tbl.title);
 
-                return (
+                  return (
+                    <button
+                      key={tbl.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedTableId(tbl.id);
+                        setIsSummaryDropdownOpen(false);
+                      }}
+                      className={`w-full py-2 px-1 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center text-center truncate ${
+                        isSelected
+                          ? 'bg-amber-600 text-white shadow-xs'
+                          : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                      }`}
+                    >
+                      <span className="truncate">{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* แถวที่ 2: สรุปปริมาณ และ สรุปคุณภาพ แสดงเลย 2 ปุ่ม ให้เท่าๆกันเต็มบรรทัดพอดี */}
+              <div className="grid grid-cols-2 gap-1.5 w-full">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedTableId('summary');
+                    setSummaryViewType('quantity');
+                  }}
+                  className={`w-full py-2 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 text-center ${
+                    selectedTableId === 'summary' && summaryViewType === 'quantity'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                  }`}
+                >
+                  <BarChart2 className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">สรุปปริมาณ</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedTableId('summary');
+                    setSummaryViewType('quality');
+                  }}
+                  className={`w-full py-2 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 text-center ${
+                    selectedTableId === 'summary' && summaryViewType === 'quality'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                  }`}
+                >
+                  <Award className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">สรุปคุณภาพ</span>
+                </button>
+              </div>
+
+              {/* Edit Score Criteria Button (Admin Only on Mobile) */}
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setThresholdInput(thresholds);
+                    setIsThresholdModalOpen(true);
+                  }}
+                  className="w-full py-1.5 px-3 text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-300/80 rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-2xs active:scale-95"
+                  title="แก้ไขปรับระดับเกณฑ์คะแนน (การอ่าน / คิดวิเคราะห์ / การเขียน)"
+                >
+                  <Edit className="w-3.5 h-3.5 text-amber-700" />
+                  <span>แก้ไขเกณฑ์คะแนน (Admin)</span>
+                </button>
+              )}
+            </div>
+
+            {/* DESKTOP VIEW SUB-TABS (hidden sm:flex) */}
+            <div className="hidden sm:flex sm:items-center sm:justify-between gap-2.5 w-full">
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-xs font-bold text-slate-600 px-1 inline shrink-0">ตารางประเมิน:</span>
+                  
+                  {rwConfig.tables.map((tbl) => {
+                    const isSelected = selectedTableId === tbl.id;
+                    const label = cleanTitle(tbl.title);
+
+                    return (
+                      <button
+                        key={tbl.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedTableId(tbl.id);
+                          setIsSummaryDropdownOpen(false);
+                        }}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+                          isSelected
+                            ? 'bg-amber-600 text-white shadow-xs'
+                            : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                        }`}
+                      >
+                        <span>{label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* ปุ่มสรุปภาพรวม (Desktop) */}
+                <div className="relative shrink-0">
                   <button
-                    key={tbl.id}
                     type="button"
-                    onClick={() => {
-                      setSelectedTableId(tbl.id);
-                      setIsSummaryDropdownOpen(false);
-                    }}
-                    className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                      isSelected
+                    onClick={() => setIsSummaryDropdownOpen(!isSummaryDropdownOpen)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 whitespace-nowrap ${
+                      selectedTableId === 'summary'
                         ? 'bg-amber-600 text-white shadow-xs'
                         : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
                     }`}
                   >
-                    <span>{label}</span>
+                    <BarChart2 className="w-3.5 h-3.5" />
+                    <span>
+                      {selectedTableId === 'summary'
+                        ? (summaryViewType === 'quantity' ? 'สรุปปริมาณ' : 'สรุปคุณภาพ')
+                        : 'สรุปภาพรวม'}
+                    </span>
+                    <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isSummaryDropdownOpen ? 'rotate-180' : ''}`} />
                   </button>
-                );
-              })}
 
-              {/* ปุ่มสรุปภาพรวม (Dropdown Menu) */}
-              <div className="relative">
+                  {isSummaryDropdownOpen && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-20"
+                        onClick={() => setIsSummaryDropdownOpen(false)}
+                      />
+                      <div className="absolute left-0 mt-1.5 w-48 bg-white rounded-xl shadow-lg border border-slate-200 py-1 z-30 animate-in fade-in zoom-in-95 duration-100">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedTableId('summary');
+                            setSummaryViewType('quantity');
+                            setIsSummaryDropdownOpen(false);
+                          }}
+                          className={`w-full text-left px-3.5 py-2 text-xs font-bold flex items-center gap-2 hover:bg-slate-50 transition-colors ${
+                            selectedTableId === 'summary' && summaryViewType === 'quantity'
+                              ? 'text-emerald-700 bg-emerald-50/60'
+                              : 'text-slate-700'
+                          }`}
+                        >
+                          <BarChart2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <div className="flex flex-col">
+                            <span>📊 สรุปปริมาณ</span>
+                            <span className="text-[10px] text-slate-400 font-normal">ตารางคะแนนรวมตัวเลข</span>
+                          </div>
+                          {selectedTableId === 'summary' && summaryViewType === 'quantity' && (
+                            <Check className="w-3.5 h-3.5 text-emerald-600 ml-auto shrink-0" />
+                          )}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedTableId('summary');
+                            setSummaryViewType('quality');
+                          }}
+                          className={`w-full text-left px-3.5 py-2 text-xs font-bold flex items-center gap-2 hover:bg-slate-50 transition-colors ${
+                            selectedTableId === 'summary' && summaryViewType === 'quality'
+                              ? 'text-blue-700 bg-blue-50/60'
+                              : 'text-slate-700'
+                          }`}
+                        >
+                          <Award className="w-4 h-4 text-blue-600 shrink-0" />
+                          <div className="flex flex-col">
+                            <span>🏆 สรุปคุณภาพ</span>
+                            <span className="text-[10px] text-slate-400 font-normal">ตารางระดับเกณฑ์ตัวหนังสือ</span>
+                          </div>
+                          {selectedTableId === 'summary' && summaryViewType === 'quality' && (
+                            <Check className="w-3.5 h-3.5 text-blue-600 ml-auto shrink-0" />
+                          )}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Far Right: Edit Score Criteria Button (Admin Only on Desktop) */}
+              {isAdmin && (
                 <button
                   type="button"
-                  onClick={() => setIsSummaryDropdownOpen(!isSummaryDropdownOpen)}
-                  className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                    selectedTableId === 'summary'
-                      ? 'bg-amber-600 text-white shadow-xs'
-                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                  }`}
+                  onClick={() => {
+                    setThresholdInput(thresholds);
+                    setIsThresholdModalOpen(true);
+                  }}
+                  className="px-3 py-1.5 text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-300/80 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs active:scale-95 shrink-0"
+                  title="แก้ไขปรับระดับเกณฑ์คะแนน (การอ่าน / คิดวิเคราะห์ / การเขียน)"
                 >
-                  <BarChart2 className="w-3.5 h-3.5" />
-                  <span>
-                    {selectedTableId === 'summary'
-                      ? (summaryViewType === 'quantity' ? 'สรุปปริมาณ' : 'สรุปคุณภาพ')
-                      : 'สรุปภาพรวม'}
-                  </span>
-                  <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isSummaryDropdownOpen ? 'rotate-180' : ''}`} />
+                  <Edit className="w-3.5 h-3.5 text-amber-700" />
+                  <span>แก้ไขเกณฑ์คะแนน</span>
                 </button>
-
-                {isSummaryDropdownOpen && (
-                  <>
-                    <div
-                      className="fixed inset-0 z-20"
-                      onClick={() => setIsSummaryDropdownOpen(false)}
-                    />
-                    <div className="absolute right-0 sm:left-0 mt-1.5 w-48 bg-white rounded-xl shadow-lg border border-slate-200 py-1 z-30 animate-in fade-in zoom-in-95 duration-100">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedTableId('summary');
-                          setSummaryViewType('quantity');
-                          setIsSummaryDropdownOpen(false);
-                        }}
-                        className={`w-full text-left px-3.5 py-2 text-xs font-bold flex items-center gap-2 hover:bg-slate-50 transition-colors ${
-                          selectedTableId === 'summary' && summaryViewType === 'quantity'
-                            ? 'text-emerald-700 bg-emerald-50/60'
-                            : 'text-slate-700'
-                        }`}
-                      >
-                        <BarChart2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                        <div className="flex flex-col">
-                          <span>📊 สรุปปริมาณ</span>
-                          <span className="text-[10px] text-slate-400 font-normal">ตารางคะแนนรวมตัวเลข</span>
-                        </div>
-                        {selectedTableId === 'summary' && summaryViewType === 'quantity' && (
-                          <Check className="w-3.5 h-3.5 text-emerald-600 ml-auto shrink-0" />
-                        )}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedTableId('summary');
-                          setSummaryViewType('quality');
-                          setIsSummaryDropdownOpen(false);
-                        }}
-                        className={`w-full text-left px-3.5 py-2 text-xs font-bold flex items-center gap-2 hover:bg-slate-50 transition-colors ${
-                          selectedTableId === 'summary' && summaryViewType === 'quality'
-                            ? 'text-blue-700 bg-blue-50/60'
-                            : 'text-slate-700'
-                        }`}
-                      >
-                        <Award className="w-4 h-4 text-blue-600 shrink-0" />
-                        <div className="flex flex-col">
-                          <span>🏆 สรุปคุณภาพ</span>
-                          <span className="text-[10px] text-slate-400 font-normal">ตารางระดับเกณฑ์ตัวหนังสือ</span>
-                        </div>
-                        {selectedTableId === 'summary' && summaryViewType === 'quality' && (
-                          <Check className="w-3.5 h-3.5 text-blue-600 ml-auto shrink-0" />
-                        )}
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
+              )}
             </div>
-
-            {/* Far Right: Edit Score Criteria Button */}
-            <button
-              type="button"
-              onClick={() => {
-                setThresholdInput(thresholds);
-                setIsThresholdModalOpen(true);
-              }}
-              className="px-3 py-1.5 text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-300/80 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs active:scale-95 shrink-0 self-start sm:self-auto"
-              title="แก้ไขปรับระดับเกณฑ์คะแนน (การอ่าน / คิดวิเคราะห์ / การเขียน)"
-            >
-              <Edit className="w-3.5 h-3.5 text-amber-700" />
-              <span>แก้ไขเกณฑ์คะแนน</span>
-            </button>
           </div>
 
           {/* ACTIVE TABLE CONTENT VIEW */}
@@ -1497,8 +1787,8 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
                 )}
               </div>
 
-              {/* TABLE DATA GRID */}
-              <div className="overflow-x-auto">
+              {/* TABLE DATA GRID (DESKTOP) */}
+              <div className="hidden sm:block overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200 text-[11px]">
                     <tr>
@@ -1580,12 +1870,12 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
                                   type="number"
                                   min={0}
                                   max={ind.maxScore}
-                                  disabled={isLocked || isAdmin}
+                                  disabled={isReadOnlyForUser}
                                   value={val}
                                   onChange={(e) => updateIndicatorScore(st, ind.id, e.target.value, ind.maxScore)}
                                   placeholder="-"
                                   className={`w-14 text-center font-bold font-mono py-1 rounded-lg border focus:outline-none placeholder:text-slate-300 ${
-                                    isAdmin
+                                    isReadOnlyForUser
                                       ? 'bg-slate-100 text-slate-500 border-slate-200 cursor-not-allowed'
                                       : 'bg-white text-slate-800 border-slate-200 focus:ring-1 focus:ring-amber-500'
                                   }`}
@@ -1608,14 +1898,71 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
                   </tbody>
                 </table>
               </div>
+
+              {/* TABLE DATA GRID (MOBILE: เลขที่, รูปโปรไฟล์นักเรียน, ชื่อนามสกุล, เกณฑ์คะแนน) */}
+              <div className="sm:hidden overflow-hidden">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200 text-[11px]">
+                    <tr>
+                      <th className="py-2.5 px-2 text-center w-12">เลขที่</th>
+                      <th className="py-2.5 px-2 text-center w-14">รูปโปรไฟล์</th>
+                      <th className="py-2.5 px-2">ชื่อนามสกุล</th>
+                      <th className="py-2.5 px-2 text-center w-24">เกณฑ์คะแนน</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {classStudents.map((st) => {
+                      const rec = getStudentAssessment(st);
+                      const hasScore = hasStudentTableScore(rec, activeTableConfig);
+                      const tableTotal = getStudentTableScore(rec, activeTableConfig);
+
+                      return (
+                        <tr
+                          key={st.id}
+                          onClick={() => setMobileGradingStudent(st)}
+                          className="hover:bg-amber-50/40 active:bg-amber-100/50 transition-colors cursor-pointer"
+                        >
+                          <td className="py-2.5 px-2 text-center font-mono font-bold text-xs text-slate-600">
+                            {st.rollNumber ?? '-'}
+                          </td>
+                          <td className="py-2 px-1 text-center">
+                            <div className="w-8 h-8 rounded-full overflow-hidden border border-slate-200 bg-slate-100 mx-auto flex items-center justify-center">
+                              {st.photoUrl ? (
+                                <img src={st.photoUrl} alt="" className="w-full h-full object-cover" />
+                              ) : (
+                                <User className="w-4 h-4 text-slate-400" />
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-2">
+                            <div className="font-semibold text-xs text-slate-800 leading-tight">
+                              {st.prefix}{st.firstName} {st.lastName}
+                            </div>
+                            <div className="text-[10px] text-slate-400 mt-0.5">
+                              {hasScore ? `รวม: ${tableTotal}/${getTableMaxScore(activeTableConfig)}` : 'ยังไม่ได้ลงคะแนน'}
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-2 text-center">
+                            {hasScore ? (
+                              getTableLevelTextBadge(tableTotal, activeTableConfig)
+                            ) : (
+                              <span className="text-slate-400 text-xs">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
           {/* TAB: SUMMARY OVERVIEW WITH 2 CLEAR PAGES (สรุปปริมาณ & สรุปคุณภาพ) */}
           {selectedTableId === 'summary' && (
             <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden space-y-0">
-              {/* Header with 2 clear page buttons: สรุปปริมาณ และ สรุปคุณภาพ */}
-              <div className="p-3.5 bg-amber-50/90 border-b border-amber-100 flex flex-wrap items-center justify-between gap-3">
+              {/* Header with 2 clear page buttons: สรุปปริมาณ และ สรุปคุณภาพ (Hidden on mobile because sub-tabs bar above handles it) */}
+              <div className="hidden sm:flex p-3.5 bg-amber-50/90 border-b border-amber-100 flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <BarChart2 className="w-5 h-5 text-amber-700 shrink-0" />
                   <h4 className="text-xs sm:text-sm font-bold text-amber-950">
@@ -1655,116 +2002,212 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
 
               {/* เมื่อกดปุ่มสรุปปริมาณ: รวมตารางการอ่าน รวมตารางการคิดวิเคราะห์ รวมตารางการเขียน และรวมทั้งหมด */}
               {summaryViewType === 'quantity' && (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200 text-[11px]">
-                      <tr>
-                        <th className="py-2.5 px-3 w-12 text-center">เลขที่</th>
-                        <th className="py-2.5 px-3 min-w-[150px]">ชื่อ - นามสกุล</th>
-                        
-                        {/* Sub-total header for each table */}
-                        {rwConfig.tables.map(tbl => (
-                          <th key={tbl.id} className="py-2.5 px-3 text-center min-w-[180px] text-amber-950 bg-amber-50/30 border-x border-slate-100">
-                            <div className="font-bold text-xs">{getQuantityTableColumnTitle(tbl)}</div>
+                <>
+                  <div className="hidden sm:block overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200 text-[11px]">
+                        <tr>
+                          <th className="py-2.5 px-3 w-12 text-center">เลขที่</th>
+                          <th className="py-2.5 px-3 min-w-[150px]">ชื่อ - นามสกุล</th>
+                          
+                          {/* Sub-total header for each table */}
+                          {rwConfig.tables.map(tbl => (
+                            <th key={tbl.id} className="py-2.5 px-3 text-center min-w-[180px] text-amber-950 bg-amber-50/30 border-x border-slate-100">
+                              <div className="font-bold text-xs">{getQuantityTableColumnTitle(tbl)}</div>
+                            </th>
+                          ))}
+
+                          <th className="py-2.5 px-3 text-center min-w-[110px] bg-amber-100/60 font-bold text-amber-950">
+                            รวมทั้งหมด ({getGrandMaxScore()})
                           </th>
-                        ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {classStudents.map((st) => {
+                          const rec = getStudentAssessment(st);
+                          const hasAny = hasStudentAnyRWScore(rec);
+                          const grandTotal = getStudentGrandTotalScore(rec);
 
-                        <th className="py-2.5 px-3 text-center min-w-[110px] bg-amber-100/60 font-bold text-amber-950">
-                          รวมทั้งหมด ({getGrandMaxScore()})
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {classStudents.map((st) => {
-                        const rec = getStudentAssessment(st);
-                        const hasAny = hasStudentAnyRWScore(rec);
-                        const grandTotal = getStudentGrandTotalScore(rec);
+                          return (
+                            <tr key={st.id} className="hover:bg-slate-50">
+                              <td className="py-2 px-3 text-center font-mono text-slate-500 font-bold">
+                                {st.rollNumber ?? '-'}
+                              </td>
+                              <td className="py-2 px-3 font-semibold text-slate-800 whitespace-nowrap">
+                                {st.prefix}{st.firstName} {st.lastName}
+                              </td>
 
-                        return (
-                          <tr key={st.id} className="hover:bg-slate-50">
-                            <td className="py-2 px-3 text-center font-mono text-slate-500 font-bold">
-                              {st.rollNumber ?? '-'}
-                            </td>
-                            <td className="py-2 px-3 font-semibold text-slate-800 whitespace-nowrap">
-                              {st.prefix}{st.firstName} {st.lastName}
-                            </td>
+                              {rwConfig.tables.map(tbl => {
+                                const hasTbl = hasStudentTableScore(rec, tbl);
+                                const tScore = getStudentTableScore(rec, tbl);
+                                return (
+                                  <td key={tbl.id} className="py-2 px-3 text-center font-mono font-bold text-slate-700 bg-amber-50/10">
+                                    {hasTbl ? tScore : '-'}
+                                  </td>
+                                );
+                              })}
 
-                            {rwConfig.tables.map(tbl => {
-                              const hasTbl = hasStudentTableScore(rec, tbl);
-                              const tScore = getStudentTableScore(rec, tbl);
-                              return (
-                                <td key={tbl.id} className="py-2 px-3 text-center font-mono font-bold text-slate-700 bg-amber-50/10">
-                                  {hasTbl ? tScore : '-'}
-                                </td>
-                              );
-                            })}
+                              <td className="py-2 px-3 text-center font-mono font-bold text-amber-950 bg-amber-100/40 text-xs">
+                                {hasAny ? `${grandTotal} / ${getGrandMaxScore()}` : '-'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
 
-                            <td className="py-2 px-3 text-center font-mono font-bold text-amber-950 bg-amber-100/40 text-xs">
-                              {hasAny ? `${grandTotal} / ${getGrandMaxScore()}` : '-'}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                  {/* Mobile Quantity Summary Table */}
+                  <div className="sm:hidden overflow-hidden">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200 text-[11px]">
+                        <tr>
+                          <th className="py-2.5 px-2 text-center w-12">เลขที่</th>
+                          <th className="py-2.5 px-2 text-center w-14">รูปโปรไฟล์</th>
+                          <th className="py-2.5 px-2">ชื่อนามสกุล</th>
+                          <th className="py-2.5 px-2 text-center w-24">เกณฑ์คะแนน</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {classStudents.map((st) => {
+                          const rec = getStudentAssessment(st);
+                          const hasAny = hasStudentAnyRWScore(rec);
+                          const grandTotal = getStudentGrandTotalScore(rec);
+
+                          return (
+                            <tr key={st.id} className="hover:bg-slate-50">
+                              <td className="py-2.5 px-2 text-center font-mono font-bold text-xs text-slate-600">
+                                {st.rollNumber ?? '-'}
+                              </td>
+                              <td className="py-2 px-1 text-center">
+                                <div className="w-8 h-8 rounded-full overflow-hidden border border-slate-200 bg-slate-100 mx-auto flex items-center justify-center">
+                                  {st.photoUrl ? (
+                                    <img src={st.photoUrl} alt="" className="w-full h-full object-cover" />
+                                  ) : (
+                                    <User className="w-4 h-4 text-slate-400" />
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-2.5 px-2">
+                                <div className="font-semibold text-xs text-slate-800 leading-tight">
+                                  {st.prefix}{st.firstName} {st.lastName}
+                                </div>
+                              </td>
+                              <td className="py-2.5 px-2 text-center font-mono font-bold text-amber-950 text-xs">
+                                {hasAny ? `${grandTotal}/${getGrandMaxScore()}` : '-'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
 
               {/* เมื่อกดปุ่มสรุปคุณภาพ: การอ่าน คิดวิเคราะห์ การเขียน และสรุป */}
               {summaryViewType === 'quality' && (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200 text-[11px]">
-                      <tr>
-                        <th className="py-2.5 px-3 w-12 text-center">เลขที่</th>
-                        <th className="py-2.5 px-3 min-w-[150px]">ชื่อ - นามสกุล</th>
-                        
-                        {/* Sub-total header for each table */}
-                        {rwConfig.tables.map(tbl => (
-                          <th key={tbl.id} className="py-2.5 px-3 text-center min-w-[140px] text-blue-950 bg-blue-50/30 border-x border-slate-100">
-                            <div className="font-bold text-xs">{getQualityTableColumnTitle(tbl)}</div>
+                <>
+                  <div className="hidden sm:block overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200 text-[11px]">
+                        <tr>
+                          <th className="py-2.5 px-3 w-12 text-center">เลขที่</th>
+                          <th className="py-2.5 px-3 min-w-[150px]">ชื่อ - นามสกุล</th>
+                          
+                          {/* Sub-total header for each table */}
+                          {rwConfig.tables.map(tbl => (
+                            <th key={tbl.id} className="py-2.5 px-3 text-center min-w-[140px] text-blue-950 bg-blue-50/30 border-x border-slate-100">
+                              <div className="font-bold text-xs">{getQualityTableColumnTitle(tbl)}</div>
+                            </th>
+                          ))}
+
+                          <th className="py-2.5 px-3 text-center min-w-[120px] bg-blue-100/60 font-bold text-blue-950">
+                            สรุป
                           </th>
-                        ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {classStudents.map((st) => {
+                          const rec = getStudentAssessment(st);
+                          const hasAny = hasStudentAnyRWScore(rec);
+                          const overallLvl = calculateStudentLevel(rec);
 
-                        <th className="py-2.5 px-3 text-center min-w-[120px] bg-blue-100/60 font-bold text-blue-950">
-                          สรุป
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {classStudents.map((st) => {
-                        const rec = getStudentAssessment(st);
-                        const hasAny = hasStudentAnyRWScore(rec);
-                        const overallLvl = calculateStudentLevel(rec);
+                          return (
+                            <tr key={st.id} className="hover:bg-slate-50">
+                              <td className="py-2 px-3 text-center font-mono text-slate-500 font-bold">
+                                {st.rollNumber ?? '-'}
+                              </td>
+                              <td className="py-2 px-3 font-semibold text-slate-800 whitespace-nowrap">
+                                {st.prefix}{st.firstName} {st.lastName}
+                              </td>
 
-                        return (
-                          <tr key={st.id} className="hover:bg-slate-50">
-                            <td className="py-2 px-3 text-center font-mono text-slate-500 font-bold">
-                              {st.rollNumber ?? '-'}
-                            </td>
-                            <td className="py-2 px-3 font-semibold text-slate-800 whitespace-nowrap">
-                              {st.prefix}{st.firstName} {st.lastName}
-                            </td>
+                              {rwConfig.tables.map(tbl => {
+                                const hasTbl = hasStudentTableScore(rec, tbl);
+                                const tScore = getStudentTableScore(rec, tbl);
+                                return (
+                                  <td key={tbl.id} className="py-2 px-3 text-center bg-blue-50/10">
+                                    {hasTbl ? getTableLevelTextBadge(tScore, tbl) : <span className="text-slate-400 font-normal">-</span>}
+                                  </td>
+                                );
+                              })}
 
-                            {rwConfig.tables.map(tbl => {
-                              const hasTbl = hasStudentTableScore(rec, tbl);
-                              const tScore = getStudentTableScore(rec, tbl);
-                              return (
-                                <td key={tbl.id} className="py-2 px-3 text-center bg-blue-50/10">
-                                  {hasTbl ? getTableLevelTextBadge(tScore, tbl) : <span className="text-slate-400 font-normal">-</span>}
-                                </td>
-                              );
-                            })}
+                              <td className="py-2 px-3 text-center bg-blue-100/40">
+                                {hasAny ? getQualityTextBadge(overallLvl) : <span className="text-slate-400 font-normal">-</span>}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
 
-                            <td className="py-2 px-3 text-center bg-blue-100/40">
-                              {hasAny ? getQualityTextBadge(overallLvl) : <span className="text-slate-400 font-normal">-</span>}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                  {/* Mobile Quality Summary Table */}
+                  <div className="sm:hidden overflow-hidden">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200 text-[11px]">
+                        <tr>
+                          <th className="py-2.5 px-2 text-center w-12">เลขที่</th>
+                          <th className="py-2.5 px-2 text-center w-14">รูปโปรไฟล์</th>
+                          <th className="py-2.5 px-2">ชื่อนามสกุล</th>
+                          <th className="py-2.5 px-2 text-center w-24">เกณฑ์คะแนน</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {classStudents.map((st) => {
+                          const rec = getStudentAssessment(st);
+                          const hasAny = hasStudentAnyRWScore(rec);
+                          const overallLvl = calculateStudentLevel(rec);
+
+                          return (
+                            <tr key={st.id} className="hover:bg-slate-50">
+                              <td className="py-2.5 px-2 text-center font-mono font-bold text-xs text-slate-600">
+                                {st.rollNumber ?? '-'}
+                              </td>
+                              <td className="py-2 px-1 text-center">
+                                <div className="w-8 h-8 rounded-full overflow-hidden border border-slate-200 bg-slate-100 mx-auto flex items-center justify-center">
+                                  {st.photoUrl ? (
+                                    <img src={st.photoUrl} alt="" className="w-full h-full object-cover" />
+                                  ) : (
+                                    <User className="w-4 h-4 text-slate-400" />
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-2.5 px-2">
+                                <div className="font-semibold text-xs text-slate-800 leading-tight">
+                                  {st.prefix}{st.firstName} {st.lastName}
+                                </div>
+                              </td>
+                              <td className="py-2.5 px-2 text-center">
+                                {hasAny ? getQualityTextBadge(overallLvl) : <span className="text-slate-400 text-xs">-</span>}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
             </div>
           )}
@@ -1777,7 +2220,8 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
       {activeBooklet === 'characteristics' && (
         <div className="space-y-3">
           <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
-            <div className="overflow-x-auto">
+            {/* Desktop Table */}
+            <div className="hidden sm:block overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200 text-[11px]">
                   <tr>
@@ -1831,7 +2275,7 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
                           {st.rollNumber ?? '-'}
                         </td>
                         <td className="py-2 px-3 whitespace-nowrap">
-                          {isAdmin ? (
+                          {isReadOnlyForUser ? (
                             <span className="font-semibold text-slate-800">
                               {st.prefix}{st.firstName} {st.lastName}
                             </span>
@@ -1883,6 +2327,60 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
                 </tbody>
               </table>
             </div>
+
+            {/* Mobile Table */}
+            <div className="sm:hidden overflow-hidden">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200 text-[11px]">
+                  <tr>
+                    <th className="py-2.5 px-2 text-center w-12">เลขที่</th>
+                    <th className="py-2.5 px-2 text-center w-14">รูปโปรไฟล์</th>
+                    <th className="py-2.5 px-2">ชื่อนามสกุล</th>
+                    <th className="py-2.5 px-2 text-center w-24">เกณฑ์คะแนน</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {classStudents.map((st) => {
+                    const rec = getStudentAssessment(st);
+                    const ch = rec.characteristics || {};
+                    const hasChar = hasStudentCharacteristicsScore(rec);
+
+                    return (
+                      <tr
+                        key={st.id}
+                        onClick={() => handleOpenCharacteristicsModal(st)}
+                        className="hover:bg-amber-50/40 active:bg-amber-100/50 transition-colors cursor-pointer"
+                      >
+                        <td className="py-2.5 px-2 text-center font-mono font-bold text-xs text-slate-600">
+                          {st.rollNumber ?? '-'}
+                        </td>
+                        <td className="py-2 px-1 text-center">
+                          <div className="w-8 h-8 rounded-full overflow-hidden border border-slate-200 bg-slate-100 mx-auto flex items-center justify-center">
+                            {st.photoUrl ? (
+                              <img src={st.photoUrl} alt="" className="w-full h-full object-cover" />
+                            ) : (
+                              <User className="w-4 h-4 text-slate-400" />
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-2">
+                          <div className="font-semibold text-xs text-slate-800 leading-tight">
+                            {st.prefix}{st.firstName} {st.lastName}
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-2 text-center">
+                          {hasChar && ch.overallLevel !== undefined ? (
+                            getLevelBadge(ch.overallLevel)
+                          ) : (
+                            <span className="text-slate-400 text-xs">-</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -1893,7 +2391,8 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
       {activeBooklet === 'competencies' && (
         <div className="space-y-3">
           <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
-            <div className="overflow-x-auto">
+            {/* Desktop Table */}
+            <div className="hidden sm:block overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200 text-[11px]">
                   <tr>
@@ -1942,10 +2441,10 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
                             <td key={cKey} className="py-1.5 px-1.5 text-center">
                               <select
                                 value={val}
-                                disabled={isLocked || isAdmin}
+                                disabled={isReadOnlyForUser}
                                 onChange={(e) => updateCompetency(st, cKey, e.target.value)}
                                 className={`text-xs font-bold font-mono px-2 py-1 rounded-lg border focus:outline-none ${
-                                  isAdmin
+                                  isReadOnlyForUser
                                     ? 'bg-slate-100 text-slate-500 border-slate-200 cursor-not-allowed'
                                     : 'bg-white text-slate-800 border-slate-200 focus:ring-1 focus:ring-emerald-500 cursor-pointer'
                                 }`}
@@ -1961,6 +2460,60 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
                         })}
                         <td className="py-2 px-3 text-center bg-amber-50/40">
                           {hasComp && comp.overallLevel !== undefined ? getLevelBadge(comp.overallLevel) : <span className="text-slate-400 font-normal">-</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Table */}
+            <div className="sm:hidden overflow-hidden">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200 text-[11px]">
+                  <tr>
+                    <th className="py-2.5 px-2 text-center w-12">เลขที่</th>
+                    <th className="py-2.5 px-2 text-center w-14">รูปโปรไฟล์</th>
+                    <th className="py-2.5 px-2">ชื่อนามสกุล</th>
+                    <th className="py-2.5 px-2 text-center w-24">เกณฑ์คะแนน</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {classStudents.map((st) => {
+                    const rec = getStudentAssessment(st);
+                    const comp = rec.competency || {};
+                    const hasComp = hasStudentCompetencyScore(rec);
+
+                    return (
+                      <tr
+                        key={st.id}
+                        onClick={() => setEvaluatingCompetencyStudent(st)}
+                        className="hover:bg-amber-50/40 active:bg-amber-100/50 transition-colors cursor-pointer"
+                      >
+                        <td className="py-2.5 px-2 text-center font-mono font-bold text-xs text-slate-600">
+                          {st.rollNumber ?? '-'}
+                        </td>
+                        <td className="py-2 px-1 text-center">
+                          <div className="w-8 h-8 rounded-full overflow-hidden border border-slate-200 bg-slate-100 mx-auto flex items-center justify-center">
+                            {st.photoUrl ? (
+                              <img src={st.photoUrl} alt="" className="w-full h-full object-cover" />
+                            ) : (
+                              <User className="w-4 h-4 text-slate-400" />
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-2">
+                          <div className="font-semibold text-xs text-slate-800 leading-tight">
+                            {st.prefix}{st.firstName} {st.lastName}
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-2 text-center">
+                          {hasComp && comp.overallLevel !== undefined ? (
+                            getLevelBadge(comp.overallLevel)
+                          ) : (
+                            <span className="text-slate-400 text-xs">-</span>
+                          )}
                         </td>
                       </tr>
                     );
@@ -2455,31 +3008,54 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
             isModalFullScreen ? 'w-screen h-screen rounded-none' : 'max-w-5xl w-full max-h-[92vh] rounded-3xl'
           }`}>
             {/* Modal Header */}
-            <div className="p-4 sm:p-5 bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-800 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-white/15 flex items-center justify-center backdrop-blur-xs border border-white/20 shrink-0">
+            <div className="px-3 py-1.5 sm:p-5 bg-gradient-to-r from-blue-700 via-indigo-700 to-blue-800 text-white flex items-center justify-between gap-2 shrink-0">
+              <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+                <div className="hidden sm:flex w-10 h-10 rounded-2xl bg-white/15 items-center justify-center backdrop-blur-xs border border-white/20 shrink-0">
                   <Award className="w-5 h-5 text-amber-300" />
                 </div>
-                <div>
+                <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-white/20 text-white border border-white/20">
-                      เลขที่ {evaluatingStudent.rollNumber ?? '-'}
-                    </span>
-                    <h3 className="text-lg sm:text-xl font-bold text-white">
-                      {evaluatingStudent.prefix}{evaluatingStudent.firstName} {evaluatingStudent.lastName}
-                    </h3>
+                    {/* Mobile dropdown selector for student (sm:hidden) */}
+                    <div className="relative flex items-center min-w-0 max-w-[240px] sm:hidden">
+                      <select
+                        value={evaluatingStudent.id}
+                        onChange={(e) => {
+                          handleSaveCharacteristicsEvaluationSilently(evaluatingStudent);
+                          const selected = classStudents.find(s => s.id === e.target.value);
+                          if (selected) handleOpenCharacteristicsModal(selected);
+                        }}
+                        className="appearance-none bg-white/20 hover:bg-white/30 text-white font-bold text-xs pl-2.5 pr-7 py-1 rounded-xl border border-white/30 outline-none cursor-pointer truncate w-full"
+                      >
+                        {classStudents.map((st) => (
+                          <option key={st.id} value={st.id} className="text-slate-800 bg-white">
+                            เลขที่ {st.rollNumber ?? '-'}: {st.prefix}{st.firstName} {st.lastName}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown className="w-3.5 h-3.5 text-white/80 absolute right-2 pointer-events-none" />
+                    </div>
+
+                    {/* Desktop static title (hidden sm:flex) */}
+                    <div className="hidden sm:flex sm:items-center sm:gap-2">
+                      <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-white/20 text-white border border-white/20">
+                        เลขที่ {evaluatingStudent.rollNumber ?? '-'}
+                      </span>
+                      <h3 className="text-lg sm:text-xl font-bold text-white">
+                        {evaluatingStudent.prefix}{evaluatingStudent.firstName} {evaluatingStudent.lastName}
+                      </h3>
+                    </div>
                   </div>
-                  <p className="text-xs sm:text-sm text-blue-100 mt-0.5 font-medium">
+                  <p className="hidden sm:block text-xs sm:text-sm text-blue-100 mt-0.5 font-medium truncate">
                     แบบประเมินคุณลักษณะอันพึงประสงค์ 8 ประการ • ชั้น {selectedGrade} • ภาคเรียนที่ {currentSemester}/{currentAcademicYear}
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 self-end sm:self-auto">
+              <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
                 <button
                   type="button"
                   onClick={() => setIsModalFullScreen(!isModalFullScreen)}
-                  className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+                  className="hidden sm:flex p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
                   title={isModalFullScreen ? "ย่อขนาดหน้าต่าง" : "แสดงเต็มจอ"}
                 >
                   {isModalFullScreen ? <Minimize2 className="w-5 h-5" /> : <Maximize2 className="w-5 h-5" />}
@@ -2487,7 +3063,7 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
                 <button
                   type="button"
                   onClick={() => setEvaluatingStudent(null)}
-                  className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
+                  className="p-1.5 sm:p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
                   title="ปิดหน้าต่าง"
                 >
                   <X className="w-5 h-5" />
@@ -2496,8 +3072,8 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
             </div>
 
             {/* Top Category Selection Circles (1, 2, 3, 4, 5, 6, 7, 8) */}
-            <div className="p-3 bg-white border-b border-slate-200 flex items-center justify-between gap-1.5 overflow-x-auto scrollbar-none shrink-0">
-              <div className="flex items-center gap-2 sm:gap-3 mx-auto">
+            <div className="p-2 sm:p-3 bg-white border-b border-slate-200 flex items-center justify-between gap-1 sm:gap-1.5 overflow-x-auto scrollbar-none shrink-0">
+              <div className="flex items-center gap-1 sm:gap-3 mx-auto">
                 {CHARACTERISTICS_GROUPS.map((grp, idx) => {
                   const isSelected = activeCategoryIndex === idx;
                   return (
@@ -2505,9 +3081,9 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
                       key={grp.id}
                       type="button"
                       onClick={() => setActiveCategoryIndex(idx)}
-                      className={`w-9 h-9 sm:w-10 sm:h-10 rounded-full font-bold text-sm sm:text-base flex items-center justify-center transition-all cursor-pointer ${
+                      className={`w-7 h-7 sm:w-10 sm:h-10 rounded-full font-bold text-xs sm:text-base flex items-center justify-center transition-all cursor-pointer ${
                         isSelected
-                          ? 'bg-blue-600 text-white shadow-md ring-2 ring-blue-300 font-extrabold scale-110'
+                          ? 'bg-blue-600 text-white shadow-md ring-2 ring-blue-300 font-extrabold scale-105 sm:scale-110'
                           : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
                       }`}
                       title={`${grp.number}. ${grp.title}`}
@@ -2519,9 +3095,9 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
               </div>
             </div>
 
-            {/* Sub-bar: Category title only */}
-            <div className="p-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-2 shrink-0">
-              <div className="text-sm sm:text-base font-bold text-slate-900">
+            {/* Sub-bar: Category title only (Fixed header for active category) */}
+            <div className="p-2.5 sm:p-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-2 shrink-0">
+              <div className="text-sm sm:text-base font-bold text-slate-900 truncate">
                 {CHARACTERISTICS_GROUPS[activeCategoryIndex]?.title}
               </div>
             </div>
@@ -2537,11 +3113,11 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
                     {/* Header of Group (Non-editable topic title) */}
                     <div className="p-3 sm:p-4 bg-slate-50 rounded-xl border border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                       <div className="flex items-center gap-2.5">
-                        <span className="w-3 h-3 rounded-full bg-blue-600 shrink-0"></span>
-                        <h4 className="font-bold text-sm sm:text-base text-slate-900">
+                        <span className="hidden sm:inline-block w-3 h-3 rounded-full bg-blue-600 shrink-0"></span>
+                        <h4 className="hidden sm:block font-bold text-sm sm:text-base text-slate-900">
                           {grp.title}
                         </h4>
-                        <span className="text-xs font-semibold text-slate-500 bg-slate-200/80 px-2 py-0.5 rounded-md">
+                        <span className="hidden sm:inline-flex text-xs font-semibold text-slate-500 bg-slate-200/80 px-2 py-0.5 rounded-md">
                           (เป็นหัวข้อกรอกไม่ได้)
                         </span>
                       </div>
@@ -2550,7 +3126,7 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
                         <span className="text-xs text-slate-600 font-bold">ให้เฉพาะข้อนี้:</span>
                         <button
                           type="button"
-                          disabled={isLocked}
+                          disabled={isReadOnlyForUser}
                           onClick={() => handleFillGroupModalSubScores(grp.id, 3)}
                           className="px-3 py-1 text-xs font-bold bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-300 rounded-lg transition-colors cursor-pointer shadow-2xs"
                         >
@@ -2558,7 +3134,7 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
                         </button>
                         <button
                           type="button"
-                          disabled={isLocked}
+                          disabled={isReadOnlyForUser}
                           onClick={() => handleFillGroupModalSubScores(grp.id, 2)}
                           className="px-3 py-1 text-xs font-bold bg-white hover:bg-sky-50 text-sky-700 border border-sky-300 rounded-lg transition-colors cursor-pointer shadow-2xs"
                         >
@@ -2570,7 +3146,7 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
                     {/* Sub-indicators List */}
                     <div className="space-y-3 divide-y divide-slate-100">
                       {grp.indicators.map((ind) => {
-                        const currentVal = modalSubScores[ind.id] ?? 3;
+                        const currentVal = modalSubScores[ind.id];
                         return (
                           <div 
                             key={ind.id} 
@@ -2588,7 +3164,7 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
                                   <button
                                     key={score}
                                     type="button"
-                                    disabled={isLocked}
+                                    disabled={isReadOnlyForUser}
                                     onClick={() => handleSetModalSubScore(ind.id, score)}
                                     className={`w-9 h-9 sm:w-10 sm:h-10 text-xs sm:text-sm font-extrabold rounded-xl border transition-all cursor-pointer flex items-center justify-center ${
                                       isSelected
@@ -2613,16 +3189,23 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
                     </div>
 
                     {/* Group Summary Row (สรุป) */}
-                    <div className="p-3.5 rounded-xl bg-amber-50/80 border border-amber-200/90 flex items-center justify-between">
-                      <span className="text-sm font-bold text-amber-950 flex items-center gap-2">
-                        <Sparkles className="w-4 h-4 text-amber-600" />
-                        <span>สรุป {grp.title}</span>
+                    <div className="p-2.5 sm:p-3.5 rounded-xl bg-amber-50/80 border border-amber-200/90 flex items-center justify-between gap-2">
+                      <span className="text-sm font-bold text-amber-950 flex items-center gap-1.5 shrink-0">
+                        <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span className="sm:hidden">สรุป</span>
+                        <span className="hidden sm:inline">สรุป {grp.title}</span>
                       </span>
-                      <div className="flex items-center gap-2.5">
-                        <span className="text-xs sm:text-sm font-mono font-bold text-amber-900">
-                          (ระดับ {groupScore})
-                        </span>
-                        {getLevelBadge(groupScore)}
+                      <div className="flex items-center gap-2 shrink-0">
+                        {groupScore !== undefined ? (
+                          <>
+                            <span className="text-xs sm:text-sm font-mono font-bold text-amber-900">
+                              (ระดับ {groupScore})
+                            </span>
+                            {getLevelBadge(groupScore)}
+                          </>
+                        ) : (
+                          <span className="text-xs sm:text-sm font-mono font-bold text-slate-400">-</span>
+                        )}
                       </div>
                     </div>
 
@@ -2643,7 +3226,8 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
                       </button>
 
                       <span className="text-xs sm:text-sm font-mono font-bold text-slate-500">
-                        หัวข้อที่ {activeCategoryIndex + 1} / {CHARACTERISTICS_GROUPS.length}
+                        <span className="sm:hidden">{activeCategoryIndex + 1}/{CHARACTERISTICS_GROUPS.length}</span>
+                        <span className="hidden sm:inline">หัวข้อที่ {activeCategoryIndex + 1} / {CHARACTERISTICS_GROUPS.length}</span>
                       </span>
 
                       <button
@@ -2666,18 +3250,30 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
             </div>
 
             {/* Modal Sticky Footer */}
-            <div className="p-4 sm:p-5 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+            <div className="p-3 sm:p-5 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shrink-0">
               {/* Grand Total Badge */}
-              <div className="flex items-center gap-2.5">
-                <span className="text-sm sm:text-base font-bold text-slate-900">
-                  สรุปรวมคุณลักษณะ 8 ประการ:
+              <div className="flex items-center justify-between sm:justify-start gap-2">
+                <span className="text-xs sm:text-base font-bold text-slate-900">
+                  <span className="sm:hidden">สรุปรวม:</span>
+                  <span className="hidden sm:inline">สรุปรวมคุณลักษณะ 8 ประการ:</span>
                 </span>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs sm:text-sm font-mono font-bold text-slate-700">
-                    ({getModalGrandOverallScore(modalSubScores)} คะแนน)
-                  </span>
-                  {getLevelBadge(getModalGrandOverallScore(modalSubScores))}
-                </div>
+                {(() => {
+                  const grandScore = getModalGrandOverallScore(modalSubScores);
+                  return (
+                    <div className="flex items-center gap-1.5">
+                      {grandScore !== undefined ? (
+                        <>
+                          <span className="text-xs sm:text-sm font-mono font-bold text-slate-700">
+                            ({grandScore} คะแนน)
+                          </span>
+                          {getLevelBadge(grandScore)}
+                        </>
+                      ) : (
+                        <span className="text-xs sm:text-sm font-mono font-bold text-slate-400">-</span>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Action Buttons */}
@@ -2697,9 +3293,9 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
                   return (
                     <button
                       type="button"
-                      disabled={isLocked}
+                      disabled={isReadOnlyForUser}
                       onClick={() => handleSaveCharacteristicsEvaluation(true)}
-                      className="px-4 py-2.5 text-xs sm:text-sm font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition-all cursor-pointer flex items-center gap-1 shadow-2xs"
+                      className="hidden sm:flex px-4 py-2.5 text-xs sm:text-sm font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-xl transition-all cursor-pointer items-center gap-1 shadow-2xs"
                       title="บันทึกแล้วเปิดหน้านักเรียนคนถัดไปทันที"
                     >
                       <span>บันทึก & คนถัดไป</span>
@@ -2710,7 +3306,7 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
 
                 <button
                   type="button"
-                  disabled={isLocked}
+                  disabled={isReadOnlyForUser}
                   onClick={() => handleSaveCharacteristicsEvaluation(false)}
                   className="px-6 py-2.5 text-xs sm:text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
                 >
@@ -2718,6 +3314,339 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
                   <span>บันทึกผลการประเมิน</span>
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Rapid Grading Modal for Reading/Writing */}
+      {mobileGradingStudent && activeTableConfig && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/60 backdrop-blur-xs sm:hidden">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl flex flex-col max-h-[90vh] overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="px-4 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                <div className="w-8 h-8 rounded-full overflow-hidden border border-white/30 bg-white/10 shrink-0 flex items-center justify-center">
+                  {mobileGradingStudent.photoUrl ? (
+                    <img src={mobileGradingStudent.photoUrl} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <User className="w-4 h-4 text-white/80" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="relative flex items-center min-w-0 max-w-[220px]">
+                    <select
+                      value={mobileGradingStudent.id}
+                      onChange={(e) => {
+                        const selected = classStudents.find(s => s.id === e.target.value);
+                        if (selected) setMobileGradingStudent(selected);
+                      }}
+                      className="appearance-none bg-white/20 hover:bg-white/30 text-white font-bold text-xs pl-2 pr-7 py-1 rounded-lg border border-white/30 outline-none cursor-pointer truncate w-full"
+                    >
+                      {classStudents.map((st) => (
+                        <option key={st.id} value={st.id} className="text-slate-800 bg-white">
+                          เลขที่ {st.rollNumber ?? '-'}: {st.prefix}{st.firstName} {st.lastName}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="w-3.5 h-3.5 text-white/80 absolute right-2 pointer-events-none" />
+                  </div>
+                  <p className="text-[11px] text-blue-100 truncate mt-0.5">
+                    {cleanTitle(activeTableConfig.title)} (เต็ม {getTableMaxScore(activeTableConfig)} คะแนน)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMobileGradingStudent(null)}
+                className="p-1 rounded-lg hover:bg-white/10 text-white/80 hover:text-white transition-colors ml-2 shrink-0 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Content - Indicators Scoring */}
+            <div className="p-4 space-y-3 overflow-y-auto flex-1 bg-slate-50">
+              {(() => {
+                const rec = getStudentAssessment(mobileGradingStudent);
+                const hasScore = hasStudentTableScore(rec, activeTableConfig);
+                const tableTotal = getStudentTableScore(rec, activeTableConfig);
+                return (
+                  <>
+                    <div className="space-y-2.5">
+                      {activeTableConfig.indicators.map((ind) => {
+                        const currentVal = rec.indicatorScores?.[ind.id];
+                        const displayVal = currentVal !== undefined && currentVal !== null ? currentVal : '';
+                        return (
+                          <div key={ind.id} className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between gap-3">
+                            <div className="min-w-0 flex-1">
+                              <div className="text-xs font-bold text-slate-800 truncate">
+                                {ind.name}
+                              </div>
+                              <div className="text-[10px] text-slate-500">
+                                คะแนนเต็ม {ind.maxScore} คะแนน
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                disabled={isReadOnlyForUser}
+                                value={displayVal}
+                                onChange={(e) => {
+                                  const val = e.target.value.trim();
+                                  if (val === '' || val === '-') {
+                                    updateIndicatorScore(mobileGradingStudent, ind.id, '', ind.maxScore);
+                                  } else {
+                                    const num = Number(val);
+                                    if (!isNaN(num)) {
+                                      updateIndicatorScore(mobileGradingStudent, ind.id, num, ind.maxScore);
+                                    }
+                                  }
+                                }}
+                                placeholder="-"
+                                className="w-16 h-10 px-2 text-center text-sm font-bold bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-blue-700 outline-none disabled:bg-slate-100 disabled:text-slate-400 placeholder:text-slate-400 placeholder:font-bold"
+                              />
+                              <span className="text-xs text-slate-400">/{ind.maxScore}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Table Total Score & Quality Badge */}
+                    <div className="p-3 bg-white rounded-xl border border-blue-200 shadow-2xs flex items-center justify-between">
+                      <div>
+                        <div className="text-[11px] font-medium text-slate-500">รวมคะแนนตารางนี้</div>
+                        <div className="text-base font-black text-blue-700 font-mono">
+                          {hasScore ? `${Math.round(tableTotal * 10) / 10} / ${getTableMaxScore(activeTableConfig)}` : '-'}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[11px] font-medium text-slate-500 mb-0.5">เกณฑ์คะแนน</div>
+                        {hasScore ? getTableLevelTextBadge(tableTotal, activeTableConfig) : <span className="text-slate-400 font-bold text-sm">-</span>}
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+
+            {/* Modal Footer with Prev / Save / Next */}
+            <div className="p-3 bg-white border-t border-slate-200 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={handlePrevMobileGradingStudent}
+                disabled={currentMobileGradingIndex <= 0}
+                className="px-2.5 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all disabled:opacity-30 disabled:pointer-events-none flex items-center gap-1 shrink-0 cursor-pointer"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                <span>ก่อนหน้า</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={isReadOnlyForUser}
+                onClick={() => {
+                  syncAssessmentDataToGrades();
+                  onShowToast('success', 'บันทึกเรียบร้อย', `บันทึกคะแนนของ ${mobileGradingStudent.prefix}${mobileGradingStudent.firstName} ${mobileGradingStudent.lastName} เรียบร้อยแล้ว`);
+                }}
+                className="flex-1 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <Save className="w-4 h-4" />
+                <span>บันทึก</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleNextMobileGradingStudent}
+                disabled={currentMobileGradingIndex >= classStudents.length - 1}
+                className="px-2.5 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all disabled:opacity-30 disabled:pointer-events-none flex items-center gap-1 shrink-0 cursor-pointer"
+              >
+                <span>ถัดไป</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Rapid Grading Modal for Competencies */}
+      {evaluatingCompetencyStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/60 backdrop-blur-xs sm:hidden">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl flex flex-col max-h-[90vh] overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="px-4 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                <div className="w-8 h-8 rounded-full overflow-hidden border border-white/30 bg-white/10 shrink-0 flex items-center justify-center">
+                  {evaluatingCompetencyStudent.photoUrl ? (
+                    <img src={evaluatingCompetencyStudent.photoUrl} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <User className="w-4 h-4 text-white/80" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="relative flex items-center min-w-0 max-w-[220px]">
+                    <select
+                      value={evaluatingCompetencyStudent.id}
+                      onChange={(e) => {
+                        const selected = classStudents.find(s => s.id === e.target.value);
+                        if (selected) setEvaluatingCompetencyStudent(selected);
+                      }}
+                      className="appearance-none bg-white/20 hover:bg-white/30 text-white font-bold text-xs pl-2 pr-7 py-1 rounded-lg border border-white/30 outline-none cursor-pointer truncate w-full"
+                    >
+                      {classStudents.map((st) => (
+                        <option key={st.id} value={st.id} className="text-slate-800 bg-white">
+                          เลขที่ {st.rollNumber ?? '-'}: {st.prefix}{st.firstName} {st.lastName}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown className="w-3.5 h-3.5 text-white/80 absolute right-2 pointer-events-none" />
+                  </div>
+                  <p className="text-[11px] text-purple-100 truncate mt-0.5">
+                    สมรรถนะสำคัญ 5 ประการ
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEvaluatingCompetencyStudent(null)}
+                className="p-1 rounded-lg hover:bg-white/10 text-white/80 hover:text-white transition-colors ml-2 shrink-0 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-4 space-y-3 overflow-y-auto flex-1 bg-slate-50">
+              {(() => {
+                const rec = getStudentAssessment(evaluatingCompetencyStudent);
+                const comp = rec.competency || {};
+                const compList: Array<{ key: keyof Competency5Criteria; title: string; desc: string }> = [
+                  { key: 'comp1', title: '1. ความสามารถในการสื่อสาร', desc: 'การใช้ภาษาถ่ายทอดความคิด ความรู้ ความเข้าใจ' },
+                  { key: 'comp2', title: '2. ความสามารถในการคิด', desc: 'การคิดวิเคราะห์ สังเคราะห์ สร้างสรรค์ มีวิจารณญาณ' },
+                  { key: 'comp3', title: '3. ความสามารถในการแก้ปัญหา', desc: 'การแก้ปัญหาและอุปสรรคได้อย่างถูกต้องเหมาะสม' },
+                  { key: 'comp4', title: '4. ความสามารถในการใช้ทักษะชีวิต', desc: 'การนำกระบวนการต่างๆ ไปใช้ในการดำเนินชีวิตประจำวัน' },
+                  { key: 'comp5', title: '5. ความสามารถในการใช้เทคโนโลยี', desc: 'การเลือกและใช้เทคโนโลยีด้านต่างๆ เพื่อการพัฒนาตนเอง' },
+                ];
+
+                return (
+                  <>
+                    {/* Quick fill buttons */}
+                    <div className="flex items-center justify-between p-2.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
+                      <span className="text-[11px] font-bold text-slate-600">กรอกทั้ง 5 ข้อ:</span>
+                      <div className="flex items-center gap-1.5">
+                        {[
+                          { val: 3, label: '3 ดีเยี่ยม', color: 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' },
+                          { val: 2, label: '2 ดี', color: 'bg-sky-50 text-sky-700 border-sky-200 hover:bg-sky-100' },
+                          { val: 1, label: '1 ผ่าน', color: 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100' }
+                        ].map(q => (
+                          <button
+                            key={q.val}
+                            type="button"
+                            disabled={isReadOnlyForUser}
+                            onClick={() => {
+                              ['comp1', 'comp2', 'comp3', 'comp4', 'comp5'].forEach(k => {
+                                updateCompetency(evaluatingCompetencyStudent, k as keyof Competency5Criteria, q.val);
+                              });
+                            }}
+                            className={`px-2 py-1 text-[11px] font-bold border rounded-lg transition-all active:scale-95 cursor-pointer ${q.color}`}
+                          >
+                            {q.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Competency 5 criteria */}
+                    <div className="space-y-2.5">
+                      {compList.map(item => {
+                        const val = comp[item.key] as number | undefined;
+                        return (
+                          <div key={item.key} className="p-3 bg-white rounded-xl border border-slate-200 shadow-2xs space-y-2">
+                            <div>
+                              <div className="text-xs font-bold text-slate-800">{item.title}</div>
+                            </div>
+                            <div className="grid grid-cols-4 gap-1.5">
+                              {[
+                                { level: 3, label: 'ดีเยี่ยม (3)', activeBg: 'bg-emerald-600 text-white border-emerald-600' },
+                                { level: 2, label: 'ดี (2)', activeBg: 'bg-sky-600 text-white border-sky-600' },
+                                { level: 1, label: 'ผ่าน (1)', activeBg: 'bg-amber-500 text-white border-amber-500' },
+                                { level: 0, label: 'ไม่ผ่าน (0)', activeBg: 'bg-rose-600 text-white border-rose-600' }
+                              ].map(lvl => {
+                                const isSelected = val === lvl.level;
+                                return (
+                                  <button
+                                    key={lvl.level}
+                                    type="button"
+                                    disabled={isReadOnlyForUser}
+                                    onClick={() => updateCompetency(evaluatingCompetencyStudent, item.key, lvl.level)}
+                                    className={`py-1.5 px-1 rounded-lg text-[10px] font-bold border text-center transition-all cursor-pointer ${
+                                      isSelected
+                                        ? `${lvl.activeBg} shadow-xs scale-100`
+                                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                                    }`}
+                                  >
+                                    {lvl.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Summary row */}
+                    <div className="p-3 bg-white rounded-xl border border-purple-200 shadow-2xs flex items-center justify-between">
+                      <div>
+                        <div className="text-[11px] font-medium text-slate-500">ผลการประเมินสมรรถนะรวม</div>
+                      </div>
+                      <div className="text-right">
+                        {comp.overallLevel !== undefined ? getQualityTextBadge(comp.overallLevel) : (
+                          <span className="text-xs text-slate-400 font-bold">-</span>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+
+            {/* Modal Footer with Prev / Save / Next */}
+            <div className="p-3 bg-white border-t border-slate-200 flex items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={handlePrevCompGradingStudent}
+                disabled={currentCompGradingIndex <= 0}
+                className="px-2.5 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all disabled:opacity-30 disabled:pointer-events-none flex items-center gap-1 shrink-0 cursor-pointer"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                <span>ก่อนหน้า</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={isReadOnlyForUser}
+                onClick={() => {
+                  syncAssessmentDataToGrades();
+                  onShowToast('success', 'บันทึกเรียบร้อย', `บันทึกสมรรถนะสำคัญของ ${evaluatingCompetencyStudent.prefix}${evaluatingCompetencyStudent.firstName} ${evaluatingCompetencyStudent.lastName} เรียบร้อยแล้ว`);
+                }}
+                className="flex-1 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 rounded-xl shadow-xs transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <Save className="w-4 h-4" />
+                <span>บันทึก</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleNextCompGradingStudent}
+                disabled={currentCompGradingIndex >= classStudents.length - 1}
+                className="px-2.5 py-2 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all disabled:opacity-30 disabled:pointer-events-none flex items-center gap-1 shrink-0 cursor-pointer"
+              >
+                <span>ถัดไป</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
             </div>
           </div>
         </div>

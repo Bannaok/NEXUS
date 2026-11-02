@@ -703,7 +703,7 @@ export const Module5Documents: React.FC<Module5Props> = ({
 
           {/* แสดงปีการศึกษาเฉพาะในหน้า "หนังสือคำสั่ง" เท่านั้น (ศูนย์เอกสารจะไม่มีปีการศึกษา) */}
           {activeTab === 'orders' && (
-            <div className="flex items-center gap-1.5 bg-white px-2.5 sm:px-3 py-1.5 rounded-xl border border-emerald-300/90 shadow-2xs shrink-0">
+            <div className="hidden sm:flex items-center gap-1.5 bg-white px-2.5 sm:px-3 py-1.5 rounded-xl border border-emerald-300/90 shadow-2xs shrink-0">
               <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
               <span className="text-xs font-bold text-slate-800 whitespace-nowrap">ปีการศึกษา {currentAcademicYear}</span>
             </div>
@@ -826,7 +826,7 @@ export const Module5Documents: React.FC<Module5Props> = ({
                         <span className="whitespace-nowrap">{formatThaiDocDate(doc.date)}</span>
                       </span>
                       {activeTab === 'orders' && (
-                        <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-md font-mono whitespace-nowrap shrink-0">
+                        <span className="hidden sm:inline-block text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-md font-mono whitespace-nowrap shrink-0">
                           ปีการศึกษา {doc.academicYear || currentAcademicYear}
                         </span>
                       )}
@@ -1078,7 +1078,7 @@ export const Module5Documents: React.FC<Module5Props> = ({
                     <label className="block text-xs font-semibold text-slate-700">
                       เลขที่คำสั่ง (ไม่บังคับ)
                     </label>
-                    <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md font-mono">
+                    <span className="hidden sm:inline-block text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md font-mono">
                       ปีการศึกษา {currentAcademicYear}
                     </span>
                   </div>
@@ -1183,7 +1183,7 @@ export const Module5Documents: React.FC<Module5Props> = ({
                       {isOrderDoc(selectedDocDetailModal) ? 'หนังสือคำสั่ง' : 'ศูนย์เอกสาร'}
                     </span>
                     {isOrderDoc(selectedDocDetailModal) && (
-                      <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md font-mono">
+                      <span className="hidden sm:inline-block text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md font-mono">
                         ปีการศึกษา {selectedDocDetailModal.academicYear || currentAcademicYear}
                       </span>
                     )}

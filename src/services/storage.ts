@@ -2345,6 +2345,7 @@ export const StorageService = {
         lastName: found.lastName,
         role: found.role || 'member',
         assignedGrade: found.gradeLevel,
+        assignedRoom: found.room || (found.gradeLevel ? '1' : undefined),
         position: found.position,
         learningGroup: found.learningGroup,
         avatarUrl: found.avatarUrl,

@@ -45,28 +45,52 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   return (
     <header className="bg-gradient-to-r from-[#11244e] via-[#173b75] to-[#1e293b] text-white shadow-md border-b border-blue-900/60">
-      {/* Top micro bar: Google Sheets status if connected */}
-      {googleConfig.isConnected && (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-1.5 border-b border-white/10 flex flex-wrap items-center justify-end text-xs text-indigo-100/90 gap-2">
-          <div className="flex items-center gap-3">
-            {/* Sync Button */}
-            <button
-              onClick={onSyncAll}
-              disabled={isSyncing}
-              className="flex items-center gap-1 text-[11px] text-indigo-200 hover:text-white transition-colors cursor-pointer"
-              title="ซิงค์ข้อมูลกับ Google Sheets"
-            >
-              <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
-              <span>ซิงค์ชีต</span>
-            </button>
+      {/* Main Branding & User bar */}
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-1 sm:py-3 flex items-center justify-between gap-2 sm:gap-3">
+        {/* Mobile View Top Bar (sm:hidden): Clean member name & term/academic year display */}
+        <div className="sm:hidden flex items-center justify-between w-full py-1 gap-2">
+          {/* Member Name */}
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-7 h-7 rounded-lg bg-white/15 border border-white/20 flex items-center justify-center text-white shrink-0 shadow-xs">
+              <UserCheck className="w-4 h-4 text-emerald-300" />
+            </div>
+            <div className="min-w-0">
+              <div className="text-xs font-bold text-white truncate max-w-[170px]">
+                {user.fullName}
+              </div>
+              {user.assignedGrade ? (
+                <p className="text-[10px] text-indigo-200/80 truncate leading-tight">
+                  ครูประจำชั้น {user.assignedGrade}{user.assignedRoom ? ` ห้อง ${user.assignedRoom}` : ''}
+                </p>
+              ) : (
+                <p className="text-[10px] text-indigo-200/80 truncate leading-tight">
+                  {user.position || 'ครูผู้สอน'}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Term & Academic Year (Small font in blue top bar) */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <div className="text-[10px] font-semibold text-indigo-100 bg-white/10 border border-white/15 px-2 py-0.5 rounded-lg flex items-center gap-1 shadow-2xs">
+              <span>ภาคเรียนที่ {schoolInfo.semester || '1'}</span>
+              <span>ปีการศึกษา {schoolInfo.academicYear || '2569'}</span>
+            </div>
+
+            {/* Developer inspection return button if active */}
+            {user.role === 'developer' && isInspectingSchool && onReturnToDevConsole && (
+              <button
+                onClick={onReturnToDevConsole}
+                className="px-2 py-0.5 bg-purple-600 active:scale-95 text-white text-[10px] font-bold rounded-lg border border-purple-400/40 shrink-0"
+              >
+                Dev
+              </button>
+            )}
           </div>
         </div>
-      )}
 
-      {/* Main Branding & User bar */}
-      <div className="max-w-7xl mx-auto px-3.5 sm:px-6 lg:px-8 py-3 flex flex-col md:flex-row md:items-center justify-between gap-3">
-        {/* Brand identity */}
-        <div className="flex items-center gap-3">
+        {/* Desktop Brand identity: Hidden on mobile to maximize white workspace */}
+        <div className="hidden sm:flex items-center gap-3">
           <div className="w-12 h-12 rounded-2xl bg-white border border-white/30 p-1 flex items-center justify-center shrink-0 shadow-sm overflow-hidden">
             <img
               src={schoolInfo.logoUrl || '/nexus-logo.png'}
@@ -94,8 +118,8 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* User Session, Settings & Logout */}
-        <div className="flex items-center gap-2 self-end md:self-auto">
+        {/* User Session, Settings & Logout (Desktop View: hidden on mobile) */}
+        <div className="hidden sm:flex items-center gap-2">
           {/* If Developer is inspecting a school, show quick return button */}
           {user.role === 'developer' && isInspectingSchool && onReturnToDevConsole && (
             <button
@@ -108,7 +132,7 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
-          {/* Clean User Display Badge (read-only, not a switcher) */}
+          {/* Clean User Display Badge */}
           <div 
             className="flex items-center gap-2.5 bg-white/10 border border-white/15 px-3 py-1.5 rounded-xl backdrop-blur-xs select-none"
             title={`เข้าสู่ระบบในฐานะ: ${user.fullName}`}
@@ -148,13 +172,12 @@ export const Header: React.FC<HeaderProps> = ({
                 {user.role === 'developer' 
                   ? 'Level 1: Developer'
                   : (user.position || (user.role === 'admin' ? 'Level 2: ผู้ดูแลโรงเรียน' : 'ครูผู้สอน'))}
-                {user.assignedGrade && ` • ชั้น ${user.assignedGrade}`}
+                {user.assignedGrade && ` • ชั้น ${user.assignedGrade}${user.assignedRoom ? ` ห้อง ${user.assignedRoom}` : ''}`}
               </p>
             </div>
           </div>
 
-
-          {/* Settings icon button located at top right near logout (only for Admin and Member) */}
+          {/* Settings icon button (only for Admin and Member on Desktop) */}
           {user.role !== 'developer' && (
             <button
               onClick={onOpenSettings}
@@ -165,7 +188,7 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
-          {/* Dedicated Logout button for production */}
+          {/* Dedicated Logout button for Desktop */}
           <button
             onClick={onLogout}
             className="px-3 py-2 bg-rose-500/20 hover:bg-rose-600 active:scale-95 border border-rose-400/30 text-rose-200 hover:text-white rounded-xl transition-all shadow-xs shrink-0 flex items-center gap-1.5 text-xs font-semibold cursor-pointer"

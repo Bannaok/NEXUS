@@ -11,6 +11,7 @@ export interface UserSession {
   position?: string;
   phone?: string; // เบอร์โทรติดต่อ
   assignedGrade?: GradeLevel | string;
+  assignedRoom?: string; // ห้องประจำชั้น เช่น '1', '2', '3'
   learningGroup?: string;
   avatarUrl?: string;
   schoolId?: string;
@@ -158,6 +159,7 @@ export interface Personnel {
   customDepartment?: string;
   position: string;
   advisorGrade?: string; // ครูที่ปรึกษาประจำชั้น เช่น ป.1, ป.2, ฯลฯ
+  advisorRoom?: string; // ห้องที่ปรึกษาประจำชั้น เช่น '1', '2', '3'
   birthDate: string;
   employmentDate: string;
   retirementDate: string;
@@ -281,6 +283,7 @@ export interface Subject {
   code: string; // e.g., ว11101
   name: string;
   gradeLevel: GradeLevel;
+  room?: string; // ห้องเรียน เช่น '1', '2', '3' (ค่าเริ่มต้น '1')
   hoursPerWeek: number;
   semester: '1' | '2';
   totalScore: number; // 100
@@ -464,6 +467,7 @@ export interface MemberAccount {
   role: Role;
   phone?: string; // เบอร์โทรติดต่อ
   gradeLevel?: GradeLevel;
+  room?: string; // ห้องประจำชั้น เช่น '1', '2', '3'
   position: string;
   learningGroup?: string;
   avatarUrl?: string;
