@@ -316,7 +316,7 @@ export const SettingsView: React.FC<SettingsProps> = ({
             </div>
             <div>
               <h2 className="text-base font-bold">ตั้งค่าระบบ (System Settings)</h2>
-              <p className="text-xs text-slate-400">
+              <p className="hidden sm:block text-xs text-slate-400">
                 จัดการฐานข้อมูล Google Sheets, บัญชีสมาชิก และข้อมูลโปรไฟล์ส่วนตัว
               </p>
             </div>
@@ -330,7 +330,7 @@ export const SettingsView: React.FC<SettingsProps> = ({
                   onClose();
                   onLogout();
                 }}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
                 title="ออกจากระบบ"
               >
                 <LogOut className="w-3.5 h-3.5" />
@@ -410,14 +410,14 @@ export const SettingsView: React.FC<SettingsProps> = ({
                     <UserCheck className="w-5 h-5 text-indigo-600" />
                     <span>ตั้งค่าโปรไฟล์และข้อมูลส่วนตัว</span>
                   </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">
+                  <p className="hidden sm:block text-xs text-slate-500 mt-0.5">
                     อัปโหลดรูปประจำตัว กำหนดคำนำหน้า ชื่อ-สกุล ชั้นประจำชั้น และกลุ่มสาระการเรียนรู้
                   </p>
                 </div>
                 <span className={`text-[11px] font-bold px-2.5 py-1 rounded-xl border ${
                   user.role === 'developer'
                     ? 'bg-purple-50 text-purple-700 border-purple-200'
-                    : 'bg-blue-50 text-blue-700 border-blue-200'
+                    : 'hidden sm:inline-block bg-blue-50 text-blue-700 border-blue-200'
                 }`}>
                   {user.role === 'developer' ? 'ผู้พัฒนาระบบ (Developer)' : 'ครูผู้สอน / สมาชิก'}
                 </span>

@@ -267,7 +267,7 @@ export const Navigation: React.FC<NavigationProps> = ({
             <div className="flex items-center justify-between px-3 py-0.5 border-b border-slate-100 bg-slate-50/70 text-[10px] text-slate-500 font-medium">
               <div className="flex items-center gap-1.5 font-semibold text-slate-700">
                 <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
-                <span>เมนูหลัก (2 ชั้น)</span>
+                <span>เมนูหลัก</span>
               </div>
               <button
                 type="button"

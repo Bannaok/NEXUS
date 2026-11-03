@@ -2106,10 +2106,10 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
                           key={rm}
                           type="button"
                           onClick={() => setSelectedRoom(rm)}
-                          className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          className={`px-3 py-1 h-7 min-w-[62px] rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center text-center shrink-0 border ${
                             normalizeRoom(selectedRoom) === rm
-                              ? 'bg-emerald-600 text-white shadow-2xs'
-                              : 'text-slate-600 hover:bg-emerald-50'
+                              ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                              : 'bg-white text-slate-600 border-slate-200 hover:bg-emerald-50'
                           }`}
                         >
                           ห้อง {rm}
@@ -3025,14 +3025,14 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
                     <tr className="bg-slate-100/70 border-b border-slate-200/80 text-slate-700 uppercase tracking-wider font-semibold">
-                      <th className="py-2.5 px-3 w-16 text-center">ลำดับ</th>
-                      <th className="py-2.5 px-4 w-44">วันที่</th>
-                      <th className="py-2.5 px-3 w-28 text-center">วัน</th>
-                      <th className="py-2.5 px-3 w-32 text-center">สถานะวัน</th>
-                      <th className="py-2.5 px-4">หมายเหตุ</th>
-                      <th className="py-2.5 px-3 w-28 text-center">การส่ง</th>
+                      <th className="py-1.5 px-1 sm:py-2.5 sm:px-3 text-center sm:w-16">ลำดับ</th>
+                      <th className="py-1.5 px-1.5 sm:py-2.5 sm:px-4 sm:w-44">วันที่</th>
+                      <th className="py-1.5 px-1 sm:py-2.5 sm:px-3 text-center sm:w-28">วัน</th>
+                      <th className="py-1.5 px-1 sm:py-2.5 sm:px-3 text-center sm:w-32">สถานะวัน</th>
+                      <th className="py-2.5 px-4 hidden sm:table-cell">หมายเหตุ</th>
+                      <th className="py-1.5 px-1 sm:py-2.5 sm:px-3 text-center sm:w-28">การส่ง</th>
                       {user.role === 'admin' && (
-                        <th className="py-2.5 px-3 w-24 text-center">การจัดการ</th>
+                        <th className="py-1.5 px-1 sm:py-2.5 sm:px-3 text-center sm:w-24">การจัดการ</th>
                       )}
                     </tr>
                   </thead>
@@ -3075,21 +3075,21 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
                                     : 'hover:bg-slate-50/80'
                             }`}
                           >
-                            <td className="py-2.5 px-3 text-center">
+                            <td className="py-1.5 px-1 sm:py-2.5 sm:px-3 text-center">
                               {isHoliday ? (
                                 <span className="text-slate-300 font-mono text-xs font-bold select-none">-</span>
                               ) : (
-                                <div className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-emerald-100 text-emerald-900 font-mono font-bold text-xs shadow-2xs">
+                                <div className="inline-flex items-center justify-center w-6 h-6 sm:w-7 sm:h-7 rounded-lg bg-emerald-100 text-emerald-900 font-mono font-bold text-[11px] sm:text-xs shadow-2xs">
                                   {workingDayNumber}
                                 </div>
                               )}
                             </td>
 
                             {/* Date Display: Thai format only (e.g. 16 พ.ค. 2569) */}
-                            <td className="py-2.5 px-4">
-                              <div className="flex items-center gap-1.5">
+                            <td className="py-1.5 px-1.5 sm:py-2.5 sm:px-4">
+                              <div className="flex items-center gap-1">
                                 <div>
-                                  <div className={`font-bold flex items-center gap-1 ${
+                                  <div className={`font-bold flex items-center gap-1 text-[11px] sm:text-xs ${
                                     isWeekend && isHoliday ? 'text-red-600' : isHoliday ? 'text-rose-700' : 'text-slate-800'
                                   }`}>
                                     <span>{formatThaiDate(item.date)}</span>
@@ -3103,8 +3103,8 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
                               </div>
                             </td>
 
-                            <td className="py-2.5 px-3 text-center">
-                              <span className={`inline-block px-2.5 py-0.5 rounded-md text-xs font-bold ${
+                            <td className="py-1.5 px-1 sm:py-2.5 sm:px-3 text-center">
+                              <span className={`inline-block px-1.5 sm:px-2.5 py-0.5 rounded-md text-[10px] sm:text-xs font-bold ${
                                 isWeekend
                                   ? 'bg-red-100 text-red-600 border border-red-300'
                                   : isHoliday
@@ -3115,12 +3115,12 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
                               </span>
                             </td>
 
-                            <td className="py-2.5 px-3 text-center">
+                            <td className="py-1.5 px-1 sm:py-2.5 sm:px-3 text-center">
                               {user.role === 'admin' ? (
                                 <button
                                   type="button"
                                   onClick={() => handleToggleHolidayItem(item.date, true)}
-                                  className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold transition-all cursor-pointer active:scale-95 ${
+                                  className={`inline-flex items-center gap-1 px-1.5 sm:px-2.5 py-0.5 rounded-full text-[10px] sm:text-[11px] font-bold transition-all cursor-pointer active:scale-95 ${
                                     isHoliday
                                       ? 'bg-red-50 hover:bg-red-100 text-red-700 border border-red-200'
                                       : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200'
@@ -3140,34 +3140,34 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
                                   )}
                                 </button>
                               ) : isHoliday ? (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200 text-[11px] font-bold">
+                                <span className="inline-flex items-center gap-1 px-1.5 sm:px-2.5 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200 text-[10px] sm:text-[11px] font-bold">
                                   <AlertCircle className="w-3 h-3 text-red-500" />
                                   <span>วันหยุด</span>
                                 </span>
                               ) : (
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-bold">
+                                <span className="inline-flex items-center gap-1 px-1.5 sm:px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] sm:text-[11px] font-bold">
                                   <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                                   <span>วันเรียน</span>
                                 </span>
                               )}
                             </td>
 
-                            <td className="py-2.5 px-4">
+                            <td className="py-2.5 px-4 hidden sm:table-cell">
                               <span className={`text-xs ${isWeekend && isHoliday ? 'text-red-500 font-medium' : isHoliday ? 'text-rose-600 font-medium' : 'text-slate-600'}`}>
                                 {item.note || (isWeekend ? 'วันหยุดสุดสัปดาห์' : isHoliday ? 'วันหยุด' : 'วันเรียนปกติ')}
                               </span>
                             </td>
 
                             {/* Submission Status Column */}
-                            <td className="py-2.5 px-3 text-center">
+                            <td className="py-1.5 px-1 sm:py-2.5 sm:px-3 text-center">
                               {isHoliday ? (
                                 <span className="text-slate-300 font-mono text-xs">-</span>
                               ) : (() => {
                                 const subStatus = getSubmissionStatusForDate(item.date);
                                 if (subStatus.isAllSubmitted) {
                                   return (
-                                    <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 font-bold" title="สมาชิกทุกคนเช็กชื่อครบแล้ว">
-                                      <Check className="w-4 h-4" />
+                                    <span className="inline-flex items-center justify-center w-6 h-6 sm:w-7 sm:h-7 rounded-lg bg-emerald-100 text-emerald-700 font-bold" title="สมาชิกทุกคนเช็กชื่อครบแล้ว">
+                                      <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                                     </span>
                                   );
                                 } else {
@@ -3175,10 +3175,10 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
                                     <button
                                       type="button"
                                       onClick={() => setSubmissionStatusModalDate(item.date)}
-                                      className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-700 font-bold transition-all cursor-pointer shadow-2xs"
+                                      className="inline-flex items-center justify-center w-6 h-6 sm:w-7 sm:h-7 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-700 font-bold transition-all cursor-pointer shadow-2xs"
                                       title="ยังมีสมาชิกบางคนยังไม่เช็กชื่อ (คลิกเพื่อดูรายละเอียด)"
                                     >
-                                      <AlertCircle className="w-4 h-4" />
+                                      <AlertCircle className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                                     </button>
                                   );
                                 }
@@ -3186,23 +3186,23 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
                             </td>
 
                             {user.role === 'admin' && (
-                              <td className="py-2.5 px-3 text-center">
-                                <div className="flex items-center justify-center gap-1.5">
+                              <td className="py-1.5 px-1 sm:py-2.5 sm:px-3 text-center">
+                                <div className="flex items-center justify-center gap-1">
                                   <button
                                     type="button"
                                     onClick={() => handleOpenEditDay(item)}
-                                    className="p-1.5 text-slate-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg border border-slate-200 transition-all cursor-pointer active:scale-95 shadow-2xs"
+                                    className="p-1 sm:p-1.5 text-slate-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg border border-slate-200 transition-all cursor-pointer active:scale-95 shadow-2xs"
                                     title="กดเพื่อตั้งค่าเป็นเวลาเรียนหรือวันหยุด"
                                   >
-                                    <Pencil className="w-3.5 h-3.5" />
+                                    <Pencil className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                                   </button>
                                   <button
                                     type="button"
                                     onClick={() => handleDeleteDay(item.date)}
-                                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                    className="p-1 sm:p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
                                     title="ลบวันนี้ออกจากตาราง"
                                   >
-                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <Trash2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                                   </button>
                                 </div>
                               </td>
@@ -4066,7 +4066,8 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
                                 <div className="text-slate-700 flex items-center gap-1 text-xs">
                                   <span className="text-slate-400 font-medium">เหตุผล:</span>
                                   <span className="font-semibold bg-white px-2 py-0.5 rounded border border-slate-200/80 text-slate-800">
-                                    {item.notes || 'ไม่ระบุเหตุผล'}
+                                    <span className="sm:hidden">{(item.notes || 'ไม่ระบุเหตุผล').replace(/\s*\(หักจาก:[\s\S]*?\)/, '')}</span>
+                                    <span className="hidden sm:inline">{item.notes || 'ไม่ระบุเหตุผล'}</span>
                                   </span>
                                 </div>
                                 <button
@@ -4238,7 +4239,7 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
             </div>
 
             {/* Selectors Bar: ภาคเรียน, ปีการศึกษา และปุ่มเลือกห้อง */}
-            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200/80 flex flex-wrap items-center justify-between gap-3 shrink-0">
+            <div className={`bg-slate-50 p-3 rounded-2xl border border-slate-200/80 items-center justify-between gap-3 shrink-0 ${user.role === 'admin' ? 'flex flex-wrap' : 'hidden sm:flex'}`}>
               {user.role === 'admin' ? (
                 <div className="flex flex-wrap items-center gap-2">
                   <select
@@ -4261,13 +4262,13 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
                   </select>
                 </div>
               ) : (
-                <div className="px-3 py-2 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold whitespace-nowrap">
+                <div className="hidden sm:block px-3 py-2 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold whitespace-nowrap">
                   ภาคเรียนที่ {activeSemester} • ปีการศึกษา {activeAcademicYear}
                 </div>
               )}
 
               {availableRoomsForGrade.length > 1 && (
-                <div className="flex items-center gap-1.5 flex-wrap">
+                <div className="hidden sm:flex items-center gap-1.5 flex-wrap">
                   <span className="text-xs font-bold text-slate-600">เลือกห้อง:</span>
                   {availableRoomsForGrade.map(rm => (
                     <button
@@ -4344,8 +4345,8 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
                 const totalRoomMoney = rows.reduce((acc, r) => acc + r.totalMoney, 0);
 
                 return (
-                  <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
-                    <table className="w-full text-left border-collapse text-xs">
+                  <div className="border border-slate-200 rounded-2xl overflow-x-auto shadow-2xs">
+                    <table className="min-w-[620px] sm:min-w-full w-full text-left border-collapse text-xs">
                       <thead>
                         <tr className="bg-slate-50 border-b border-slate-200 text-slate-700 uppercase tracking-wider font-semibold">
                           <th className="py-2.5 px-2.5 w-12 text-center">เลขที่</th>
