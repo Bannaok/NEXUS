@@ -152,36 +152,84 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   // Submission Modal State for "งานที่ต้องส่ง"
   const [taskToSubmit, setTaskToSubmit] = useState<TaskItem | null>(null);
-  const [submitFile, setSubmitFile] = useState<{ name: string; url: string; size: string } | null>(null);
+  const [submitFile, setSubmitFile] = useState<{
+    id?: string;
+    name: string;
+    url: string;
+    size: string;
+    hostedUrl?: string;
+    driveFileId?: string;
+    downloadUrl?: string;
+  } | null>(null);
   const [isUploadingSubmit, setIsUploadingSubmit] = useState(false);
 
   const handleFileChangeForSubmission = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (file.size > 5 * 1024 * 1024) {
+      if (onShowToast) {
+        onShowToast('warning', 'ขนาดไฟล์เกิน 5MB', 'กรุณาเลือกไฟล์ที่มีขนาดไม่เกิน 5MB');
+      }
+      e.target.value = '';
+      return;
+    }
+
     const sizeInMB = (file.size / (1024 * 1024)).toFixed(2);
     const sizeStr = sizeInMB + ' MB';
+    const fileIndexId = `sub_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const deterministicHostedUrl = `/api/files/${fileIndexId}`;
 
     setIsUploadingSubmit(true);
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       const base64 = event.target?.result as string;
-      setSubmitFile({ name: file.name, url: base64, size: sizeStr });
+      let hostedUrl = deterministicHostedUrl;
+      let driveFileId = '';
+      let driveUrl = '';
+      let downloadUrl = deterministicHostedUrl;
+
+      try {
+        const res = await fetch('/api/files/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: fileIndexId,
+            fileName: file.name,
+            dataUrl: base64,
+            schoolId: user.schoolId,
+            category: `TaskSubmissions_${taskToSubmit?.academicYear || schoolInfo?.academicYear || '2569'}`,
+            uploadedBy: user.fullName || user.id,
+            uploadToDrive: true,
+            taskId: taskToSubmit?.id || 'task',
+            memberId: user.id
+          })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          hostedUrl = data?.url || deterministicHostedUrl;
+          driveFileId = data?.driveFileId || '';
+          driveUrl = data?.driveUrl || (driveFileId ? `https://drive.google.com/file/d/${driveFileId}/view?usp=sharing` : '');
+          downloadUrl = data?.downloadUrl || hostedUrl;
+        }
+      } catch {
+        // Fallback to local
+      }
+
+      const bestUrl = driveUrl || hostedUrl || base64;
+      setSubmitFile({
+        id: fileIndexId,
+        name: file.name,
+        url: bestUrl,
+        size: sizeStr,
+        hostedUrl,
+        driveFileId: driveFileId || undefined,
+        downloadUrl
+      });
       setIsUploadingSubmit(false);
       if (onShowToast) {
-        onShowToast('info', 'เลือกไฟล์เรียบร้อย', `พร้อมส่งไฟล์ "${file.name}" (${sizeStr}) กดยืนยันส่งงานเพื่อจัดเก็บลง Google Drive`);
+        onShowToast('info', 'อัปโหลดไฟล์เรียบร้อย', `พร้อมส่งไฟล์ "${file.name}" (${sizeStr}) กดยืนยันส่งงานได้ทันที`);
       }
-      StorageService.uploadFileToGoogleDrive(
-        base64,
-        file.name,
-        `TaskSubmissions_${taskToSubmit?.academicYear || schoolInfo?.academicYear || '2569'}`
-      )
-        .then(driveUrl => {
-          if (driveUrl && driveUrl.startsWith('http')) {
-            setSubmitFile(prev => (prev && prev.name === file.name ? { ...prev, url: driveUrl } : prev));
-          }
-        })
-        .catch(() => {});
     };
     reader.onerror = () => {
       setIsUploadingSubmit(false);
@@ -205,7 +253,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     }
 
     setIsUploadingSubmit(true);
-    let finalFileUrl = submitFile.url;
+    let finalFileUrl = submitFile.url || submitFile.hostedUrl || '';
     try {
       if (finalFileUrl.startsWith('data:')) {
         const uploadedUrl = await StorageService.uploadFileToGoogleDrive(
@@ -218,18 +266,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         }
       }
     } catch {
-      // Keep local dataUrl if offline
+      // Keep local url if offline
     } finally {
       setIsUploadingSubmit(false);
     }
 
     const nowIso = new Date().toISOString();
     const newSub: TaskSubmission = {
+      id: submitFile.id || `sub_${Date.now()}`,
       memberId: user.id,
       memberName: user.fullName || user.username,
       fileUrl: finalFileUrl,
       fileName: submitFile.name,
       fileSize: submitFile.size,
+      driveFileId: submitFile.driveFileId,
+      localHostedUrl: submitFile.hostedUrl,
+      downloadUrl: submitFile.downloadUrl || finalFileUrl,
       submittedAt: nowIso
     };
 
@@ -237,28 +289,45 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     const updatedSubs = [
       ...currentSubs.filter(
         s =>
-          s.memberId !== user.id &&
-          (!user.username || s.memberId?.toLowerCase() !== user.username.toLowerCase()) &&
-          s.memberName !== user.fullName
+          !(
+            (s.memberId === user.id ||
+              (user.username && s.memberId?.toLowerCase() === user.username.toLowerCase()) ||
+              s.memberName === user.fullName) &&
+            s.fileName === submitFile.name
+          )
       ),
       newSub
     ];
 
     const nextDeletedMap = { ...(taskToSubmit.deletedSubmissionsMap || {}) };
     delete nextDeletedMap[user.id];
-    if (user.username) delete nextDeletedMap[user.username];
-    if (user.fullName) delete nextDeletedMap[user.fullName];
+    delete nextDeletedMap[user.id.toLowerCase()];
+    if (user.username) {
+      delete nextDeletedMap[user.username];
+      delete nextDeletedMap[user.username.toLowerCase()];
+    }
+    if (user.fullName) {
+      delete nextDeletedMap[user.fullName];
+      delete nextDeletedMap[user.fullName.toLowerCase()];
+    }
+    delete nextDeletedMap[submitFile.name];
+    delete nextDeletedMap[`${user.id}_${submitFile.name}`];
 
     const schoolMembers = (members || []).filter(m => m.role !== 'admin');
     const totalMembersCountForSubmit = schoolMembers.length > 0 ? schoolMembers.length : 1;
-    const isNowAllSubmitted = updatedSubs.length >= totalMembersCountForSubmit;
+    const uniqueSubMembers = new Set(
+      updatedSubs
+        .filter(s => s && (s.memberId || s.memberName))
+        .map(s => String(s.memberId || s.memberName).trim().toLowerCase())
+    );
+    const isNowAllSubmitted = uniqueSubMembers.size >= totalMembersCountForSubmit;
 
     const updatedTask: TaskItem = {
       ...taskToSubmit,
       submissions: updatedSubs,
       deletedSubmissionsMap: Object.keys(nextDeletedMap).length > 0 ? nextDeletedMap : undefined,
       isCompleted: isNowAllSubmitted,
-      submittedFileUrl: finalFileUrl.startsWith('http') ? finalFileUrl : undefined,
+      submittedFileUrl: finalFileUrl || undefined,
       submittedFileName: submitFile.name,
       submittedFileSize: submitFile.size,
       submittedBy: user.id,
@@ -313,8 +382,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         t.submittedBy === user.id;
       return !hasMemberSubmitted;
     } else {
-      const submittedCount = (t.submissions || []).length;
-      return submittedCount < totalMembersCount;
+      const uniqueSubmittedCount = new Set(
+        (t.submissions || [])
+          .filter(s => s && (s.memberId || s.memberName))
+          .map(s => String(s.memberId || s.memberName).trim().toLowerCase())
+      ).size;
+      return uniqueSubmittedCount < totalMembersCount;
     }
   });
 

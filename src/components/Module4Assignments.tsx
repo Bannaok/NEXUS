@@ -168,8 +168,11 @@ export const Module4Assignments: React.FC<Module4Props> = ({
   const [downloadingFileKey, setDownloadingFileKey] = useState<string | null>(null);
   const [expandedMemberIds, setExpandedMemberIds] = useState<Record<string, boolean>>({});
 
-  const toggleMemberExpand = (memberKey: string) => {
-    setExpandedMemberIds(prev => ({ ...prev, [memberKey]: !prev[memberKey] }));
+  const toggleMemberExpand = (memberKey: string, currentExpanded?: boolean) => {
+    setExpandedMemberIds(prev => {
+      const cur = currentExpanded !== undefined ? currentExpanded : (prev[memberKey] ?? true);
+      return { ...prev, [memberKey]: !cur };
+    });
   };
 
   // Submission modal state (for members) with 0-100% progress tracking and multi-file support
@@ -274,15 +277,34 @@ export const Module4Assignments: React.FC<Module4Props> = ({
   const findMemberSubmissions = (task: TaskItem, member: MemberAccount): TaskSubmission[] => {
     if (!task || !member) return [];
     const normMemberName = normalizePersonName(member.fullName);
-
-    // Check if permanently deleted via tombstone or deletedSubmissionsMap
-    if (StorageService.isSubmissionDeleted(task.id, member.id, member.username, member.fullName, normMemberName)) {
-      return [];
-    }
     const delMap = task.deletedSubmissionsMap || {};
-    if (delMap[member.id] || (member.username && delMap[member.username]) || (member.fullName && delMap[member.fullName])) {
-      return [];
-    }
+
+    const isSubDeletedForTask = (s: TaskSubmission): boolean => {
+      if (!s) return true;
+      const subId = (s as any).id;
+      const delAt =
+        (subId ? delMap[subId] : '') ||
+        (s.fileName && member.id ? delMap[`${member.id}_${s.fileName}`] : '') ||
+        (s.fileName && s.memberId ? delMap[`${s.memberId}_${s.fileName}`] : '') ||
+        (s.fileName ? delMap[s.fileName] : '') ||
+        (member.id ? (delMap[member.id] || delMap[member.id.toLowerCase()]) : '') ||
+        (s.memberId ? (delMap[s.memberId] || delMap[s.memberId.toLowerCase()]) : '') ||
+        (member.username ? (delMap[member.username] || delMap[member.username.toLowerCase()]) : '') ||
+        (member.fullName ? (delMap[member.fullName] || delMap[member.fullName.toLowerCase()]) : '') ||
+        (s.memberName ? (delMap[s.memberName] || delMap[s.memberName.toLowerCase()]) : '');
+      if (delAt) {
+        if (!s.submittedAt) return true;
+        const delTime = new Date(delAt).getTime();
+        const subTime = new Date(s.submittedAt).getTime();
+        if (isNaN(subTime) || delTime >= subTime) return true;
+        return false;
+      }
+      if (subId && StorageService.isSubmissionDeleted(task.id, subId)) return true;
+      if (!s.submittedAt && StorageService.isSubmissionDeleted(task.id, s.memberId, s.memberName, s.fileName)) {
+        return true;
+      }
+      return false;
+    };
 
     const subs = task.submissions || [];
     const memberSubs: TaskSubmission[] = [];
@@ -290,24 +312,46 @@ export const Module4Assignments: React.FC<Module4Props> = ({
 
     subs.forEach((s, idx) => {
       if (!s) return;
-      if (StorageService.isSubmissionDeleted(task.id, s.memberId, s.memberName, s.fileName)) return;
-      if (s.fileName && delMap[s.fileName]) return;
-      if (s.fileName && delMap[`${member.id}_${s.fileName}`]) return;
+      if (isSubDeletedForTask(s)) return;
+
+      const sMemIdLower = (s.memberId || '').trim().toLowerCase();
+      const sMemNameLower = (s.memberName || '').trim().toLowerCase();
+      const mIdLower = (member.id || '').trim().toLowerCase();
+      const mUserLower = (member.username || '').trim().toLowerCase();
+      const mFullLower = (member.fullName || '').trim().toLowerCase();
+      const normSubName = normalizePersonName(s.memberName);
 
       const matches =
-        s.memberId === member.id ||
-        (member.username && s.memberId?.toLowerCase() === member.username.toLowerCase()) ||
-        (member.fullName && s.memberName === member.fullName) ||
-        (normMemberName && normalizePersonName(s.memberName) === normMemberName);
+        (mIdLower && (sMemIdLower === mIdLower || sMemNameLower === mIdLower)) ||
+        (mUserLower && (sMemIdLower === mUserLower || sMemNameLower === mUserLower)) ||
+        (mFullLower && (sMemNameLower === mFullLower || sMemIdLower === mFullLower)) ||
+        (normMemberName && normSubName && normSubName === normMemberName);
 
       if (matches) {
-        const fileKey = `${s.fileName || ''}_${s.fileUrl || ''}_${idx}`;
-        if (!seenFileKeys.has(fileKey)) {
-          seenFileKeys.add(fileKey);
-          memberSubs.push({
-            ...s,
-            fileUrl: resolveSubmissionDriveUrl(s, task.submittedFileUrl, task)
-          });
+        const dedupKey = `${(s.fileName || '').trim().toLowerCase()}__${(s as any).id || idx}`;
+        const fileNameOnlyKey = (s.fileName || '').trim().toLowerCase();
+        if (!seenFileKeys.has(dedupKey)) {
+          seenFileKeys.add(dedupKey);
+          if (fileNameOnlyKey) {
+            // If an older entry with the exact same fileName exists, replace it with the newer one
+            const existingIdx = memberSubs.findIndex(
+              ex => (ex.fileName || '').trim().toLowerCase() === fileNameOnlyKey
+            );
+            const resolvedSub: TaskSubmission = {
+              ...s,
+              fileUrl: resolveSubmissionDriveUrl(s, task.submittedFileUrl, task)
+            };
+            if (existingIdx >= 0) {
+              memberSubs[existingIdx] = resolvedSub;
+            } else {
+              memberSubs.push(resolvedSub);
+            }
+          } else {
+            memberSubs.push({
+              ...s,
+              fileUrl: resolveSubmissionDriveUrl(s, task.submittedFileUrl, task)
+            });
+          }
         }
       }
     });
@@ -321,10 +365,7 @@ export const Module4Assignments: React.FC<Module4Props> = ({
        (member.fullName && task.submittedByName === member.fullName) ||
        (normMemberName && normalizePersonName(task.submittedByName) === normMemberName))
     ) {
-      if (StorageService.isSubmissionDeleted(task.id, task.submittedBy, task.submittedByName, task.submittedFileName)) {
-        return [];
-      }
-      return [{
+      const legacySub: TaskSubmission = {
         memberId: member.id,
         memberName: member.fullName,
         fileUrl: task.submittedFileUrl,
@@ -332,7 +373,11 @@ export const Module4Assignments: React.FC<Module4Props> = ({
         fileSize: task.submittedFileSize || '1.0 MB',
         driveFileId: task.driveFileId,
         submittedAt: task.submittedAt || new Date().toISOString()
-      }];
+      };
+      if (isSubDeletedForTask(legacySub)) {
+        return [];
+      }
+      return [legacySub];
     }
     return [];
   };
@@ -381,14 +426,43 @@ export const Module4Assignments: React.FC<Module4Props> = ({
   const getTaskEffectiveSubmissions = (task: TaskItem): TaskSubmission[] => {
     if (!task) return [];
     const result: TaskSubmission[] = [];
-    const seenKeys = new Set<string>();
+    const seenMemberKeys = new Set<string>();
+    const delMap = task.deletedSubmissionsMap || {};
 
-    const addSub = (s: TaskSubmission, fallbackName?: string) => {
-      if (!s) return;
-      if (StorageService.isSubmissionDeleted(task.id, s.memberId, s.memberName, s.fileName)) return;
-      const key = String(s.memberId || s.memberName || '').trim().toLowerCase();
-      if (!key || seenKeys.has(key)) return;
-      seenKeys.add(key);
+    const isRawSubDeleted = (s: TaskSubmission): boolean => {
+      if (!s) return true;
+      const subId = (s as any).id;
+      const delAt =
+        (subId ? delMap[subId] : '') ||
+        (s.fileName && s.memberId ? delMap[`${s.memberId}_${s.fileName}`] : '') ||
+        (s.fileName ? delMap[s.fileName] : '') ||
+        (s.memberId ? (delMap[s.memberId] || delMap[s.memberId.toLowerCase()]) : '') ||
+        (s.memberName ? (delMap[s.memberName] || delMap[s.memberName.toLowerCase()]) : '');
+      if (delAt) {
+        if (!s.submittedAt) return true;
+        const delTime = new Date(delAt).getTime();
+        const subTime = new Date(s.submittedAt).getTime();
+        if (isNaN(subTime) || delTime >= subTime) return true;
+        return false;
+      }
+      if (subId && StorageService.isSubmissionDeleted(task.id, subId)) return true;
+      if (!s.submittedAt && StorageService.isSubmissionDeleted(task.id, s.memberId, s.memberName, s.fileName)) {
+        return true;
+      }
+      return false;
+    };
+
+    const addSub = (s: TaskSubmission, canonicalMemberKey?: string, fallbackName?: string) => {
+      if (!s || isRawSubDeleted(s)) return;
+      const key = (canonicalMemberKey || String(s.memberId || s.memberName || '')).trim().toLowerCase();
+      if (!key || seenMemberKeys.has(key)) return;
+      seenMemberKeys.add(key);
+      if (s.memberId) seenMemberKeys.add(String(s.memberId).trim().toLowerCase());
+      if (s.memberName) {
+        seenMemberKeys.add(String(s.memberName).trim().toLowerCase());
+        const norm = normalizePersonName(s.memberName);
+        if (norm) seenMemberKeys.add(norm);
+      }
       const effectiveUrl = resolveSubmissionDriveUrl(s, task.submittedFileUrl, task);
       result.push({
         ...s,
@@ -401,26 +475,35 @@ export const Module4Assignments: React.FC<Module4Props> = ({
     schoolMembers.forEach(m => {
       const subs = findMemberSubmissions(task, m);
       if (subs.length > 0) {
-        addSub(subs[0], m.fullName);
+        addSub(subs[0], m.id, m.fullName);
       }
     });
 
     (task.submissions || []).forEach(s => {
       if (s && (s.memberId || s.memberName)) {
+        const norm = normalizePersonName(s.memberName);
+        if (
+          (s.memberId && seenMemberKeys.has(String(s.memberId).trim().toLowerCase())) ||
+          (s.memberName && seenMemberKeys.has(String(s.memberName).trim().toLowerCase())) ||
+          (norm && seenMemberKeys.has(norm))
+        ) {
+          return;
+        }
         addSub(s);
       }
     });
 
     if (result.length === 0 && task.submittedFileUrl && (task.submittedBy || task.submittedByName)) {
-      if (!StorageService.isSubmissionDeleted(task.id, task.submittedBy, task.submittedByName, task.submittedFileName)) {
-        addSub({
-          memberId: task.submittedBy || 'member',
-          memberName: task.submittedByName || task.submittedBy || 'สมาชิก',
-          fileUrl: task.submittedFileUrl,
-          fileName: task.submittedFileName || 'ไฟล์งานที่ส่ง',
-          fileSize: task.submittedFileSize || '1.0 MB',
-          submittedAt: task.submittedAt || new Date().toISOString()
-        });
+      const legacySub: TaskSubmission = {
+        memberId: task.submittedBy || 'member',
+        memberName: task.submittedByName || task.submittedBy || 'สมาชิก',
+        fileUrl: task.submittedFileUrl,
+        fileName: task.submittedFileName || 'ไฟล์งานที่ส่ง',
+        fileSize: task.submittedFileSize || '1.0 MB',
+        submittedAt: task.submittedAt || new Date().toISOString()
+      };
+      if (!isRawSubDeleted(legacySub)) {
+        addSub(legacySub);
       }
     }
 
@@ -726,44 +809,43 @@ export const Module4Assignments: React.FC<Module4Props> = ({
       }
     }
 
-    setSubmittedFiles(prev => [...prev, ...newUploadedItems]);
+    const combinedFiles = [...submittedFiles, ...newUploadedItems];
+    setSubmittedFiles(combinedFiles);
     if (newUploadedItems.length > 0) {
       setSubmittedFile(newUploadedItems[newUploadedItems.length - 1]);
     }
 
+    // Auto-persist uploaded files to the task immediately so Admin sees the submission right away
+    if (submittingTaskId && newUploadedItems.length > 0) {
+      persistMemberFilesToTask(submittingTaskId, combinedFiles);
+    }
+
     setUploadProgress(100);
     setIsUploadingSubmission(false);
-    setUploadStepText(`✓ อัปโหลดสำเร็จครบ ${validFiles.length} ไฟล์แล้ว พร้อมกดยืนยันการส่งงาน`);
+    setUploadStepText(`✓ อัปโหลดและบันทึกส่งงานครบ ${validFiles.length} ไฟล์แล้ว (สามารถเลือกไฟล์เพิ่มหรือกดยืนยันเพื่อปิดหน้าต่าง)`);
     onShowToast(
       'success',
-      'อัปโหลดไฟล์เรียบร้อย',
-      `อัปโหลด ${validFiles.length} ไฟล์เสร็จสมบูรณ์ สามารถเลือกไฟล์เพิ่มเติมหรือกดยืนยันการส่งงานได้ทันที`
+      'อัปโหลดและซิงค์ไฟล์เรียบร้อย',
+      `ส่งไฟล์ ${validFiles.length} ไฟล์เข้าสู่ระบบและซิงค์ไปยังผู้ดูแลระบบ (Admin) เรียบร้อยแล้ว`
     );
     e.target.value = '';
   };
 
-  const handleFinalSubmitTask = async (taskId: string) => {
-    if (submittedFiles.length === 0 && !submittedFile) {
-      onShowToast('warning', 'ยังไม่มีไฟล์', 'กรุณาเลือกไฟล์งานอย่างน้อย 1 ไฟล์ก่อนกดยืนยัน');
-      return;
-    }
-    if (isUploadingSubmission || uploadProgress < 100) {
-      onShowToast('warning', 'ยังไม่พร้อมส่ง', 'กรุณารอให้อัปโหลดไฟล์ให้ครบ 100% ก่อนกดยืนยันการส่งงาน');
-      return;
-    }
+  const persistMemberFilesToTask = (
+    taskId: string,
+    filesToSave: Array<{
+      id: string;
+      name: string;
+      url: string;
+      size: string;
+      hostedUrl?: string;
+      driveFileId?: string;
+      driveUrl?: string;
+      downloadUrl?: string;
+    }>
+  ): TaskItem | null => {
     const task = tasks.find(t => t.id === taskId);
-    if (!task) return;
-
-    const filesToSave = submittedFiles.length > 0 ? submittedFiles : (submittedFile ? [{
-      id: `sub_${Date.now()}`,
-      name: submittedFile.name,
-      url: submittedFile.url,
-      size: submittedFile.size,
-      hostedUrl: submittedFile.hostedUrl,
-      driveFileId: submittedFile.driveFileId,
-      driveUrl: submittedFile.driveUrl,
-      downloadUrl: submittedFile.downloadUrl
-    }] : []);
+    if (!task || filesToSave.length === 0) return null;
 
     const nowIso = new Date().toISOString();
     const newSubs: TaskSubmission[] = filesToSave.map((f, idx) => ({
@@ -780,31 +862,46 @@ export const Module4Assignments: React.FC<Module4Props> = ({
     }));
 
     const normMyName = normalizePersonName(user.fullName);
-    const otherSubs = (task.submissions || []).filter(s => 
-      s.memberId !== user.id && 
-      (!user.username || s.memberId?.toLowerCase() !== user.username.toLowerCase()) && 
-      s.memberName !== user.fullName &&
-      (!normMyName || normalizePersonName(s.memberName) !== normMyName)
+    const otherSubs = (task.submissions || []).filter(
+      s =>
+        s.memberId !== user.id &&
+        (!user.username || s.memberId?.toLowerCase() !== user.username.toLowerCase()) &&
+        s.memberName !== user.fullName &&
+        (!normMyName || normalizePersonName(s.memberName) !== normMyName)
     );
 
-    // Retain any existing files this member already submitted that were not re-submitted with the same name
     const existingMySubs = findMemberSubmissions(task, user as any).filter(
-      oldS => !filesToSave.some(newF => newF.name === oldS.fileName)
+      oldS => !filesToSave.some(newF => newF.name.trim().toLowerCase() === (oldS.fileName || '').trim().toLowerCase())
     );
 
     const updatedSubs = [...otherSubs, ...existingMySubs, ...newSubs];
 
     const nextDeletedMap = { ...(task.deletedSubmissionsMap || {}) };
     delete nextDeletedMap[user.id];
-    if (user.username) delete nextDeletedMap[user.username];
-    if (user.fullName) delete nextDeletedMap[user.fullName];
+    delete nextDeletedMap[user.id.toLowerCase()];
+    if (user.username) {
+      delete nextDeletedMap[user.username];
+      delete nextDeletedMap[user.username.toLowerCase()];
+    }
+    if (user.fullName) {
+      delete nextDeletedMap[user.fullName];
+      delete nextDeletedMap[user.fullName.toLowerCase()];
+    }
     filesToSave.forEach(f => {
       delete nextDeletedMap[f.name];
+      delete nextDeletedMap[f.name.toLowerCase()];
       delete nextDeletedMap[`${user.id}_${f.name}`];
     });
 
-    const isAllMembersDone = updatedSubs.length >= totalSchoolMembers;
+    const uniqueMembersSet = new Set<string>();
+    updatedSubs.forEach(s => {
+      if (s && (s.memberId || s.memberName)) {
+        uniqueMembersSet.add(String(s.memberId || s.memberName).trim().toLowerCase());
+      }
+    });
+    const isAllMembersDone = uniqueMembersSet.size >= totalSchoolMembers;
 
+    const allMyFilesCount = existingMySubs.length + newSubs.length;
     const updatedTask: TaskItem = {
       ...task,
       submissions: updatedSubs,
@@ -812,7 +909,10 @@ export const Module4Assignments: React.FC<Module4Props> = ({
       isCompleted: isAllMembersDone,
       submittedFileUrl: newSubs[0]?.fileUrl || task.submittedFileUrl,
       driveFileId: newSubs[0]?.driveFileId || task.driveFileId,
-      submittedFileName: newSubs.length === 1 ? newSubs[0]?.fileName : `${newSubs[0]?.fileName} (+${newSubs.length - 1} ไฟล์)`,
+      submittedFileName:
+        allMyFilesCount <= 1
+          ? newSubs[0]?.fileName
+          : `${newSubs[0]?.fileName} (+${allMyFilesCount - 1} ไฟล์)`,
       submittedFileSize: newSubs[0]?.fileSize,
       submittedBy: user.id,
       submittedByName: user.fullName,
@@ -820,7 +920,46 @@ export const Module4Assignments: React.FC<Module4Props> = ({
     };
 
     onSaveTask(updatedTask);
+    return updatedTask;
+  };
 
+  const handleFinalSubmitTask = async (taskId: string) => {
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return;
+
+    const existingMySubs = findMemberSubmissions(task, user as any);
+    if (submittedFiles.length === 0 && !submittedFile && existingMySubs.length === 0) {
+      onShowToast('warning', 'ยังไม่มีไฟล์', 'กรุณาเลือกไฟล์งานอย่างน้อย 1 ไฟล์ก่อนกดยืนยัน');
+      return;
+    }
+    if (isUploadingSubmission || ( (submittedFiles.length > 0 || submittedFile) && uploadProgress < 100 )) {
+      onShowToast('warning', 'ยังไม่พร้อมส่ง', 'กรุณารอให้อัปโหลดไฟล์ให้ครบ 100% ก่อนกดยืนยันการส่งงาน');
+      return;
+    }
+
+    const filesToSave =
+      submittedFiles.length > 0
+        ? submittedFiles
+        : submittedFile
+        ? [
+            {
+              id: `sub_${Date.now()}`,
+              name: submittedFile.name,
+              url: submittedFile.url,
+              size: submittedFile.size,
+              hostedUrl: submittedFile.hostedUrl,
+              driveFileId: submittedFile.driveFileId,
+              driveUrl: submittedFile.driveUrl,
+              downloadUrl: submittedFile.downloadUrl
+            }
+          ]
+        : [];
+
+    if (filesToSave.length > 0) {
+      persistMemberFilesToTask(taskId, filesToSave);
+    }
+
+    const totalSavedCount = filesToSave.length || existingMySubs.length;
     setIsUploadingSubmission(false);
     setUploadProgress(0);
     setUploadStepText('');
@@ -831,7 +970,7 @@ export const Module4Assignments: React.FC<Module4Props> = ({
     onShowToast(
       'success',
       'ส่งงานสำเร็จ 🎉',
-      `ส่งงาน "${task.title}" จำนวน ${filesToSave.length} ไฟล์เรียบร้อยแล้ว ระบบซิงค์ข้อมูลและไฟล์ไปยังหน้าผู้ดูแลระบบ (Admin) ทันที`
+      `ส่งงาน "${task.title}" จำนวน ${totalSavedCount} ไฟล์เรียบร้อยแล้ว ระบบซิงค์ข้อมูลและไฟล์ไปยังหน้าผู้ดูแลระบบ (Admin) ทันที`
     );
   };
 
@@ -1206,6 +1345,19 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                                 : (isUrgent ? 'ด่วนที่สุด' : isHigh ? 'ด่วน' : 'ปกติ')}
                             </span>
 
+                            {user.role === 'admin' && !isGreenCompleted && submittedCount > 0 && (
+                              <span
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setStatusTaskModal(task);
+                                }}
+                                className="text-[10px] sm:text-[11px] font-bold px-2 py-0.5 rounded-lg shrink-0 flex items-center gap-1 bg-emerald-100 text-emerald-800 border border-emerald-300 cursor-pointer hover:bg-emerald-200 transition-colors"
+                                title="คลิกเพื่อดูไฟล์งานที่สมาชิกส่ง"
+                              >
+                                ✓ มีผู้ส่งงานแล้ว ({submittedCount}/{totalSchoolMembers} คน)
+                              </span>
+                            )}
+
                             {task.dueDate && (
                               <span className={`text-[10px] sm:text-xs font-mono font-bold px-1.5 sm:px-2 py-0.5 rounded-lg border flex items-center gap-1 whitespace-nowrap shrink-0 ${
                                 isGreenCompleted 
@@ -1555,7 +1707,7 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                   {schoolMembers.map((mem, idx) => {
                     const memberSubs = findMemberSubmissions(liveStatusTask, mem);
                     const hasSubmitted = memberSubs.length > 0;
-                    const isExpanded = !!expandedMemberIds[mem.id];
+                    const isExpanded = expandedMemberIds[mem.id] ?? true;
                     const overdue = isOverdue(liveStatusTask.dueDate);
 
                     return (
@@ -1600,7 +1752,7 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                               {/* Accordion toggle button with icon */}
                               <button
                                 type="button"
-                                onClick={() => toggleMemberExpand(mem.id)}
+                                onClick={() => toggleMemberExpand(mem.id, isExpanded)}
                                 className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold inline-flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs ${
                                   isExpanded
                                     ? 'bg-emerald-600 text-white border-emerald-600'
@@ -1643,7 +1795,16 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                               {memberSubs.map((sub, fileIdx) => {
                                 const subFileUrl = resolveSubmissionDriveUrl(sub, liveStatusTask.submittedFileUrl, liveStatusTask);
                                 const dlKey = `sub-${liveStatusTask.id}-${mem.id}-${fileIdx}`;
-                                const driveUrl = getGoogleDriveViewUrl(subFileUrl) || (sub.driveFileId ? `https://drive.google.com/file/d/${sub.driveFileId}/view?usp=sharing` : '');
+                                const driveUrl =
+                                  getGoogleDriveViewUrl(subFileUrl) ||
+                                  (sub.driveFileId
+                                    ? `https://drive.google.com/file/d/${sub.driveFileId}/view?usp=sharing`
+                                    : '') ||
+                                  `/api/files/open?url=${encodeURIComponent(
+                                    subFileUrl || (sub as any).localHostedUrl || ''
+                                  )}&name=${encodeURIComponent(sub.fileName || 'file')}&taskId=${encodeURIComponent(
+                                    liveStatusTask.id
+                                  )}&memberId=${encodeURIComponent(sub.memberId || mem.id)}`;
 
                                 return (
                                   <div
@@ -1671,7 +1832,7 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                                         disabled={downloadingFileKey === dlKey}
                                         onClick={() =>
                                           handleDownloadFile(
-                                            subFileUrl,
+                                            subFileUrl || (sub as any).localHostedUrl || '',
                                             sub.fileName,
                                             dlKey,
                                             liveStatusTask.id,
@@ -1690,18 +1851,16 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                                       </button>
 
                                       {/* ไอคอนเปิดไฟล์ใน Google Drive */}
-                                      {driveUrl && (
-                                        <a
-                                          href={driveUrl}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold inline-flex items-center gap-1 transition-colors cursor-pointer shadow-2xs no-underline"
-                                          title="เปิดดู/ดาวน์โหลดบน Google Drive โดยตรง"
-                                        >
-                                          <ExternalLink className="w-3.5 h-3.5" />
-                                          <span className="hidden sm:inline text-[11px]">Drive</span>
-                                        </a>
-                                      )}
+                                      <a
+                                        href={driveUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold inline-flex items-center gap-1 transition-colors cursor-pointer shadow-2xs no-underline"
+                                        title="เปิดดู/ดาวน์โหลดบน Google Drive โดยตรง"
+                                      >
+                                        <ExternalLink className="w-3.5 h-3.5" />
+                                        <span className="hidden sm:inline text-[11px]">Drive</span>
+                                      </a>
 
                                       {/* ไอคอนลบไฟล์นี้ */}
                                       <button
@@ -1734,10 +1893,29 @@ export const Module4Assignments: React.FC<Module4Props> = ({
 
                   {/* แสดงรายการส่งงานเพิ่มเติมหากมีสมาชิกที่ส่งเข้ามาแต่ไม่ได้อยู่ในรายการ schoolMembers */}
                   {(() => {
-                    const extraSubs = (liveStatusTask.submissions || []).filter(
-                      s => s && !StorageService.isSubmissionDeleted(liveStatusTask.id, s.memberId, s.memberName, s.fileName) &&
-                           !schoolMembers.some(m => findMemberSubmissions(liveStatusTask, m).some(ms => ms.memberId === s.memberId || ms.memberName === s.memberName))
-                    );
+                    const matchedSubIds = new Set<string>();
+                    schoolMembers.forEach(m => {
+                      findMemberSubmissions(liveStatusTask, m).forEach(ms => {
+                        if (ms.id) matchedSubIds.add(ms.id);
+                        matchedSubIds.add(`${ms.memberId || ''}_${ms.fileName || ''}`);
+                      });
+                    });
+
+                    const extraSubs = (liveStatusTask.submissions || []).filter(s => {
+                      if (!s) return false;
+                      if (s.id && matchedSubIds.has(s.id)) return false;
+                      if (matchedSubIds.has(`${s.memberId || ''}_${s.fileName || ''}`)) return false;
+                      if (!s.submittedAt && StorageService.isSubmissionDeleted(liveStatusTask.id, s.memberId, s.memberName, s.fileName)) {
+                        return false;
+                      }
+                      return !schoolMembers.some(m =>
+                        findMemberSubmissions(liveStatusTask, m).some(
+                          ms =>
+                            (ms.memberId && s.memberId && ms.memberId === s.memberId) ||
+                            (ms.memberName && s.memberName && ms.memberName === s.memberName)
+                        )
+                      );
+                    });
 
                     // Group extra submissions by member
                     const extraGroups: Record<string, TaskSubmission[]> = {};
@@ -1750,7 +1928,7 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                     return Object.entries(extraGroups).map(([groupKey, subs], extraIdx) => {
                       const firstSub = subs[0];
                       const memberName = firstSub.memberName || firstSub.memberId || `สมาชิกท่านที่ ${schoolMembers.length + extraIdx + 1}`;
-                      const isExpanded = !!expandedMemberIds[`extra_${groupKey}`];
+                      const isExpanded = expandedMemberIds[`extra_${groupKey}`] ?? true;
 
                       return (
                         <div
@@ -1777,7 +1955,7 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                             <div className="flex items-center gap-1.5 shrink-0">
                               <button
                                 type="button"
-                                onClick={() => toggleMemberExpand(`extra_${groupKey}`)}
+                                onClick={() => toggleMemberExpand(`extra_${groupKey}`, isExpanded)}
                                 className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold inline-flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs ${
                                   isExpanded
                                     ? 'bg-emerald-600 text-white border-emerald-600'
@@ -1813,7 +1991,16 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                               {subs.map((s, fIdx) => {
                                 const effectiveUrl = resolveSubmissionDriveUrl(s, liveStatusTask.submittedFileUrl, liveStatusTask);
                                 const extraDlKey = `sub-extra-${liveStatusTask.id}-${s.memberId || fIdx}-${fIdx}`;
-                                const driveUrl = getGoogleDriveViewUrl(effectiveUrl) || (s.driveFileId ? `https://drive.google.com/file/d/${s.driveFileId}/view?usp=sharing` : '');
+                                const driveUrl =
+                                  getGoogleDriveViewUrl(effectiveUrl) ||
+                                  (s.driveFileId
+                                    ? `https://drive.google.com/file/d/${s.driveFileId}/view?usp=sharing`
+                                    : '') ||
+                                  `/api/files/open?url=${encodeURIComponent(
+                                    effectiveUrl || (s as any).localHostedUrl || ''
+                                  )}&name=${encodeURIComponent(s.fileName || 'file')}&taskId=${encodeURIComponent(
+                                    liveStatusTask.id
+                                  )}&memberId=${encodeURIComponent(s.memberId || '')}`;
 
                                 return (
                                   <div
@@ -1840,7 +2027,7 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                                         disabled={downloadingFileKey === extraDlKey}
                                         onClick={() =>
                                           handleDownloadFile(
-                                            effectiveUrl,
+                                            effectiveUrl || (s as any).localHostedUrl || '',
                                             s.fileName,
                                             extraDlKey,
                                             liveStatusTask.id,
@@ -1858,18 +2045,16 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                                         <span className="hidden sm:inline text-[11px]">ดาวน์โหลด</span>
                                       </button>
 
-                                      {driveUrl && (
-                                        <a
-                                          href={driveUrl}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold inline-flex items-center gap-1 cursor-pointer shadow-2xs no-underline"
-                                          title="เปิดดูบน Google Drive"
-                                        >
-                                          <ExternalLink className="w-3.5 h-3.5" />
-                                          <span className="hidden sm:inline text-[11px]">Drive</span>
-                                        </a>
-                                      )}
+                                      <a
+                                        href={driveUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold inline-flex items-center gap-1 cursor-pointer shadow-2xs no-underline"
+                                        title="เปิดดูบน Google Drive"
+                                      >
+                                        <ExternalLink className="w-3.5 h-3.5" />
+                                        <span className="hidden sm:inline text-[11px]">Drive</span>
+                                      </a>
 
                                       <button
                                         type="button"

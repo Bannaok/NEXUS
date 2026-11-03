@@ -978,7 +978,11 @@ function ensureTaskFilesHostedAndUploaded(key: string, tasksList: any): any {
       if (rawUrl.startsWith('data:')) {
         const subIdClean = String(sub.memberId || sub.memberName || 'member').replace(/[^a-zA-Z0-9_-]/g, '_');
         const taskIdClean = String(task.id || 'task').replace(/[^a-zA-Z0-9_-]/g, '_');
-        const fileId = `sub_${taskIdClean}_${subIdClean}`;
+        const fileNameClean = String(sub.fileName || 'file').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40);
+        const fileId = sub.id
+          ? String(sub.id).replace(/[^a-zA-Z0-9_-]/g, '_')
+          : `sub_${taskIdClean}_${subIdClean}_${fileNameClean}`;
+        sub.id = sub.id || fileId;
         // Save locally immediately so /api/files/:fileId works with 0ms latency
         const hostedPath = saveServerHostedFile(fileId, sub.fileName || 'submission', rawUrl, {
           schoolId,
@@ -991,7 +995,7 @@ function ensureTaskFilesHostedAndUploaded(key: string, tasksList: any): any {
         }
 
         // Upload to Google Drive in background so cross-container (ais-dev <-> ais-pre) & Google Sheets get a permanent Drive link
-        const uploadLockKey = `${key}::${task.id}::${sub.memberId}::${sub.submittedAt || ''}`;
+        const uploadLockKey = `${key}::${task.id}::${sub.memberId}::${sub.fileName || ''}::${sub.submittedAt || ''}`;
         if (!inFlightDriveUploads.has(uploadLockKey)) {
           inFlightDriveUploads.add(uploadLockKey);
           fetch(getGasWebAppUrl(), {
@@ -1020,18 +1024,26 @@ function ensureTaskFilesHostedAndUploaded(key: string, tasksList: any): any {
                   driveUrl,
                   downloadUrl: resData.downloadUrl
                 });
-                const curList = state.store[key];
-                if (Array.isArray(curList)) {
-                  let updatedAny = false;
-                  const nextList = curList.map((t: any) => {
+                const nowTs = Date.now();
+                const deltaUpdates: Record<string, any> = {};
+                const deltaTimestamps: Record<string, number> = {};
+
+                for (const tk of Object.keys(state.store)) {
+                  if (!isTaskKeyName(tk) || !Array.isArray(state.store[tk])) continue;
+                  let updatedInKey = false;
+                  const nextList = state.store[tk].map((t: any) => {
                     if (!t || t.id !== task.id) return t;
                     const nextSubs = (Array.isArray(t.submissions) ? t.submissions : []).map((s: any) => {
-                      if (
+                      const isSameSub =
                         s &&
-                        (s.memberId === sub.memberId || s.memberName === sub.memberName) &&
+                        ((sub.id && s.id === sub.id) ||
+                          ((s.memberId === sub.memberId || s.memberName === sub.memberName) &&
+                            (!sub.fileName || !s.fileName || s.fileName === sub.fileName)));
+                      if (
+                        isSameSub &&
                         (!s.fileUrl || String(s.fileUrl).startsWith('data:') || String(s.fileUrl).startsWith('/api/files/'))
                       ) {
-                        updatedAny = true;
+                        updatedInKey = true;
                         return {
                           ...s,
                           fileUrl: driveUrl,
@@ -1050,15 +1062,20 @@ function ensureTaskFilesHostedAndUploaded(key: string, tasksList: any): any {
                     };
                   });
 
-                  if (updatedAny) {
-                    const nowTs = Date.now();
-                    state.store[key] = nextList;
-                    state.timestamps[key] = Math.max(nowTs, (Number(state.timestamps[key]) || 0) + 1);
-                    state.rev += 1;
-                    scheduleDiskSave();
-                    broadcastDelta('server-drive-sync', { [key]: nextList }, { [key]: state.timestamps[key] });
-                    scheduleCloudKvPush([key]);
+                  if (updatedInKey) {
+                    state.store[tk] = nextList;
+                    state.timestamps[tk] = Math.max(nowTs, (Number(state.timestamps[tk]) || 0) + 1);
+                    deltaUpdates[tk] = nextList;
+                    deltaTimestamps[tk] = state.timestamps[tk];
                   }
+                }
+
+                const changedKeys = Object.keys(deltaUpdates);
+                if (changedKeys.length > 0) {
+                  state.rev += 1;
+                  scheduleDiskSave();
+                  broadcastDelta('server-drive-sync', deltaUpdates, deltaTimestamps);
+                  scheduleCloudKvPush(changedKeys);
                 }
               }
             })
@@ -1193,9 +1210,34 @@ function sanitizeForCloudKv(val: any): any {
 
 function normalizeSubKeyServer(sub: any): string {
   if (!sub) return '';
-  const idPart = String(sub.memberId || '').trim().toLowerCase();
-  if (idPart) return idPart;
-  return String(sub.memberName || '').trim().toLowerCase();
+  const memPart = String(sub.memberId || sub.memberName || '').trim().toLowerCase();
+  const filePart = String(sub.fileName || '').trim().toLowerCase();
+  if (memPart && filePart) return `${memPart}__${filePart}`;
+  if (sub.id) return String(sub.id).trim().toLowerCase();
+  return memPart || filePart;
+}
+
+function clearSubmissionTombstonesForSubServer(taskId: string, sub: any, deletedMap?: Record<string, string>): void {
+  if (!taskId || !sub) return;
+  const subKey = normalizeSubKeyServer(sub);
+  const candidates = [
+    sub.id,
+    sub.memberId,
+    sub.memberName,
+    sub.fileName,
+    subKey,
+    sub.memberId && sub.fileName ? `${sub.memberId}_${sub.fileName}` : undefined,
+    sub.memberName && sub.fileName ? `${sub.memberName}_${sub.fileName}` : undefined
+  ];
+  for (const c of candidates) {
+    if (!c) continue;
+    const tk = makeSubTombstoneKeyServer(taskId, String(c));
+    if (tk) deletedSubmissionKeysServer.delete(tk);
+    if (deletedMap) {
+      delete deletedMap[String(c)];
+      delete deletedMap[String(c).toLowerCase()];
+    }
+  }
 }
 
 function mergeSingleTaskSubmissionsServer(existingTask: any, incomingTask: any): any {
@@ -1213,26 +1255,45 @@ function mergeSingleTaskSubmissionsServer(existingTask: any, incomingTask: any):
   const mergedSubsMap = new Map<string, any>();
 
   const targetTaskId = String(incomingTask?.id || existingTask?.id || '').trim();
+
+  // If incomingTask has active submissions that are newer than deletedMap (or deletedMap no longer has them), clear stale tombstones
+  for (const incSub of incSubs) {
+    if (!incSub || typeof incSub !== 'object') continue;
+    const subTime = String(incSub.submittedAt || '');
+    const incDeletedMap = incomingTask.deletedSubmissionsMap || {};
+    const delById = incSub.memberId ? (incDeletedMap[String(incSub.memberId).trim()] || incDeletedMap[String(incSub.memberId).trim().toLowerCase()]) : undefined;
+    const delByName = incSub.memberName ? (incDeletedMap[String(incSub.memberName).trim()] || incDeletedMap[String(incSub.memberName).trim().toLowerCase()]) : undefined;
+    const delByFile = incSub.fileName ? incDeletedMap[String(incSub.fileName).trim()] : undefined;
+    const activeDelTime = delByFile || delById || delByName;
+    if (!activeDelTime || (subTime && subTime > activeDelTime)) {
+      clearSubmissionTombstonesForSubServer(targetTaskId, incSub, deletedMap);
+    }
+  }
+
   const considerSub = (sub: any) => {
     if (!sub || typeof sub !== 'object') return;
     const key = normalizeSubKeyServer(sub);
     if (!key) return;
-    if (isSubmissionKeyDeletedServer(targetTaskId, sub.memberId, sub.memberName, sub.fileName, key)) {
+    const subTime = String(sub.submittedAt || '');
+    const delById = sub.memberId ? (deletedMap[String(sub.memberId).trim()] || deletedMap[String(sub.memberId).trim().toLowerCase()]) : undefined;
+    const delByName = sub.memberName ? (deletedMap[String(sub.memberName).trim()] || deletedMap[String(sub.memberName).trim().toLowerCase()]) : undefined;
+    const delByFile = sub.fileName ? (deletedMap[String(sub.fileName).trim()] || (sub.memberId ? deletedMap[`${sub.memberId}_${sub.fileName}`] : undefined)) : undefined;
+    const delTime = delByFile || (delById && delByName ? (delById > delByName ? delById : delByName) : (delById || delByName));
+    if (delTime && (!subTime || delTime >= subTime)) {
       return;
     }
-    const subTime = String(sub.submittedAt || '');
-    const delById = sub.memberId ? deletedMap[String(sub.memberId).trim().toLowerCase()] : undefined;
-    const delByName = sub.memberName ? deletedMap[String(sub.memberName).trim().toLowerCase()] : undefined;
-    const delTime = delById && delByName ? (delById > delByName ? delById : delByName) : (delById || delByName);
-    if (delTime && (!subTime || delTime >= subTime)) {
+    if (delTime && subTime && subTime > delTime) {
+      clearSubmissionTombstonesForSubServer(targetTaskId, sub, deletedMap);
+    }
+    if (isSubmissionKeyDeletedServer(targetTaskId, sub.id, sub.fileName, key) && (!subTime || delTime)) {
       return;
     }
 
     const prev = mergedSubsMap.get(key);
     if (!prev) {
       const cloned = { ...sub };
-      if (!cloned.fileUrl && (cloned.downloadUrl || cloned.driveFileId)) {
-        cloned.fileUrl = cloned.downloadUrl || `https://lh3.googleusercontent.com/d/${cloned.driveFileId}`;
+      if (!cloned.fileUrl && (cloned.downloadUrl || cloned.driveFileId || cloned.localHostedUrl)) {
+        cloned.fileUrl = cloned.downloadUrl || cloned.localHostedUrl || `https://lh3.googleusercontent.com/d/${cloned.driveFileId}`;
       }
       mergedSubsMap.set(key, cloned);
     } else {
@@ -1252,9 +1313,12 @@ function mergeSingleTaskSubmissionsServer(existingTask: any, incomingTask: any):
       } else if (!newer.fileUrl && (subUrl || prevUrl)) {
         newer.fileUrl = subUrl || prevUrl;
       }
-      if (!newer.fileUrl && (newer.downloadUrl || newer.driveFileId)) {
-        newer.fileUrl = newer.downloadUrl || `https://lh3.googleusercontent.com/d/${newer.driveFileId}`;
+      if (!newer.fileUrl && (newer.downloadUrl || newer.driveFileId || newer.localHostedUrl)) {
+        newer.fileUrl = newer.downloadUrl || newer.localHostedUrl || `https://lh3.googleusercontent.com/d/${newer.driveFileId}`;
       }
+      newer.localHostedUrl = sub.localHostedUrl || prev.localHostedUrl;
+      newer.driveFileId = sub.driveFileId || prev.driveFileId;
+      newer.downloadUrl = sub.downloadUrl || prev.downloadUrl;
       mergedSubsMap.set(key, newer);
     }
   };
@@ -1269,13 +1333,20 @@ function mergeSingleTaskSubmissionsServer(existingTask: any, incomingTask: any):
   let finalSubFileName = incomingTask.submittedFileName || existingTask.submittedFileName;
 
   if (
-    (finalSubBy && isSubmissionKeyDeletedServer(targetTaskId, finalSubBy, finalSubByName, finalSubFileName)) ||
-    (finalSubFileName && isSubmissionKeyDeletedServer(targetTaskId, finalSubFileName))
+    mergedSubmissions.length === 0 &&
+    ((finalSubBy && isSubmissionKeyDeletedServer(targetTaskId, finalSubBy, finalSubByName, finalSubFileName)) ||
+      (finalSubFileName && isSubmissionKeyDeletedServer(targetTaskId, finalSubFileName)))
   ) {
     finalSubUrl = undefined;
     finalSubBy = undefined;
     finalSubByName = undefined;
     finalSubFileName = undefined;
+  } else if (mergedSubmissions.length > 0 && !finalSubUrl) {
+    const latestSub = mergedSubmissions[mergedSubmissions.length - 1];
+    finalSubUrl = latestSub.fileUrl || latestSub.localHostedUrl || latestSub.downloadUrl;
+    finalSubBy = finalSubBy || latestSub.memberId;
+    finalSubByName = finalSubByName || latestSub.memberName;
+    finalSubFileName = finalSubFileName || latestSub.fileName;
   }
 
   const result: any = {
@@ -1289,6 +1360,8 @@ function mergeSingleTaskSubmissionsServer(existingTask: any, incomingTask: any):
   };
   if (Object.keys(deletedMap).length > 0) {
     result.deletedSubmissionsMap = deletedMap;
+  } else {
+    delete result.deletedSubmissionsMap;
   }
   return result;
 }
@@ -2286,17 +2359,56 @@ async function startServer() {
         }
       }
 
-      // Source 2: Local or Firestore-backed hosted file by explicit /api/files/:fileId or deterministic taskId+memberId
+      // Source 2: Local or Firestore-backed hosted file by explicit /api/files/:fileId, submission.id, localHostedUrl, or deterministic taskId+memberId
       const candidateFileIds: string[] = [];
+      const addCandidateFid = (val?: string) => {
+        if (!val) return;
+        const clean = val.startsWith('/api/files/')
+          ? val.replace('/api/files/', '').split('?')[0].trim()
+          : val.trim();
+        if (clean && !candidateFileIds.includes(clean)) {
+          candidateFileIds.push(clean);
+        }
+      };
+
       if (rawUrl.startsWith('/api/files/')) {
-        const fid = rawUrl.replace('/api/files/', '').split('?')[0].trim();
-        if (fid) candidateFileIds.push(fid);
+        addCandidateFid(rawUrl);
       }
       if (taskIdHint && memberIdHint) {
         const tClean = taskIdHint.replace(/[^a-zA-Z0-9_-]/g, '_');
         const mClean = memberIdHint.replace(/[^a-zA-Z0-9_-]/g, '_');
-        const detId = `sub_${tClean}_${mClean}`;
-        if (!candidateFileIds.includes(detId)) candidateFileIds.push(detId);
+        addCandidateFid(`sub_${tClean}_${mClean}`);
+        if (rawName && rawName !== 'download') {
+          const fClean = rawName.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40);
+          addCandidateFid(`sub_${tClean}_${mClean}_${fClean}`);
+        }
+      }
+
+      // Also inspect state.store task submissions for matching s.id or s.localHostedUrl
+      const cleanNameLowerForCand = rawName.toLowerCase();
+      for (const [k, v] of Object.entries(state.store)) {
+        if (isTaskKeyName(k) && Array.isArray(v)) {
+          for (const t of v) {
+            if (!t || !Array.isArray(t.submissions)) continue;
+            if (taskIdHint && String(t.id) !== taskIdHint) continue;
+            for (const s of t.submissions) {
+              if (!s) continue;
+              const matchName =
+                cleanNameLowerForCand !== 'download' &&
+                String(s.fileName || '').trim().toLowerCase() === cleanNameLowerForCand;
+              const matchMem =
+                memberIdHint &&
+                (String(s.memberId) === memberIdHint || String(s.memberName) === memberIdHint);
+              if (matchName || (matchMem && cleanNameLowerForCand === 'download')) {
+                if (s.id) addCandidateFid(String(s.id));
+                if (s.localHostedUrl) addCandidateFid(String(s.localHostedUrl));
+                if (typeof s.fileUrl === 'string' && s.fileUrl.startsWith('/api/files/')) {
+                  addCandidateFid(s.fileUrl);
+                }
+              }
+            }
+          }
+        }
       }
 
       for (const fid of candidateFileIds) {
@@ -2426,6 +2538,56 @@ async function startServer() {
     }
   });
 
+  // Endpoint to open file in Google Drive (or inline preview if Drive sync is still in progress)
+  app.get('/api/files/open', async (req, res) => {
+    try {
+      const rawUrl = String(req.query.url || '').trim();
+      const rawName = String(req.query.name || 'file').trim();
+      const taskIdHint = String(req.query.taskId || '').trim();
+      const memberIdHint = String(req.query.memberId || '').trim();
+      const schoolIdHint = String(req.query.schoolId || '').trim();
+      const explicitId = String(req.query.id || '').trim();
+
+      let driveId = explicitId || extractDriveIdServer(rawUrl);
+
+      if (!driveId && rawUrl.startsWith('/api/files/')) {
+        const fid = rawUrl.replace('/api/files/', '').split('?')[0].trim();
+        const rec = await loadServerHostedFileAsync(fid);
+        if (rec?.driveFileId) driveId = rec.driveFileId;
+      }
+
+      if (!driveId) {
+        const matched = findServerHostedFileByMatch({
+          fileName: rawName,
+          taskId: taskIdHint,
+          memberId: memberIdHint
+        });
+        if (matched?.driveFileId) driveId = matched.driveFileId;
+      }
+
+      if (!driveId) {
+        driveId = await resolveDriveIdFromStoreOrSheet(rawUrl, rawName, schoolIdHint, taskIdHint, memberIdHint);
+      }
+
+      if (driveId) {
+        res.redirect(`https://drive.google.com/file/d/${encodeURIComponent(driveId)}/view?usp=sharing`);
+        return;
+      }
+
+      // Fallback: open inline directly via /api/files/download
+      const qs = new URLSearchParams();
+      if (rawUrl) qs.set('url', rawUrl);
+      if (rawName) qs.set('name', rawName);
+      if (taskIdHint) qs.set('taskId', taskIdHint);
+      if (memberIdHint) qs.set('memberId', memberIdHint);
+      if (schoolIdHint) qs.set('schoolId', schoolIdHint);
+      qs.set('inline', '1');
+      res.redirect(`/api/files/download?${qs.toString()}`);
+    } catch {
+      res.status(404).json({ status: 'error', message: 'File not found' });
+    }
+  });
+
   app.get('/api/files/:fileId', async (req, res) => {
     const fileId = String(req.params.fileId || '').trim();
     const record = await loadServerHostedFileAsync(fileId);
@@ -2507,6 +2669,59 @@ async function startServer() {
               });
               // Invalidate cached DriveFiles rows for this school so next lookup sees the new file
               schoolSheetsRowCache.delete(`${targetSchoolId}::DriveFiles`);
+
+              // Also update any matching task submission in state.store if the task was already saved before Drive finished
+              if (taskId) {
+                const nowTs = Date.now();
+                const deltaUpdates: Record<string, any> = {};
+                const deltaTimestamps: Record<string, number> = {};
+                for (const tk of Object.keys(state.store)) {
+                  if (!isTaskKeyName(tk) || !Array.isArray(state.store[tk])) continue;
+                  let changedInKey = false;
+                  const nextTasks = state.store[tk].map((t: any) => {
+                    if (!t || String(t.id) !== String(taskId)) return t;
+                    const nextSubs = (Array.isArray(t.submissions) ? t.submissions : []).map((s: any) => {
+                      if (!s) return s;
+                      const matchSub =
+                        s.id === safeId ||
+                        s.localHostedUrl === hostedUrl ||
+                        s.fileUrl === hostedUrl ||
+                        (memberId && s.memberId === memberId && fileName && s.fileName === fileName);
+                      if (matchSub) {
+                        changedInKey = true;
+                        return {
+                          ...s,
+                          fileUrl: fUrl || s.fileUrl,
+                          driveFileId: fid || s.driveFileId,
+                          downloadUrl: dUrl || s.downloadUrl,
+                          localHostedUrl: hostedUrl || s.localHostedUrl
+                        };
+                      }
+                      return s;
+                    });
+                    if (!changedInKey) return t;
+                    return {
+                      ...t,
+                      submissions: nextSubs,
+                      submittedFileUrl: t.submittedBy === memberId ? (fUrl || t.submittedFileUrl) : t.submittedFileUrl
+                    };
+                  });
+                  if (changedInKey) {
+                    state.store[tk] = nextTasks;
+                    state.timestamps[tk] = Math.max(nowTs, (Number(state.timestamps[tk]) || 0) + 1);
+                    deltaUpdates[tk] = nextTasks;
+                    deltaTimestamps[tk] = state.timestamps[tk];
+                  }
+                }
+                const changedKeys = Object.keys(deltaUpdates);
+                if (changedKeys.length > 0) {
+                  state.rev += 1;
+                  scheduleDiskSave();
+                  broadcastDelta('server-upload-drive-sync', deltaUpdates, deltaTimestamps);
+                  scheduleCloudKvPush(changedKeys);
+                }
+              }
+
               return { fid, fUrl, dUrl };
             }
             return null;
@@ -2691,10 +2906,51 @@ async function startServer() {
           delete state.store[key];
         } else {
           if (isTaskKeyName(key)) {
+            if (Array.isArray(value)) {
+              for (const incTask of value) {
+                if (incTask && incTask.id && Array.isArray(incTask.submissions)) {
+                  const incDelMap = incTask.deletedSubmissionsMap || {};
+                  for (const s of incTask.submissions) {
+                    if (!s) continue;
+                    const subTime = String(s.submittedAt || '');
+                    const delById = s.memberId ? (incDelMap[String(s.memberId).trim()] || incDelMap[String(s.memberId).trim().toLowerCase()]) : undefined;
+                    const delByFile = s.fileName ? incDelMap[String(s.fileName).trim()] : undefined;
+                    const activeDel = delByFile || delById;
+                    if (!activeDel || (subTime && subTime > activeDel)) {
+                      clearSubmissionTombstonesForSubServer(String(incTask.id), s);
+                    }
+                  }
+                }
+              }
+            }
             if (key in state.store) {
               finalValue = mergeTaskListsServer(state.store[key], value);
             }
             finalValue = ensureTaskFilesHostedAndUploaded(key, finalValue);
+
+            // Propagate merged tasks with matching IDs to any other ams_tasks* keys in state.store so Admin & Member always stay in sync
+            if (Array.isArray(finalValue)) {
+              const byId = new Map<string, any>();
+              for (const t of finalValue) {
+                if (t && t.id) byId.set(String(t.id), t);
+              }
+              for (const otherKey of Object.keys(state.store)) {
+                if (otherKey === key || !isTaskKeyName(otherKey) || !Array.isArray(state.store[otherKey])) continue;
+                let otherChanged = false;
+                const nextOtherList = state.store[otherKey].map((ot: any) => {
+                  if (!ot || !ot.id || !byId.has(String(ot.id))) return ot;
+                  otherChanged = true;
+                  return mergeSingleTaskSubmissionsServer(ot, byId.get(String(ot.id)));
+                });
+                if (otherChanged) {
+                  state.store[otherKey] = nextOtherList;
+                  state.timestamps[otherKey] = effectiveTs;
+                  recentServerMutationTs.set(otherKey, effectiveTs);
+                  appliedUpdates[otherKey] = nextOtherList;
+                  appliedTimestamps[otherKey] = effectiveTs;
+                }
+              }
+            }
           } else if (isDocumentKeyName(key)) {
             if (key in state.store) {
               finalValue = mergeDocumentListsServer(state.store[key], value);

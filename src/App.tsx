@@ -601,7 +601,11 @@ export default function App() {
             t.submittedBy === user.id;
           return !hasSubmitted;
         }
-        const submittedCount = (t.submissions || []).length;
+        const submittedCount = new Set(
+          (t.submissions || [])
+            .filter(s => s && (s.memberId || s.memberName))
+            .map(s => String(s.memberId || s.memberName).trim().toLowerCase())
+        ).size;
         return submittedCount < totalSchoolMembersCount;
       }).length;
 

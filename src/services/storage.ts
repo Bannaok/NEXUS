@@ -478,6 +478,40 @@ function isSubmissionKeyDeleted(taskId: string, ...identifiers: (string | undefi
 }
 
 
+function clearSubmissionTombstonesForSubClient(
+  taskId: string,
+  s: TaskSubmission,
+  deletedMap?: Record<string, string>
+): boolean {
+  if (!taskId || !s) return false;
+  let removedAny = false;
+  const mem = String(s.memberId || s.memberName || '').trim().toLowerCase();
+  const file = String(s.fileName || '').trim().toLowerCase();
+  const subKey = mem && file ? `${mem}__${file}` : String((s as any).id || mem || file).trim().toLowerCase();
+  const candidates = [
+    (s as any).id,
+    s.memberId,
+    s.memberName,
+    s.fileName,
+    subKey,
+    s.memberId && s.fileName ? `${s.memberId}_${s.fileName}` : undefined,
+    s.memberName && s.fileName ? `${s.memberName}_${s.fileName}` : undefined
+  ];
+  for (const c of candidates) {
+    if (!c) continue;
+    const tk = makeSubTombstoneKey(taskId, String(c));
+    if (tk && deletedSubmissionKeysSet.has(tk)) {
+      deletedSubmissionKeysSet.delete(tk);
+      removedAny = true;
+    }
+    if (deletedMap) {
+      delete deletedMap[String(c)];
+      delete deletedMap[String(c).toLowerCase()];
+    }
+  }
+  return removedAny;
+}
+
 function mergeSingleTaskSubmissionsClient(existingTask: TaskItem, incomingTask: TaskItem, preferIncomingMeta = true): TaskItem {
   if (!existingTask) return incomingTask;
   if (!incomingTask) return existingTask;
@@ -497,18 +531,32 @@ function mergeSingleTaskSubmissionsClient(existingTask: TaskItem, incomingTask: 
   const subMap = new Map<string, TaskSubmission>();
   const getKey = (s: TaskSubmission) => {
     if (!s) return '';
-    if ((s as any).id) return String((s as any).id).trim();
-    const mem = String(s.memberId || s.memberName || '').trim();
-    const file = String(s.fileName || '').trim();
-    return `${mem}__${file}`;
+    const mem = String(s.memberId || s.memberName || '').trim().toLowerCase();
+    const file = String(s.fileName || '').trim().toLowerCase();
+    if (mem && file) return `${mem}__${file}`;
+    if ((s as any).id) return String((s as any).id).trim().toLowerCase();
+    return mem || file;
   };
+
+  // Clear stale tombstones for active incoming submissions that are newer than deletedMap (or not in incomingTask.deletedSubmissionsMap)
+  const incDelMap = incomingTask.deletedSubmissionsMap || {};
+  for (const incSub of incomingSubs) {
+    if (!incSub) continue;
+    const subTime = incSub.submittedAt ? new Date(incSub.submittedAt).getTime() : 0;
+    const delAt =
+      (incSub.fileName && incSub.memberId ? incDelMap[`${incSub.memberId}_${incSub.fileName}`] : '') ||
+      (incSub.fileName ? incDelMap[incSub.fileName] : '') ||
+      (incSub.memberId ? (incDelMap[incSub.memberId] || incDelMap[incSub.memberId.toLowerCase()]) : '') ||
+      (incSub.memberName ? (incDelMap[incSub.memberName] || incDelMap[incSub.memberName.toLowerCase()]) : '');
+    const delTime = delAt ? new Date(delAt).getTime() : 0;
+    if (!delAt || (subTime > 0 && subTime > delTime)) {
+      clearSubmissionTombstonesForSubClient(base.id, incSub, deletedMap);
+    }
+  }
 
   const isSubDeleted = (taskId: string, s: TaskSubmission): boolean => {
     if (!s) return true;
     const k = getKey(s);
-    if ((s as any).id && isSubmissionKeyDeleted(taskId, (s as any).id)) return true;
-    if (s.fileName && isSubmissionKeyDeleted(taskId, s.fileName)) return true;
-    if (isSubmissionKeyDeleted(taskId, s.memberId, s.memberName, s.fileName, k)) return true;
     const delAt =
       ((s as any).id ? deletedMap[(s as any).id] : '') ||
       (s.fileName && s.memberId ? deletedMap[`${s.memberId}_${s.fileName}`] : '') ||
@@ -521,7 +569,12 @@ function mergeSingleTaskSubmissionsClient(existingTask: TaskItem, incomingTask: 
       const delTime = new Date(delAt).getTime();
       const subTime = new Date(s.submittedAt).getTime();
       if (isNaN(subTime) || delTime >= subTime) return true;
+      // Submission is newer than deletion timestamp -> clear stale tombstones
+      clearSubmissionTombstonesForSubClient(taskId, s, deletedMap);
+      return false;
     }
+    if ((s as any).id && isSubmissionKeyDeleted(taskId, (s as any).id)) return true;
+    if (s.fileName && isSubmissionKeyDeleted(taskId, s.fileName, k) && !s.submittedAt) return true;
     return false;
   };
 
@@ -556,6 +609,10 @@ function mergeSingleTaskSubmissionsClient(existingTask: TaskItem, incomingTask: 
         mergedSub.fileUrl = nextUrl;
       } else if (prevUrl.startsWith('http')) {
         mergedSub.fileUrl = prevUrl;
+      } else if (nextUrl.startsWith('/api/files/')) {
+        mergedSub.fileUrl = nextUrl;
+      } else if (prevUrl.startsWith('/api/files/')) {
+        mergedSub.fileUrl = prevUrl;
       } else if (nextUrl.startsWith('data:')) {
         mergedSub.fileUrl = nextUrl;
       } else if (prevUrl.startsWith('data:')) {
@@ -587,6 +644,7 @@ function mergeSingleTaskSubmissionsClient(existingTask: TaskItem, incomingTask: 
   let finalSubmittedFileName = base.submittedFileName || existingTask.submittedFileName || incomingTask.submittedFileName;
 
   if (
+    mergedSubmissions.length === 0 &&
     finalSubmittedBy &&
     (isSubmissionKeyDeleted(base.id, finalSubmittedBy, finalSubmittedByName, finalSubmittedFileName) ||
      deletedMap[finalSubmittedBy] ||
@@ -597,6 +655,12 @@ function mergeSingleTaskSubmissionsClient(existingTask: TaskItem, incomingTask: 
     finalSubmittedBy = undefined;
     finalSubmittedByName = undefined;
     finalSubmittedFileName = undefined;
+  } else if (mergedSubmissions.length > 0 && !finalSubmittedFileUrl) {
+    const latest = mergedSubmissions[mergedSubmissions.length - 1];
+    finalSubmittedFileUrl = latest.fileUrl || (latest as any).localHostedUrl || (latest as any).downloadUrl;
+    finalSubmittedBy = finalSubmittedBy || latest.memberId;
+    finalSubmittedByName = finalSubmittedByName || latest.memberName;
+    finalSubmittedFileName = finalSubmittedFileName || latest.fileName;
   }
 
   return {
@@ -1124,21 +1188,19 @@ function pushToRemoteServer(resolvedKey: string, value: any, timestamp: number) 
 
   const isTask = isTaskStorageKey(resolvedKey);
   const hasBase64TaskSub = isTask && hasPendingBase64SubmissionInTasks(value);
+  const cloudSafeValue = hasBase64TaskSub ? sanitizeValueForSync(value) : value;
 
   // 1. Primary Cloud Database: Firebase Firestore (syncs across all devices, browsers, emails, ais-dev & ais-pre in real time)
-  if (!hasBase64TaskSub) {
-    saveKeyToFirestore(resolvedKey, value, timestamp, CLIENT_ID).catch(() => {});
-  }
+  saveKeyToFirestore(resolvedKey, cloudSafeValue, timestamp, CLIENT_ID).catch(() => {});
 
   // 2. Automatic Per-School Google Sheets Sync for every piece of data filled by Member or Admin
-  // Skip while base64 submission is being converted to a Google Drive URL so we never push a stripped empty fileUrl ""
   if (!hasBase64TaskSub) {
     scheduleTenantKeySyncToSchoolSheet(resolvedKey, value, timestamp);
   }
 
-  // 3. For task keys, also push directly to RealtimeCloudKV once Drive URLs are resolved
-  if (isTask && !hasBase64TaskSub) {
-    pushToGoogleCloudKVDirect(resolvedKey, value, timestamp);
+  // 3. For task keys, also push directly to RealtimeCloudKV immediately
+  if (isTask) {
+    pushToGoogleCloudKVDirect(resolvedKey, cloudSafeValue, timestamp);
   }
 
   const payload = {
@@ -3212,15 +3274,55 @@ export const StorageService = {
   getTasks(): TaskItem[] {
     const list = getLocal<TaskItem[]>(KEYS.TASKS, INITIAL_TASKS);
     if (!Array.isArray(list)) return [];
-    const filteredTasks = deletedTaskIdsSet.size === 0 ? list : list.filter(t => t && t.id && !deletedTaskIdsSet.has(t.id));
+
+    // Also merge any submissions from other ams_tasks* keys in memoryCache for matching task IDs
+    const mergedById = new Map<string, TaskItem>();
+    for (const t of list) {
+      if (t && t.id && !deletedTaskIdsSet.has(t.id)) {
+        mergedById.set(t.id, t);
+      }
+    }
+    const activeTaskKey = resolveTenantKey(KEYS.TASKS);
+    for (const [k, cachedVal] of memoryCache.entries()) {
+      if (k === activeTaskKey || !isTaskStorageKey(k) || !Array.isArray(cachedVal)) continue;
+      for (const otherTask of cachedVal) {
+        if (!otherTask || !otherTask.id || deletedTaskIdsSet.has(otherTask.id)) continue;
+        const existing = mergedById.get(otherTask.id);
+        if (existing) {
+          mergedById.set(otherTask.id, mergeSingleTaskSubmissionsClient(existing, otherTask, false));
+        }
+      }
+    }
+
+    const filteredTasks = Array.from(mergedById.values());
     if (deletedSubmissionKeysSet.size === 0) return filteredTasks;
 
     return filteredTasks.map(t => {
       if (!t || !Array.isArray(t.submissions)) return t;
+      const delMap = t.deletedSubmissionsMap || {};
       let changed = false;
       const cleanSubs = t.submissions.filter(s => {
         if (!s) return false;
-        if (isSubmissionKeyDeleted(t.id, s.memberId, s.memberName, s.fileName)) {
+        const delAt =
+          ((s as any).id ? delMap[(s as any).id] : '') ||
+          (s.fileName && s.memberId ? delMap[`${s.memberId}_${s.fileName}`] : '') ||
+          (s.fileName ? delMap[s.fileName] : '') ||
+          (s.memberId ? (delMap[s.memberId] || delMap[s.memberId.toLowerCase()]) : '') ||
+          (s.memberName ? (delMap[s.memberName] || delMap[s.memberName.toLowerCase()]) : '');
+        if (delAt) {
+          const delTime = new Date(delAt).getTime();
+          const subTime = s.submittedAt ? new Date(s.submittedAt).getTime() : 0;
+          if (!subTime || delTime >= subTime) {
+            changed = true;
+            return false;
+          }
+          return true;
+        }
+        if ((s as any).id && isSubmissionKeyDeleted(t.id, (s as any).id)) {
+          changed = true;
+          return false;
+        }
+        if (isSubmissionKeyDeleted(t.id, s.memberId, s.memberName, s.fileName) && !s.submittedAt) {
           changed = true;
           return false;
         }
@@ -3231,8 +3333,9 @@ export const StorageService = {
       let cleanSubmittedByName = t.submittedByName;
       let cleanSubmittedFileName = t.submittedFileName;
       if (
-        (cleanSubmittedBy && isSubmissionKeyDeleted(t.id, cleanSubmittedBy, cleanSubmittedByName, cleanSubmittedFileName)) ||
-        (cleanSubmittedFileName && isSubmissionKeyDeleted(t.id, cleanSubmittedFileName))
+        cleanSubs.length === 0 &&
+        ((cleanSubmittedBy && isSubmissionKeyDeleted(t.id, cleanSubmittedBy, cleanSubmittedByName, cleanSubmittedFileName)) ||
+          (cleanSubmittedFileName && isSubmissionKeyDeleted(t.id, cleanSubmittedFileName)))
       ) {
         cleanSubmittedFileUrl = undefined;
         cleanSubmittedBy = undefined;
@@ -3261,6 +3364,35 @@ export const StorageService = {
         // ignore
       }
     }
+
+    // Clear any stale submission tombstones for active submissions in the task being saved
+    let tombstonesChanged = false;
+    if (Array.isArray(task.submissions)) {
+      const delMap = task.deletedSubmissionsMap || {};
+      for (const s of task.submissions) {
+        if (!s) continue;
+        const delAt =
+          (s.fileName && s.memberId ? delMap[`${s.memberId}_${s.fileName}`] : '') ||
+          (s.fileName ? delMap[s.fileName] : '') ||
+          (s.memberId ? (delMap[s.memberId] || delMap[s.memberId.toLowerCase()]) : '');
+        const delTime = delAt ? new Date(delAt).getTime() : 0;
+        const subTime = s.submittedAt ? new Date(s.submittedAt).getTime() : Date.now();
+        if (!delAt || subTime > delTime) {
+          if (clearSubmissionTombstonesForSubClient(task.id, s)) {
+            tombstonesChanged = true;
+          }
+        }
+      }
+    }
+    if (tombstonesChanged) {
+      const nextTombstones = Array.from(deletedSubmissionKeysSet).slice(-4000);
+      try {
+        localStorage.setItem('ams_deleted_submission_keys', JSON.stringify(nextTombstones));
+      } catch {
+        // ignore
+      }
+    }
+
     const list = this.getTasks();
     const idx = list.findIndex(t => t.id === task.id);
     let mergedTask = task;
@@ -3273,6 +3405,19 @@ export const StorageService = {
       updated = [mergedTask, ...list];
     }
     setLocal(KEYS.TASKS, updated);
+
+    // Also keep any other ams_tasks* key in memoryCache synchronized if it holds this task.id
+    const activeTaskKey = resolveTenantKey(KEYS.TASKS);
+    for (const [k, cachedVal] of memoryCache.entries()) {
+      if (k === activeTaskKey || !isTaskStorageKey(k) || !Array.isArray(cachedVal)) continue;
+      const otherIdx = cachedVal.findIndex((ot: any) => ot && ot.id === mergedTask.id);
+      if (otherIdx >= 0) {
+        const nextOther = [...cachedVal];
+        nextOther[otherIdx] = mergeSingleTaskSubmissionsClient(nextOther[otherIdx], mergedTask, true);
+        memoryCache.set(k, nextOther);
+        pushToRemoteServer(k, nextOther, Date.now());
+      }
+    }
 
     // Background upload any base64 member submission files to Google Drive so Drive links sync across all devices & Firestore
     let hasDataUrlSub = false;
@@ -3292,7 +3437,9 @@ export const StorageService = {
                 if (tIndex >= 0) {
                   const target = latestTasks[tIndex];
                   const nextSubs = (target.submissions || []).map(s =>
-                    s.memberId === sub.memberId || (sub.fileName && s.fileName === sub.fileName)
+                    (sub.id && s.id === sub.id) ||
+                    ((s.memberId === sub.memberId || s.memberName === sub.memberName) &&
+                      (!sub.fileName || s.fileName === sub.fileName))
                       ? { ...s, fileUrl: driveUrl }
                       : s
                   );
