@@ -785,6 +785,275 @@ if (typeof window !== 'undefined') {
   }
 }
 
+const DEMO_ADMIN_IDS_CLIENT = new Set(['admin-school-01', 'admin-school-02', 'admin-01']);
+const DEMO_MEMBER_IDS_CLIENT = new Set(['mem-01', 'mem-02', 'mem-03', 'mem-04', 'mem-admin']);
+
+function isBooleanSuspended(val: any): boolean {
+  if (val === true) return true;
+  if (typeof val === 'string') {
+    const clean = val.trim().toLowerCase();
+    return clean === 'true';
+  }
+  return false;
+}
+
+function normalizeAdminAccountClient(raw: any): SchoolAdminAccount | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const id = String(raw.id ?? '').trim();
+  const username = String(raw.username ?? '')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim();
+  if (!id || !username) return null;
+  const password =
+    raw.password !== undefined && raw.password !== null && String(raw.password).trim() !== ''
+      ? String(raw.password)
+          .replace(/[\u200B-\u200D\uFEFF]/g, '')
+          .trim()
+      : '123456';
+  return {
+    ...raw,
+    id,
+    username,
+    password,
+    fullName: String(raw.fullName || raw.schoolName || username).trim(),
+    schoolName: String(raw.schoolName || raw.fullName || '').trim(),
+    schoolCode: raw.schoolCode !== undefined && raw.schoolCode !== null ? String(raw.schoolCode).trim() : '',
+    isSuspended: isBooleanSuspended(raw.isSuspended)
+  };
+}
+
+function normalizeMemberAccountClient(raw: any): MemberAccount | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const id = String(raw.id ?? '').trim();
+  const username = String(raw.username ?? '')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim();
+  if (!id || !username) return null;
+
+  // Detect shifted row from MASTER_SPREADSHEET_ID Members sheet where firstName === 'member'/'admin' or gradeLevel starts with 'admin-'
+  const isShiftedMasterRow =
+    (raw.firstName === 'member' || raw.firstName === 'admin') &&
+    (String(raw.gradeLevel || '').startsWith('admin-') || typeof raw.isSuspended === 'string');
+
+  if (isShiftedMasterRow) {
+    const prefix = String(raw.fullName ?? '').trim();
+    const fullName = String(raw.role ?? '').trim();
+    const firstName = String(raw.position ?? '').trim();
+    const lastName = String(raw.prefix ?? '').trim();
+    const role = (raw.firstName === 'admin' ? 'admin' : 'member') as 'admin' | 'member';
+    const gradeLevel = String(raw.lastName ?? '').trim();
+    const position = String(raw.learningGroup ?? 'ครูประจำชั้น').trim();
+    const learningGroup = String(raw.avatarUrl ?? '').trim();
+    const schoolId = String(raw.gradeLevel ?? '').trim();
+    const schoolName = String(raw.isSuspended ?? '').trim();
+    const isSuspended = isBooleanSuspended(raw.schoolId);
+    const avatarUrl = String(raw.schoolName ?? '').startsWith('http') ? String(raw.schoolName).trim() : '';
+    const password =
+      raw.password !== undefined && raw.password !== null
+        ? String(raw.password)
+            .replace(/[\u200B-\u200D\uFEFF]/g, '')
+            .trim()
+        : '';
+
+    return {
+      id,
+      username,
+      password,
+      prefix,
+      fullName: fullName || `${prefix}${firstName} ${lastName}`.trim() || username,
+      firstName,
+      lastName,
+      role: role as any,
+      gradeLevel: gradeLevel as any,
+      position,
+      learningGroup,
+      schoolId,
+      schoolName,
+      isSuspended,
+      avatarUrl
+    };
+  }
+
+  const password =
+    raw.password !== undefined && raw.password !== null
+      ? String(raw.password)
+          .replace(/[\u200B-\u200D\uFEFF]/g, '')
+          .trim()
+      : '';
+  const roleVal = String(raw.role || 'member').trim().toLowerCase();
+  const validRole: 'admin' | 'member' = roleVal === 'admin' ? 'admin' : 'member';
+
+  return {
+    ...raw,
+    id,
+    username,
+    password,
+    role: validRole,
+    fullName: String(raw.fullName || `${raw.prefix || ''}${raw.firstName || ''} ${raw.lastName || ''}`.trim() || username).trim(),
+    firstName: raw.firstName !== undefined && raw.firstName !== null ? String(raw.firstName).trim() : '',
+    lastName: raw.lastName !== undefined && raw.lastName !== null ? String(raw.lastName).trim() : '',
+    isSuspended: isBooleanSuspended(raw.isSuspended)
+  };
+}
+
+function mergeAdminListsClient(
+  localList: SchoolAdminAccount[],
+  incomingList: SchoolAdminAccount[],
+  preferIncoming = true
+): SchoolAdminAccount[] {
+  const cleanLocal = (Array.isArray(localList) ? localList : [])
+    .map(normalizeAdminAccountClient)
+    .filter((a): a is SchoolAdminAccount => Boolean(a));
+  const cleanIncoming = (Array.isArray(incomingList) ? incomingList : [])
+    .map(normalizeAdminAccountClient)
+    .filter((a): a is SchoolAdminAccount => Boolean(a));
+
+  if (cleanIncoming.length === 0) return cleanLocal;
+  if (cleanLocal.length === 0) return cleanIncoming;
+
+  // If one list only has initial demo accounts while the other has real school admin accounts, drop unconfirmed demo accounts
+  const incomingHasReal = cleanIncoming.some(a => !DEMO_ADMIN_IDS_CLIENT.has(a.id));
+  const incomingHasDemo = cleanIncoming.some(a => DEMO_ADMIN_IDS_CLIENT.has(a.id));
+  const localHasReal = cleanLocal.some(a => !DEMO_ADMIN_IDS_CLIENT.has(a.id));
+  const localHasDemo = cleanLocal.some(a => DEMO_ADMIN_IDS_CLIENT.has(a.id));
+
+  const filteredLocal =
+    incomingHasReal && !incomingHasDemo && !localHasReal
+      ? cleanLocal.filter(a => !DEMO_ADMIN_IDS_CLIENT.has(a.id))
+      : cleanLocal;
+  const filteredIncoming =
+    localHasReal && !localHasDemo && !incomingHasReal
+      ? cleanIncoming.filter(a => !DEMO_ADMIN_IDS_CLIENT.has(a.id))
+      : cleanIncoming;
+
+  const byKey = new Map<string, SchoolAdminAccount>();
+  const primary = preferIncoming ? filteredIncoming : filteredLocal;
+  const secondary = preferIncoming ? filteredLocal : filteredIncoming;
+
+  for (const item of secondary) {
+    byKey.set(item.id, item);
+  }
+  for (const item of primary) {
+    const existing =
+      byKey.get(item.id) ||
+      Array.from(byKey.values()).find(e => e.username.toLowerCase() === item.username.toLowerCase());
+    if (existing) {
+      const merged: SchoolAdminAccount = { ...existing, ...item };
+      if (
+        existing.googleSheetId &&
+        !existing.googleSheetId.startsWith('sheet_') &&
+        (!item.googleSheetId || item.googleSheetId.startsWith('sheet_'))
+      ) {
+        merged.googleSheetId = existing.googleSheetId;
+        merged.googleSheetUrl =
+          existing.googleSheetUrl || `https://docs.google.com/spreadsheets/d/${existing.googleSheetId}/edit`;
+      }
+      if (existing.driveFolderId && !item.driveFolderId) {
+        merged.driveFolderId = existing.driveFolderId;
+        merged.driveFolderUrl =
+          existing.driveFolderUrl || `https://drive.google.com/drive/folders/${existing.driveFolderId}`;
+      }
+      byKey.set(existing.id, merged);
+    } else {
+      byKey.set(item.id, item);
+    }
+  }
+  return Array.from(byKey.values());
+}
+
+function mergeMemberListsClient(
+  localList: MemberAccount[],
+  incomingList: MemberAccount[],
+  preferIncoming = true
+): MemberAccount[] {
+  const cleanLocal = (Array.isArray(localList) ? localList : [])
+    .map(normalizeMemberAccountClient)
+    .filter((m): m is MemberAccount => Boolean(m) && m!.username.toLowerCase() !== 'admin');
+  const cleanIncoming = (Array.isArray(incomingList) ? incomingList : [])
+    .map(normalizeMemberAccountClient)
+    .filter((m): m is MemberAccount => Boolean(m) && m!.username.toLowerCase() !== 'admin');
+
+  if (cleanIncoming.length === 0) return cleanLocal;
+  if (cleanLocal.length === 0) return cleanIncoming;
+
+  const incomingHasReal = cleanIncoming.some(m => !DEMO_MEMBER_IDS_CLIENT.has(m.id));
+  const incomingHasDemo = cleanIncoming.some(m => DEMO_MEMBER_IDS_CLIENT.has(m.id));
+  const localHasReal = cleanLocal.some(m => !DEMO_MEMBER_IDS_CLIENT.has(m.id));
+  const localHasDemo = cleanLocal.some(m => DEMO_MEMBER_IDS_CLIENT.has(m.id));
+
+  const filteredLocal =
+    incomingHasReal && !incomingHasDemo && !localHasReal
+      ? cleanLocal.filter(m => !DEMO_MEMBER_IDS_CLIENT.has(m.id))
+      : cleanLocal;
+  const filteredIncoming =
+    localHasReal && !localHasDemo && !incomingHasReal
+      ? cleanIncoming.filter(m => !DEMO_MEMBER_IDS_CLIENT.has(m.id))
+      : cleanIncoming;
+
+  const byKey = new Map<string, MemberAccount>();
+  const primary = preferIncoming ? filteredIncoming : filteredLocal;
+  const secondary = preferIncoming ? filteredLocal : filteredIncoming;
+
+  for (const item of secondary) {
+    byKey.set(item.id, item);
+  }
+  for (const item of primary) {
+    const existing =
+      byKey.get(item.id) ||
+      Array.from(byKey.values()).find(e => e.username.toLowerCase() === item.username.toLowerCase());
+    if (existing) {
+      const merged: MemberAccount = {
+        ...existing,
+        ...item,
+        avatarUrl: item.avatarUrl || existing.avatarUrl || ''
+      };
+      byKey.set(existing.id, merged);
+    } else {
+      byKey.set(item.id, item);
+    }
+  }
+  return Array.from(byKey.values());
+}
+
+function isUsernameMatchClient(storedUsername: any, inputUsername: string): boolean {
+  const s = String(storedUsername ?? '')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim()
+    .toLowerCase();
+  const i = String(inputUsername ?? '')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim()
+    .toLowerCase();
+  if (!s || !i) return false;
+  if (s === i) return true;
+  if (/^\d+$/.test(s) && /^\d+$/.test(i)) {
+    const sNoZero = s.replace(/^0+/, '');
+    const iNoZero = i.replace(/^0+/, '');
+    if (sNoZero && sNoZero === iNoZero) return true;
+  }
+  return false;
+}
+
+function isPasswordMatchClient(storedPassword: any, inputPassword: string): boolean {
+  const s = String(storedPassword ?? '')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim();
+  const i = String(inputPassword ?? '')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim();
+  if (!s || !i) return false;
+  if (s === i) return true;
+  // Mobile keyboard auto-capitalization resilience
+  if (s.toLowerCase() === i.toLowerCase()) return true;
+  // Google Sheets numeric coercion stripping leading zero (e.g. '012345' -> 12345)
+  if (/^\d+$/.test(s) && /^\d+$/.test(i)) {
+    const sNoZero = s.replace(/^0+/, '');
+    const iNoZero = i.replace(/^0+/, '');
+    if (sNoZero.length >= 2 && sNoZero === iNoZero) return true;
+  }
+  return false;
+}
+
 function isSubjectStorageKey(key: string): boolean {
   return key === KEYS.SUBJECTS || key.startsWith(`${KEYS.SUBJECTS}__`);
 }
@@ -1218,8 +1487,13 @@ function pushToRemoteServer(resolvedKey: string, value: any, timestamp: number) 
     scheduleTenantKeySyncToSchoolSheet(resolvedKey, value, timestamp);
   }
 
-  // 3. For task keys, also push directly to RealtimeCloudKV immediately
-  if (isTask) {
+  // 3. For task keys and account keys, also push directly to RealtimeCloudKV immediately
+  if (
+    isTask ||
+    resolvedKey === KEYS.ADMINS ||
+    resolvedKey === KEYS.MEMBERS ||
+    resolvedKey === KEYS.DEVELOPER_ACCOUNT
+  ) {
     pushToGoogleCloudKVDirect(resolvedKey, cloudSafeValue, timestamp);
   }
 
@@ -1290,7 +1564,8 @@ function pushToRemoteServer(resolvedKey: string, value: any, timestamp: number) 
 function applyIncomingUpdates(
   updates: Record<string, any>,
   timestamps: Record<string, number> = {},
-  fromStorageEvent = false
+  fromStorageEvent = false,
+  forceAcceptAccounts = false
 ): string[] {
   const changedKeys: string[] = [];
   const now = Date.now();
@@ -1491,8 +1766,34 @@ function applyIncomingUpdates(
           value = value.filter(s => !isSubjectDeletedClient(s));
         }
       }
+    } else if (resolvedKey === KEYS.ADMINS && Array.isArray(value)) {
+      const currentCachedAdmins = memoryCache.get(resolvedKey);
+      const preferInc = forceAcceptAccounts || fromStorageEvent || localTs === 0 || incomingTs >= localTs || now - lastLocalWrite > 12000;
+      if (Array.isArray(currentCachedAdmins)) {
+        value = mergeAdminListsClient(currentCachedAdmins, value, preferInc);
+      } else {
+        value = value.map(normalizeAdminAccountClient).filter(Boolean);
+      }
+    } else if (resolvedKey === KEYS.MEMBERS && Array.isArray(value)) {
+      const currentCachedMembers = memoryCache.get(resolvedKey);
+      const preferInc = forceAcceptAccounts || fromStorageEvent || localTs === 0 || incomingTs >= localTs || now - lastLocalWrite > 12000;
+      if (Array.isArray(currentCachedMembers)) {
+        value = mergeMemberListsClient(currentCachedMembers, value, preferInc);
+      } else {
+        value = value
+          .map(normalizeMemberAccountClient)
+          .filter((m): m is MemberAccount => Boolean(m) && m!.username.toLowerCase() !== 'admin');
+      }
+    } else if (resolvedKey === KEYS.DEVELOPER_ACCOUNT && value && typeof value === 'object') {
+      if (!forceAcceptAccounts && !fromStorageEvent && now - lastLocalWrite < 12000 && incomingTs <= localTs) {
+        continue;
+      }
+      value = {
+        username: String(value.username || 'airfan').trim(),
+        password: String(value.password || '456789').trim()
+      };
     } else {
-      // Strict monotonic protection for all Admin, Member, and Developer keys:
+      // Strict monotonic protection for other keys:
       // Never allow an older or untimestamped incoming update to overwrite a newer local state!
       if (!fromStorageEvent) {
         if (locallyModifiedKeys.has(resolvedKey) && incomingTs <= localTs) {
@@ -1757,7 +2058,7 @@ export const StorageService = {
   },
 
   // Pull directly from Global Cloud KV (Google Apps Script RealtimeCloudKV)
-  async pullFromGoogleCloudKV(): Promise<boolean> {
+  async pullFromGoogleCloudKV(forceAcceptAccounts = false): Promise<boolean> {
     if (typeof window === 'undefined') return false;
     try {
       const url = `${DEFAULT_GAS_WEBAPP_URL}?action=getSheet&spreadsheetId=${MASTER_SPREADSHEET_ID}&sheet=${CLOUD_KV_SHEET}&_t=${Date.now()}`;
@@ -1784,6 +2085,22 @@ export const StorageService = {
             rowTs >= prevTs
           );
           incomingTs[parsed.key] = Math.max(prevTs, rowTs);
+        } else if (parsed.key === KEYS.ADMINS && Array.isArray(parsed.value)) {
+          const prevTs = incomingTs[parsed.key] || 0;
+          incoming[parsed.key] = mergeAdminListsClient(
+            incoming[parsed.key],
+            parsed.value,
+            rowTs >= prevTs
+          );
+          incomingTs[parsed.key] = Math.max(prevTs, rowTs);
+        } else if (parsed.key === KEYS.MEMBERS && Array.isArray(parsed.value)) {
+          const prevTs = incomingTs[parsed.key] || 0;
+          incoming[parsed.key] = mergeMemberListsClient(
+            incoming[parsed.key],
+            parsed.value,
+            rowTs >= prevTs
+          );
+          incomingTs[parsed.key] = Math.max(prevTs, rowTs);
         } else if (rowTs >= (incomingTs[parsed.key] || 0)) {
           incoming[parsed.key] = parsed.value;
           incomingTs[parsed.key] = rowTs;
@@ -1791,13 +2108,144 @@ export const StorageService = {
       }
 
       if (Object.keys(incoming).length > 0) {
-        const changed = applyIncomingUpdates(incoming, incomingTs);
+        const changed = applyIncomingUpdates(incoming, incomingTs, false, forceAcceptAccounts);
         return changed.length > 0;
       }
     } catch {
       // ignore
     }
     return false;
+  },
+
+  // Authoritative multi-source account synchronization for Login (especially on newly installed mobile PWAs)
+  async syncAccountsForLogin(): Promise<boolean> {
+    if (typeof window === 'undefined') return false;
+    let updatedAny = false;
+    try {
+      const fetchJsonSafe = (url: string) =>
+        fetch(url, { method: 'GET', headers: { Accept: 'application/json' }, cache: 'no-store' })
+          .then(r => (r.ok ? r.json() : null))
+          .catch(() => null);
+
+      const [kvUpdated, serverState, d1Master, masterAdminsSheet, masterMembersSheet] = await Promise.all([
+        this.pullFromGoogleCloudKV(true).catch(() => false),
+        fetchJsonSafe(`/api/realtime/state?sinceRev=0&forceCloud=1&_t=${Date.now()}`),
+        D1Service.fetchAll().catch(() => ({ success: false, data: undefined })),
+        fetchJsonSafe(
+          `${DEFAULT_GAS_WEBAPP_URL}?action=getSheet&spreadsheetId=${MASTER_SPREADSHEET_ID}&sheet=Admins&_t=${Date.now()}`
+        ),
+        fetchJsonSafe(
+          `${DEFAULT_GAS_WEBAPP_URL}?action=getSheet&spreadsheetId=${MASTER_SPREADSHEET_ID}&sheet=Members&_t=${Date.now()}`
+        )
+      ]);
+
+      if (kvUpdated) updatedAny = true;
+
+      const incoming: Record<string, any> = {};
+      const incomingTs: Record<string, number> = {};
+      const now = Date.now();
+
+      if (serverState && serverState.status === 'success' && serverState.store) {
+        if (typeof serverState.rev === 'number') {
+          lastKnownRev = Math.max(lastKnownRev, serverState.rev);
+        }
+        for (const [k, v] of Object.entries(serverState.store)) {
+          if (!k || INTERNAL_SKIP_KEYS.has(k)) continue;
+          incoming[k] = v;
+          incomingTs[k] = Number(serverState.timestamps?.[k]) || now;
+        }
+      }
+
+      if (d1Master && d1Master.success && d1Master.data) {
+        if (d1Master.data.developer) {
+          incoming[KEYS.DEVELOPER_ACCOUNT] = incoming[KEYS.DEVELOPER_ACCOUNT] || d1Master.data.developer;
+          incomingTs[KEYS.DEVELOPER_ACCOUNT] = Math.max(incomingTs[KEYS.DEVELOPER_ACCOUNT] || 0, now);
+        }
+        if (Array.isArray(d1Master.data.admins) && d1Master.data.admins.length > 0) {
+          incoming[KEYS.ADMINS] = Array.isArray(incoming[KEYS.ADMINS])
+            ? mergeAdminListsClient(d1Master.data.admins, incoming[KEYS.ADMINS], true)
+            : d1Master.data.admins;
+          incomingTs[KEYS.ADMINS] = Math.max(incomingTs[KEYS.ADMINS] || 0, now);
+        }
+        if (Array.isArray(d1Master.data.members) && d1Master.data.members.length > 0) {
+          incoming[KEYS.MEMBERS] = Array.isArray(incoming[KEYS.MEMBERS])
+            ? mergeMemberListsClient(d1Master.data.members, incoming[KEYS.MEMBERS], true)
+            : d1Master.data.members;
+          incomingTs[KEYS.MEMBERS] = Math.max(incomingTs[KEYS.MEMBERS] || 0, now);
+        }
+      }
+
+      if (masterAdminsSheet && masterAdminsSheet.status === 'success' && Array.isArray(masterAdminsSheet.data)) {
+        const sheetAdmins = masterAdminsSheet.data
+          .map(normalizeAdminAccountClient)
+          .filter((a: SchoolAdminAccount | null): a is SchoolAdminAccount => Boolean(a));
+        if (sheetAdmins.length > 0) {
+          incoming[KEYS.ADMINS] = Array.isArray(incoming[KEYS.ADMINS])
+            ? mergeAdminListsClient(sheetAdmins, incoming[KEYS.ADMINS], true)
+            : sheetAdmins;
+          incomingTs[KEYS.ADMINS] = Math.max(incomingTs[KEYS.ADMINS] || 0, now);
+        }
+      }
+
+      if (masterMembersSheet && masterMembersSheet.status === 'success' && Array.isArray(masterMembersSheet.data)) {
+        const sheetMembers = masterMembersSheet.data
+          .map(normalizeMemberAccountClient)
+          .filter(
+            (m: MemberAccount | null): m is MemberAccount =>
+              Boolean(m) && m!.username.toLowerCase() !== 'admin'
+          );
+        if (sheetMembers.length > 0) {
+          incoming[KEYS.MEMBERS] = Array.isArray(incoming[KEYS.MEMBERS])
+            ? mergeMemberListsClient(sheetMembers, incoming[KEYS.MEMBERS], true)
+            : sheetMembers;
+          incomingTs[KEYS.MEMBERS] = Math.max(incomingTs[KEYS.MEMBERS] || 0, now);
+        }
+      }
+
+      // Also check per-school Members sheets for any school admin with a googleSheetId
+      const currentAdminsList: SchoolAdminAccount[] = Array.isArray(incoming[KEYS.ADMINS])
+        ? incoming[KEYS.ADMINS]
+        : this.getAdmins();
+      const schoolSheetIds = Array.from(
+        new Set(
+          currentAdminsList
+            .map(a => a?.googleSheetId)
+            .filter((id): id is string => Boolean(id && id.length >= 15 && !id.startsWith('sheet_')))
+        )
+      );
+
+      if (schoolSheetIds.length > 0) {
+        const schoolMemberResults = await Promise.all(
+          schoolSheetIds.map(sid =>
+            fetchJsonSafe(`${DEFAULT_GAS_WEBAPP_URL}?action=getSheet&spreadsheetId=${sid}&sheet=Members&_t=${Date.now()}`)
+          )
+        );
+        for (const smRes of schoolMemberResults) {
+          if (smRes && smRes.status === 'success' && Array.isArray(smRes.data)) {
+            const sMembers = smRes.data
+              .map(normalizeMemberAccountClient)
+              .filter(
+                (m: MemberAccount | null): m is MemberAccount =>
+                  Boolean(m) && m!.username.toLowerCase() !== 'admin'
+              );
+            if (sMembers.length > 0) {
+              incoming[KEYS.MEMBERS] = Array.isArray(incoming[KEYS.MEMBERS])
+                ? mergeMemberListsClient(sMembers, incoming[KEYS.MEMBERS], true)
+                : sMembers;
+              incomingTs[KEYS.MEMBERS] = Math.max(incomingTs[KEYS.MEMBERS] || 0, now);
+            }
+          }
+        }
+      }
+
+      if (Object.keys(incoming).length > 0) {
+        const changed = applyIncomingUpdates(incoming, incomingTs, false, true);
+        if (changed.length > 0) updatedAny = true;
+      }
+    } catch {
+      // ignore
+    }
+    return updatedAny;
   },
 
   // Pull latest state from Firebase Firestore, Real-Time Server, Cloudflare D1, and Global Cloud KV
@@ -1823,9 +2271,10 @@ export const StorageService = {
 
     // Periodically also pull from Google Cloud KV directly (every 4.5s or on forceFull) so cross-container (ais-dev <-> ais-pre) sync works immediately
     const nowMs = Date.now();
+    let directCloudKvPromise: Promise<boolean> = Promise.resolve(false);
     if (forceFull || nowMs - lastDirectCloudPullTime > 4500) {
       lastDirectCloudPullTime = nowMs;
-      this.pullFromGoogleCloudKV().catch(() => {});
+      directCloudKvPromise = this.pullFromGoogleCloudKV().catch(() => false);
     }
 
     // 1. Pull from Firebase Firestore on initial boot or forced full sync (live changes arrive via onSnapshot)
@@ -1853,7 +2302,13 @@ export const StorageService = {
       })
       .catch(() => null);
 
-    const [firestoreData, serverData] = await Promise.all([firestorePromise, serverPromise]);
+    const [firestoreData, serverData] = await Promise.all([
+      firestorePromise,
+      serverPromise,
+      forceFull
+        ? Promise.race([directCloudKvPromise, new Promise<boolean>(r => setTimeout(() => r(false), 3500))])
+        : Promise.resolve(false)
+    ]);
 
     if (serverData && serverData.status === 'success' && serverData.store && typeof serverData.store === 'object') {
       if (typeof serverData.rev === 'number') {
@@ -2350,13 +2805,19 @@ export const StorageService = {
   },
 
   authenticate(username: string, password: string): { success: boolean; user?: UserSession; message: string } {
-    const trimmedUser = username.trim();
+    const trimmedUser = String(username ?? '')
+      .replace(/[\u200B-\u200D\uFEFF]/g, '')
+      .trim();
+    const trimmedPass = String(password ?? '')
+      .replace(/[\u200B-\u200D\uFEFF]/g, '')
+      .trim();
     const devCreds = this.getDeveloperCredentials();
 
     // 1. Level 1: Developer Account (Default ID: airfan | Password: 456789 or updated password)
     if (
-      trimmedUser.toLowerCase() === devCreds.username.toLowerCase() &&
-      password === devCreds.password
+      isUsernameMatchClient(devCreds.username || 'airfan', trimmedUser) &&
+      (isPasswordMatchClient(devCreds.password || '456789', trimmedPass) ||
+        (!devCreds.password && isPasswordMatchClient('456789', trimmedPass)))
     ) {
       const devUser: UserSession = {
         id: 'dev-01',
@@ -2376,12 +2837,15 @@ export const StorageService = {
 
     // 2. Level 2: School Admins List
     const admins = this.getAdmins();
-    const foundAdmin = admins.find(a =>
-      a.username.toLowerCase() === trimmedUser.toLowerCase() &&
-      (a.password === password || (!a.password && password === '123456'))
+    const foundAdmin = admins.find(
+      a =>
+        a &&
+        isUsernameMatchClient(a.username, trimmedUser) &&
+        (isPasswordMatchClient(a.password, trimmedPass) ||
+          ((!a.password || String(a.password).trim() === '') && isPasswordMatchClient('123456', trimmedPass)))
     );
     if (foundAdmin) {
-      if (foundAdmin.isSuspended) {
+      if (isBooleanSuspended(foundAdmin.isSuspended)) {
         return {
           success: false,
           message: `บัญชีผู้ดูแลระบบของ "${foundAdmin.schoolName}" ถูกระงับการใช้งานชั่วคราวโดยผู้พัฒนาระบบ (Developer) ไม่สามารถเข้าใช้งานได้ในขณะนี้`
@@ -2390,7 +2854,7 @@ export const StorageService = {
       const normAdminSchoolId = normalizeSchoolId(foundAdmin.id, foundAdmin.schoolName, admins);
       const adminUser: UserSession = {
         id: foundAdmin.id,
-        username: foundAdmin.username,
+        username: String(foundAdmin.username).trim(),
         fullName: foundAdmin.fullName,
         role: 'admin',
         position: 'ผู้ดูแลระบบโรงเรียน',
@@ -2407,12 +2871,12 @@ export const StorageService = {
     }
 
     // Default legacy Admin fallback
-    if (trimmedUser.toLowerCase() === 'admin' && password === '123456') {
+    if (isUsernameMatchClient('admin', trimmedUser) && isPasswordMatchClient('123456', trimmedPass)) {
       const defaultAdm = admins.find(a => a.id === 'admin-school-01');
-      if (defaultAdm?.isSuspended) {
+      if (isBooleanSuspended(defaultAdm?.isSuspended)) {
         return {
           success: false,
-          message: `บัญชีผู้ดูแลระบบของ "${defaultAdm.schoolName}" ถูกระงับการใช้งานชั่วคราวโดยผู้พัฒนาระบบ (Developer) ไม่สามารถเข้าใช้งานได้ในขณะนี้`
+          message: `บัญชีผู้ดูแลระบบของ "${defaultAdm?.schoolName}" ถูกระงับการใช้งานชั่วคราวโดยผู้พัฒนาระบบ (Developer) ไม่สามารถเข้าใช้งานได้ในขณะนี้`
         };
       }
       const adminUser: UserSession = {
@@ -2431,27 +2895,34 @@ export const StorageService = {
 
     // 3. Level 3: Members (Teachers / Staff)
     const members = this.getMembers();
-    const found = members.find(m =>
-      m.username.toLowerCase() === trimmedUser.toLowerCase() &&
-      (m.password === password || !m.password)
+    const found = members.find(
+      m =>
+        m &&
+        isUsernameMatchClient(m.username, trimmedUser) &&
+        (isPasswordMatchClient(m.password, trimmedPass) || !m.password || String(m.password).trim() === '')
     );
     if (found) {
       const memberSchoolId = normalizeSchoolId(found.schoolId, found.schoolName, admins);
       const matchedAdmin = admins.find(
-        a => a.id === memberSchoolId || (found.schoolName && cleanSchoolNameForMatch(a.schoolName) === cleanSchoolNameForMatch(found.schoolName))
+        a =>
+          a.id === memberSchoolId ||
+          (found.schoolName && cleanSchoolNameForMatch(a.schoolName) === cleanSchoolNameForMatch(found.schoolName))
       );
-      if (matchedAdmin?.isSuspended) {
+      if (isBooleanSuspended(matchedAdmin?.isSuspended)) {
         return {
           success: false,
-          message: `โรงเรียนต้นสังกัด (${matchedAdmin.schoolName}) ถูกระงับการใช้งานชั่วคราว สมาชิกในสังกัดไม่มีสิทธิ์เข้าใช้งานในขณะนี้`
+          message: `โรงเรียนต้นสังกัด (${matchedAdmin?.schoolName}) ถูกระงับการใช้งานชั่วคราว สมาชิกในสังกัดไม่มีสิทธิ์เข้าใช้งานในขณะนี้`
         };
       }
-      if (found.isSuspended) {
-        return { success: false, message: 'บัญชีสมาชิกนี้ถูกระงับการใช้งานชั่วคราว กรุณาติดต่อผู้ดูแลระบบ (Admin) หรือ Developer' };
+      if (isBooleanSuspended(found.isSuspended)) {
+        return {
+          success: false,
+          message: 'บัญชีสมาชิกนี้ถูกระงับการใช้งานชั่วคราว กรุณาติดต่อผู้ดูแลระบบ (Admin) หรือ Developer'
+        };
       }
       const memberUser: UserSession = {
         id: found.id,
-        username: found.username,
+        username: String(found.username).trim(),
         prefix: found.prefix,
         fullName: found.fullName,
         firstName: found.firstName,

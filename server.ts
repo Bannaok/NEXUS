@@ -2971,11 +2971,18 @@ async function startServer() {
 
   // 2. Fast Authoritative State Fetch (supports ?sinceRev= and ?forceCloud=1)
   let lastStateEndpointCloudPull = 0;
-  app.get('/api/realtime/state', (req, res) => {
+  app.get('/api/realtime/state', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
     const forceCloud = req.query.forceCloud === '1';
     const nowMs = Date.now();
-    if (forceCloud || nowMs - lastStateEndpointCloudPull > 3500) {
+    const missingAccounts = !Array.isArray(state.store['ams_school_admins']) || state.store['ams_school_admins'].length === 0 || !Array.isArray(state.store['ams_members']) || state.store['ams_members'].length === 0;
+    if (forceCloud || missingAccounts) {
+      lastStateEndpointCloudPull = nowMs;
+      await Promise.race([
+        pullFromCloudKV(false).catch(() => {}),
+        new Promise((resolve) => setTimeout(resolve, 4500))
+      ]);
+    } else if (nowMs - lastStateEndpointCloudPull > 3500) {
       lastStateEndpointCloudPull = nowMs;
       pullFromCloudKV(false).catch(() => {});
     }
@@ -3525,7 +3532,13 @@ async function startServer() {
     }
 
     if (action === 'getAll') {
-      await syncWithFirestoreServer(false);
+      await Promise.all([
+        syncWithFirestoreServer(false).catch(() => {}),
+        Promise.race([
+          pullFromCloudKV(false).catch(() => {}),
+          new Promise((resolve) => setTimeout(resolve, 4500))
+        ])
+      ]);
       const developer = state.store['ams_developer_account'] || { username: 'airfan', password: '456789' };
       const admins = state.store['ams_school_admins'] || [];
       const members = state.store['ams_members'] || [];

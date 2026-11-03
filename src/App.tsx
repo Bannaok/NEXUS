@@ -211,14 +211,26 @@ export default function App() {
 
   // Auth Handlers
   const handleLogin = async (username: string, password: string) => {
-    // Always pull latest cloud state from Firebase Firestore before authenticating on any device/browser/email
+    // Always pull latest cloud state before authenticating on any device/browser/PWA
     await Promise.race([
       StorageService.pullRemoteState(true),
-      new Promise(resolve => setTimeout(resolve, 2500))
+      new Promise(resolve => setTimeout(resolve, 2200))
     ]);
     reloadAllStates();
 
-    const res = StorageService.authenticate(username, password);
+    let res = StorageService.authenticate(username, password);
+
+    // If authentication fails (e.g., freshly installed mobile PWA with empty/default localStorage or pending Cloud KV fetch),
+    // await full authoritative account synchronization from Cloud KV, Server, and Master/School Google Sheets and retry
+    if (!res.success) {
+      await Promise.race([
+        StorageService.syncAccountsForLogin(),
+        new Promise(resolve => setTimeout(resolve, 7500))
+      ]);
+      reloadAllStates();
+      res = StorageService.authenticate(username, password);
+    }
+
     if (res.success && res.user) {
       setUser(res.user);
       setIsInspectingSchool(false);

@@ -23,11 +23,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username.trim()) {
+    const cleanUser = username.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+    const cleanPass = password.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
+    if (!cleanUser) {
       setErrorMessage('กรุณากรอก ID (ชื่อผู้ใช้งาน)');
       return;
     }
-    if (!password) {
+    if (!cleanPass) {
       setErrorMessage('กรุณากรอก Password (รหัสผ่าน)');
       return;
     }
@@ -36,7 +38,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
     setErrorMessage('');
 
     try {
-      const res = await Promise.resolve(onLogin(username.trim(), password));
+      const res = await Promise.resolve(onLogin(cleanUser, cleanPass));
       setIsLoading(false);
       if (!res.success) {
         setErrorMessage(res.message || 'ID หรือ Password ไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง');
@@ -108,6 +110,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                 }}
                 autoFocus
                 autoComplete="off"
+                autoCapitalize="none"
+                autoCorrect="off"
                 data-lpignore="true"
                 data-form-type="other"
                 spellCheck={false}
@@ -139,6 +143,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                   if (errorMessage) setErrorMessage('');
                 }}
                 autoComplete="new-password"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
                 data-lpignore="true"
                 data-form-type="other"
                 placeholder="••••••"
