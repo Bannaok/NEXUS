@@ -218,9 +218,15 @@ export const Module4Assignments: React.FC<Module4Props> = ({
   // Keep Admin and Member assignments & submissions continuously synchronized in real time
   useEffect(() => {
     StorageService.pullRemoteState(false).catch(() => {});
-    StorageService.recoverMissingTaskFileUrls().catch(() => {});
+    StorageService.pullFromGoogleCloudKV().catch(() => {});
+    StorageService.recoverMissingTaskFileUrls(true).catch(() => {});
+    let tick = 0;
     const timer = setInterval(() => {
+      tick += 1;
       StorageService.pullRemoteState(false).catch(() => {});
+      if (tick % 4 === 0) {
+        StorageService.recoverMissingTaskFileUrls(true).catch(() => {});
+      }
     }, 1000);
     return () => clearInterval(timer);
   }, []);
@@ -233,14 +239,15 @@ export const Module4Assignments: React.FC<Module4Props> = ({
         t.submissions.some(s => s && s.fileName && (!s.fileUrl || s.fileUrl.startsWith('/api/files/')))
     );
     if (hasMissingUrl) {
-      StorageService.recoverMissingTaskFileUrls().catch(() => {});
+      StorageService.recoverMissingTaskFileUrls(false).catch(() => {});
     }
   }, [tasks]);
 
   useEffect(() => {
     if (statusTaskModal) {
       StorageService.pullRemoteState(false).catch(() => {});
-      StorageService.recoverMissingTaskFileUrls().catch(() => {});
+      StorageService.pullFromGoogleCloudKV().catch(() => {});
+      StorageService.recoverMissingTaskFileUrls(true).catch(() => {});
     }
   }, [statusTaskModal?.id]);
 
@@ -518,8 +525,7 @@ export const Module4Assignments: React.FC<Module4Props> = ({
     const subsCount = getTaskSubmittedCount(task);
     const isFull =
       (totalSchoolMembers > 0 && subsCount >= totalSchoolMembers) ||
-      Boolean(task.isManualCompleted) ||
-      Boolean(task.isCompleted);
+      Boolean(task.isManualCompleted);
 
     if (user.role === 'member') {
       const mySub = getMySubmission(task);
@@ -545,11 +551,10 @@ export const Module4Assignments: React.FC<Module4Props> = ({
   };
 
   const handleToggleManualComplete = (task: TaskItem) => {
-    const subCount = (task.submissions || []).length;
+    const subCount = getTaskSubmittedCount(task);
     const isCurrentlyDone =
       (totalSchoolMembers > 0 && subCount >= totalSchoolMembers) ||
-      Boolean(task.isManualCompleted) ||
-      Boolean(task.isCompleted);
+      Boolean(task.isManualCompleted);
     const nextManualCompleted = !isCurrentlyDone;
     const updated: TaskItem = {
       ...task,
@@ -844,7 +849,8 @@ export const Module4Assignments: React.FC<Module4Props> = ({
       downloadUrl?: string;
     }>
   ): TaskItem | null => {
-    const task = tasks.find(t => t.id === taskId);
+    const latestFromStorage = StorageService.getTasks().find(t => t.id === taskId);
+    const task = latestFromStorage || tasks.find(t => t.id === taskId);
     if (!task || filesToSave.length === 0) return null;
 
     const nowIso = new Date().toISOString();
@@ -887,6 +893,24 @@ export const Module4Assignments: React.FC<Module4Props> = ({
       delete nextDeletedMap[user.fullName];
       delete nextDeletedMap[user.fullName.toLowerCase()];
     }
+    const matchedMem = members.find(
+      m =>
+        m.id === user.id ||
+        (user.username && m.username?.toLowerCase() === user.username.toLowerCase()) ||
+        (user.fullName && m.fullName === user.fullName)
+    );
+    if (matchedMem) {
+      delete nextDeletedMap[matchedMem.id];
+      delete nextDeletedMap[matchedMem.id.toLowerCase()];
+      if (matchedMem.username) {
+        delete nextDeletedMap[matchedMem.username];
+        delete nextDeletedMap[matchedMem.username.toLowerCase()];
+      }
+      if (matchedMem.fullName) {
+        delete nextDeletedMap[matchedMem.fullName];
+        delete nextDeletedMap[matchedMem.fullName.toLowerCase()];
+      }
+    }
     filesToSave.forEach(f => {
       delete nextDeletedMap[f.name];
       delete nextDeletedMap[f.name.toLowerCase()];
@@ -899,14 +923,14 @@ export const Module4Assignments: React.FC<Module4Props> = ({
         uniqueMembersSet.add(String(s.memberId || s.memberName).trim().toLowerCase());
       }
     });
-    const isAllMembersDone = uniqueMembersSet.size >= totalSchoolMembers;
+    const isAllMembersDone = totalSchoolMembers > 0 && uniqueMembersSet.size >= totalSchoolMembers;
 
     const allMyFilesCount = existingMySubs.length + newSubs.length;
     const updatedTask: TaskItem = {
       ...task,
       submissions: updatedSubs,
       deletedSubmissionsMap: Object.keys(nextDeletedMap).length > 0 ? nextDeletedMap : undefined,
-      isCompleted: isAllMembersDone,
+      isCompleted: isAllMembersDone || Boolean(task.isManualCompleted),
       submittedFileUrl: newSubs[0]?.fileUrl || task.submittedFileUrl,
       driveFileId: newSubs[0]?.driveFileId || task.driveFileId,
       submittedFileName:
@@ -924,7 +948,7 @@ export const Module4Assignments: React.FC<Module4Props> = ({
   };
 
   const handleFinalSubmitTask = async (taskId: string) => {
-    const task = tasks.find(t => t.id === taskId);
+    const task = StorageService.getTasks().find(t => t.id === taskId) || tasks.find(t => t.id === taskId);
     if (!task) return;
 
     const existingMySubs = findMemberSubmissions(task, user as any);
@@ -1288,8 +1312,7 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                   const submittedCount = getTaskSubmittedCount(task);
                   const isFullySubmitted =
                     (totalSchoolMembers > 0 && submittedCount >= totalSchoolMembers) ||
-                    Boolean(task.isManualCompleted) ||
-                    Boolean(task.isCompleted);
+                    Boolean(task.isManualCompleted);
                   const mySubmissions = getMySubmissions(task);
                   const mySubmission = mySubmissions[0];
                   const hasMemberSubmitted = mySubmissions.length > 0 || isFullySubmitted;
@@ -1345,7 +1368,7 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                                 : (isUrgent ? 'ด่วนที่สุด' : isHigh ? 'ด่วน' : 'ปกติ')}
                             </span>
 
-                            {user.role === 'admin' && !isGreenCompleted && submittedCount > 0 && (
+                            {user.role === 'admin' && submittedCount > 0 && (
                               <span
                                 onClick={(e) => {
                                   e.stopPropagation();

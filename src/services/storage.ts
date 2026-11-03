@@ -90,7 +90,12 @@ const GLOBAL_KEYS = new Set<string>([
   KEYS.MEMBERS,
   KEYS.ACADEMIC_YEARS,
   KEYS.DEVELOPER_ACCOUNT,
-  'ams_deleted_subject_ids'
+  'ams_deleted_subject_ids',
+  'ams_deleted_task_ids',
+  'ams_deleted_submission_keys',
+  'ams_deleted_doc_ids',
+  'ams_deleted_leave_ids',
+  'ams_deleted_duty_log_ids'
 ]);
 
 // Keys that must be strictly isolated per School (Multi-Tenant Data Isolation)
@@ -488,14 +493,28 @@ function clearSubmissionTombstonesForSubClient(
   const mem = String(s.memberId || s.memberName || '').trim().toLowerCase();
   const file = String(s.fileName || '').trim().toLowerCase();
   const subKey = mem && file ? `${mem}__${file}` : String((s as any).id || mem || file).trim().toLowerCase();
+  const cachedMembers: MemberAccount[] = Array.isArray(memoryCache.get(KEYS.MEMBERS))
+    ? memoryCache.get(KEYS.MEMBERS)
+    : [];
+  const matchedMember = cachedMembers.find(
+    m =>
+      m &&
+      ((s.memberId && (m.id === s.memberId || String(m.username || '').toLowerCase() === String(s.memberId).toLowerCase())) ||
+        (s.memberName && String(m.fullName || '').trim() === String(s.memberName).trim()))
+  );
   const candidates = [
     (s as any).id,
     s.memberId,
     s.memberName,
+    matchedMember?.id,
+    matchedMember?.username,
+    matchedMember?.fullName,
     s.fileName,
     subKey,
     s.memberId && s.fileName ? `${s.memberId}_${s.fileName}` : undefined,
-    s.memberName && s.fileName ? `${s.memberName}_${s.fileName}` : undefined
+    s.memberName && s.fileName ? `${s.memberName}_${s.fileName}` : undefined,
+    matchedMember?.id && s.fileName ? `${matchedMember.id}_${s.fileName}` : undefined,
+    matchedMember?.username && s.fileName ? `${matchedMember.username}_${s.fileName}` : undefined
   ];
   for (const c of candidates) {
     if (!c) continue;
@@ -666,6 +685,7 @@ function mergeSingleTaskSubmissionsClient(existingTask: TaskItem, incomingTask: 
   return {
     ...base,
     submissions: mergedSubmissions,
+    isCompleted: Boolean(base.isManualCompleted ?? incomingTask.isManualCompleted ?? existingTask.isManualCompleted),
     deletedSubmissionsMap: Object.keys(deletedMap).length > 0 ? deletedMap : undefined,
     attachmentUrl: base.attachmentUrl || existingTask.attachmentUrl || incomingTask.attachmentUrl,
     submittedFileUrl: finalSubmittedFileUrl,
@@ -1752,8 +1772,22 @@ export const StorageService = {
       for (const rawRow of json.data) {
         const parsed = parseCloudKvRowClient(rawRow);
         if (!parsed) continue;
-        incoming[parsed.key] = parsed.value;
-        incomingTs[parsed.key] = parsed.updatedAt || 0;
+        const rowTs = parsed.updatedAt || 0;
+        if (!(parsed.key in incoming)) {
+          incoming[parsed.key] = parsed.value;
+          incomingTs[parsed.key] = rowTs;
+        } else if (isTaskStorageKey(parsed.key)) {
+          const prevTs = incomingTs[parsed.key] || 0;
+          incoming[parsed.key] = mergeTaskListsClient(
+            incoming[parsed.key],
+            parsed.value,
+            rowTs >= prevTs
+          );
+          incomingTs[parsed.key] = Math.max(prevTs, rowTs);
+        } else if (rowTs >= (incomingTs[parsed.key] || 0)) {
+          incoming[parsed.key] = parsed.value;
+          incomingTs[parsed.key] = rowTs;
+        }
       }
 
       if (Object.keys(incoming).length > 0) {
@@ -1786,6 +1820,13 @@ export const StorageService = {
         }
       }
     };
+
+    // Periodically also pull from Google Cloud KV directly (every 4.5s or on forceFull) so cross-container (ais-dev <-> ais-pre) sync works immediately
+    const nowMs = Date.now();
+    if (forceFull || nowMs - lastDirectCloudPullTime > 4500) {
+      lastDirectCloudPullTime = nowMs;
+      this.pullFromGoogleCloudKV().catch(() => {});
+    }
 
     // 1. Pull from Firebase Firestore on initial boot or forced full sync (live changes arrive via onSnapshot)
     const firestorePromise = forceFull
@@ -3479,7 +3520,7 @@ export const StorageService = {
     return updated;
   },
 
-  async recoverMissingTaskFileUrls(): Promise<boolean> {
+  async recoverMissingTaskFileUrls(forceSheetSync = false): Promise<boolean> {
     if (typeof window === 'undefined') return false;
     const currentTasks = this.getTasks();
     const needsRecovery = currentTasks.some(
@@ -3493,7 +3534,7 @@ export const StorageService = {
             (!s.fileUrl || s.fileUrl.startsWith('/api/files/') || !extractDriveFileIdClient(s.fileUrl))
         )
     );
-    if (!needsRecovery) return false;
+    if (!needsRecovery && !forceSheetSync) return false;
 
     const getExtLower = (name: string) => {
       const idx = name.lastIndexOf('.');
@@ -3538,14 +3579,88 @@ export const StorageService = {
         }
       };
 
-      const [subRows, driveRows] = await Promise.all([
+      const [subRows, driveRows, tasksRows] = await Promise.all([
         fetchSheetRows('TaskSubmissions'),
-        fetchSheetRows('DriveFiles')
+        fetchSheetRows('DriveFiles'),
+        fetchSheetRows('Tasks')
       ]);
-      if (subRows.length === 0 && driveRows.length === 0) return false;
+      if (subRows.length === 0 && driveRows.length === 0 && tasksRows.length === 0) return false;
 
       let updatedAny = false;
-      const latestTasks = this.getTasks();
+      let latestTasks = this.getTasks();
+
+      // Reconcile submissions from the School's Tasks sheet first
+      if (tasksRows.length > 0) {
+        const parsedSheetTasks: TaskItem[] = [];
+        for (const r of tasksRows) {
+          if (!r || !r.id || deletedTaskIdsSet.has(String(r.id))) continue;
+          let subs = r.submissions;
+          if (typeof subs === 'string' && subs.trim().startsWith('[')) {
+            try {
+              subs = JSON.parse(subs);
+            } catch {
+              subs = [];
+            }
+          }
+          parsedSheetTasks.push({
+            ...r,
+            id: String(r.id),
+            title: String(r.title ?? ''),
+            submissions: Array.isArray(subs) ? subs : []
+          });
+        }
+        if (parsedSheetTasks.length > 0) {
+          const mergedFromSheet = mergeTaskListsClient(latestTasks, parsedSheetTasks, false);
+          if (JSON.stringify(mergedFromSheet) !== JSON.stringify(latestTasks)) {
+            latestTasks = mergedFromSheet;
+            updatedAny = true;
+          }
+        }
+      }
+
+      // Also merge any rows from TaskSubmissions sheet that aren't in latestTasks yet
+      if (subRows.length > 0) {
+        const subsByTask = new Map<string, TaskSubmission[]>();
+        for (const sr of subRows) {
+          if (!sr || !sr.taskId || !sr.fileName) continue;
+          const tId = String(sr.taskId).trim();
+          if (deletedTaskIdsSet.has(tId)) continue;
+          if (isSubmissionKeyDeleted(tId, sr.memberId, sr.memberName, sr.fileName)) continue;
+          const fid =
+            String(sr.driveFileId || '').trim() ||
+            extractDriveFileIdClient(String(sr.fileUrl || sr.downloadUrl || ''));
+          const viewUrl = fid
+            ? `https://drive.google.com/file/d/${fid}/view?usp=sharing`
+            : String(sr.fileUrl || '');
+          const sObj: TaskSubmission = {
+            id: String(sr.id || `sub_${tId}_${sr.memberId || 'mem'}_${sr.fileName}`),
+            memberId: String(sr.memberId || ''),
+            memberName: String(sr.memberName || ''),
+            fileName: String(sr.fileName || ''),
+            fileSize: String(sr.fileSize || '0.2 MB'),
+            fileUrl: viewUrl,
+            driveFileId: fid || undefined,
+            submittedAt: String(sr.submittedAt || new Date().toISOString())
+          };
+          if (!subsByTask.has(tId)) subsByTask.set(tId, []);
+          subsByTask.get(tId)!.push(sObj);
+        }
+        if (subsByTask.size > 0) {
+          latestTasks = latestTasks.map(t => {
+            if (!t || !t.id || !subsByTask.has(t.id)) return t;
+            const merged = mergeSingleTaskSubmissionsClient(
+              t,
+              { ...t, submissions: subsByTask.get(t.id) },
+              false
+            );
+            if (JSON.stringify(merged) !== JSON.stringify(t)) {
+              updatedAny = true;
+            }
+            return merged;
+          });
+        }
+      }
+
       const nextTasks = latestTasks.map(t => {
         if (!t || !Array.isArray(t.submissions)) return t;
         let taskUpdated = false;

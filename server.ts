@@ -1220,14 +1220,26 @@ function normalizeSubKeyServer(sub: any): string {
 function clearSubmissionTombstonesForSubServer(taskId: string, sub: any, deletedMap?: Record<string, string>): void {
   if (!taskId || !sub) return;
   const subKey = normalizeSubKeyServer(sub);
+  const membersList: any[] = Array.isArray(state.store['ams_members']) ? state.store['ams_members'] : [];
+  const matchedMember = membersList.find(
+    m =>
+      m &&
+      ((sub.memberId && (m.id === sub.memberId || String(m.username || '').toLowerCase() === String(sub.memberId).toLowerCase())) ||
+        (sub.memberName && String(m.fullName || '').trim() === String(sub.memberName).trim()))
+  );
   const candidates = [
     sub.id,
     sub.memberId,
     sub.memberName,
+    matchedMember?.id,
+    matchedMember?.username,
+    matchedMember?.fullName,
     sub.fileName,
     subKey,
     sub.memberId && sub.fileName ? `${sub.memberId}_${sub.fileName}` : undefined,
-    sub.memberName && sub.fileName ? `${sub.memberName}_${sub.fileName}` : undefined
+    sub.memberName && sub.fileName ? `${sub.memberName}_${sub.fileName}` : undefined,
+    matchedMember?.id && sub.fileName ? `${matchedMember.id}_${sub.fileName}` : undefined,
+    matchedMember?.username && sub.fileName ? `${matchedMember.username}_${sub.fileName}` : undefined
   ];
   for (const c of candidates) {
     if (!c) continue;
@@ -1353,6 +1365,7 @@ function mergeSingleTaskSubmissionsServer(existingTask: any, incomingTask: any):
     ...existingTask,
     ...incomingTask,
     submissions: mergedSubmissions,
+    isCompleted: Boolean(incomingTask.isManualCompleted ?? existingTask.isManualCompleted),
     submittedFileUrl: finalSubUrl,
     submittedBy: finalSubBy,
     submittedByName: finalSubByName,
@@ -1636,9 +1649,30 @@ async function pullFromCloudKV(seedMissingToCloud = false): Promise<number> {
     const keysToPushBack: string[] = [];
 
     const nowMs = Date.now();
+    // Deduplicate rows by key first so older duplicate rows in RealtimeCloudKV never shadow newer rows
+    const dedupedRows = new Map<string, { key: string; value: any; updatedAt: number }>();
     for (const rawRow of json.data) {
       const parsed = parseCloudKvRow(rawRow);
       if (!parsed) continue;
+      const existing = dedupedRows.get(parsed.key);
+      if (!existing) {
+        dedupedRows.set(parsed.key, parsed);
+      } else if (isTaskKeyName(parsed.key)) {
+        const mergedVal =
+          parsed.updatedAt >= existing.updatedAt
+            ? mergeTaskListsServer(existing.value, parsed.value)
+            : mergeTaskListsServer(parsed.value, existing.value);
+        dedupedRows.set(parsed.key, {
+          key: parsed.key,
+          value: mergedVal,
+          updatedAt: Math.max(existing.updatedAt, parsed.updatedAt)
+        });
+      } else if (parsed.updatedAt >= existing.updatedAt) {
+        dedupedRows.set(parsed.key, parsed);
+      }
+    }
+
+    for (const parsed of dedupedRows.values()) {
       const { key, value, updatedAt } = parsed;
 
       if (key === 'ams_deleted_doc_ids' && Array.isArray(value)) {
@@ -2032,14 +2066,19 @@ function isFilenameMatchStrict(candidateName: string, targetName: string): boole
   return t.length >= 5 && c.includes(t);
 }
 
-async function healMissingTaskSubmissionUrlsServer(): Promise<void> {
+const lastSchoolTaskReconcileMap = new Map<string, number>();
+
+async function healMissingTaskSubmissionUrlsServer(forceReconcile = false): Promise<void> {
   if (isHealingTaskUrls) return;
   isHealingTaskUrls = true;
   try {
     const changedKeys: string[] = [];
+    const nowMs = Date.now();
+
     for (const [key, val] of Object.entries(state.store)) {
       if (!isTaskKeyName(key) || !Array.isArray(val)) continue;
-      const needsHeal = val.some(
+      const schoolId = key.includes('__') ? key.split('__').slice(1).join('__') : 'admin-school-01';
+      const needsUrlHeal = val.some(
         (t: any) =>
           t &&
           Array.isArray(t.submissions) &&
@@ -2051,17 +2090,96 @@ async function healMissingTaskSubmissionUrlsServer(): Promise<void> {
               !s.driveFileId
           )
       );
-      if (!needsHeal) continue;
+      const lastReconciled = lastSchoolTaskReconcileMap.get(key) || 0;
+      const shouldReconcileSheet = forceReconcile || needsUrlHeal || nowMs - lastReconciled > 8000;
+      if (!shouldReconcileSheet) continue;
+      lastSchoolTaskReconcileMap.set(key, nowMs);
 
-      const schoolId = key.includes('__') ? key.split('__').slice(1).join('__') : 'admin-school-01';
-      const [driveRows, subRows] = await Promise.all([
+      const [driveRows, subRows, sheetTaskRows] = await Promise.all([
         fetchSchoolDriveFilesRows(schoolId),
-        fetchSchoolSheetRowsCached(schoolId, 'TaskSubmissions')
+        fetchSchoolSheetRowsCached(schoolId, 'TaskSubmissions'),
+        fetchSchoolSheetRowsCached(schoolId, 'Tasks')
       ]);
-      if ((!driveRows || driveRows.length === 0) && (!subRows || subRows.length === 0)) continue;
+      if (
+        (!driveRows || driveRows.length === 0) &&
+        (!subRows || subRows.length === 0) &&
+        (!sheetTaskRows || sheetTaskRows.length === 0)
+      ) {
+        continue;
+      }
 
+      // 0. Reconcile any submissions present in the School's Tasks or TaskSubmissions sheets into current tasks
+      let workingTasks = val;
       let keyChanged = false;
-      const nextTasks = val.map((t: any) => {
+
+      if (Array.isArray(sheetTaskRows) && sheetTaskRows.length > 0) {
+        const parsedSheetTasks: any[] = [];
+        for (const stRow of sheetTaskRows) {
+          if (!stRow || !stRow.id || deletedTaskIdsServer.has(String(stRow.id))) continue;
+          let subs = stRow.submissions;
+          if (typeof subs === 'string' && subs.trim().startsWith('[')) {
+            try {
+              subs = JSON.parse(subs);
+            } catch {
+              subs = [];
+            }
+          }
+          parsedSheetTasks.push({
+            ...stRow,
+            id: String(stRow.id),
+            title: String(stRow.title ?? ''),
+            submissions: Array.isArray(subs) ? subs : []
+          });
+        }
+        if (parsedSheetTasks.length > 0) {
+          const mergedFromTasksSheet = mergeTaskListsServer(workingTasks, parsedSheetTasks);
+          if (JSON.stringify(mergedFromTasksSheet) !== JSON.stringify(workingTasks)) {
+            workingTasks = mergedFromTasksSheet;
+            keyChanged = true;
+          }
+        }
+      }
+
+      if (Array.isArray(subRows) && subRows.length > 0) {
+        const subsByTaskId = new Map<string, any[]>();
+        for (const sr of subRows) {
+          if (!sr || !sr.taskId || !sr.fileName) continue;
+          const tId = String(sr.taskId).trim();
+          if (deletedTaskIdsServer.has(tId)) continue;
+          if (isSubmissionKeyDeletedServer(tId, sr.memberId, sr.memberName, sr.fileName)) continue;
+          const fid = extractDriveIdServer(String(sr.fileUrl || sr.driveFileId || ''));
+          const viewUrl = fid
+            ? `https://drive.google.com/file/d/${fid}/view?usp=sharing`
+            : String(sr.fileUrl || '');
+          const subObj = {
+            id: String(sr.id || `sub_${tId}_${sr.memberId || 'mem'}_${sr.fileName}`),
+            memberId: String(sr.memberId || ''),
+            memberName: String(sr.memberName || ''),
+            fileName: String(sr.fileName || ''),
+            fileSize: String(sr.fileSize || '0.2 MB'),
+            fileUrl: viewUrl,
+            driveFileId: fid || undefined,
+            submittedAt: String(sr.submittedAt || new Date().toISOString())
+          };
+          if (!subsByTaskId.has(tId)) subsByTaskId.set(tId, []);
+          subsByTaskId.get(tId)!.push(subObj);
+        }
+        if (subsByTaskId.size > 0) {
+          workingTasks = workingTasks.map((t: any) => {
+            if (!t || !t.id || !subsByTaskId.has(String(t.id))) return t;
+            const merged = mergeSingleTaskSubmissionsServer(t, {
+              ...t,
+              submissions: subsByTaskId.get(String(t.id))
+            });
+            if (JSON.stringify(merged) !== JSON.stringify(t)) {
+              keyChanged = true;
+            }
+            return merged;
+          });
+        }
+      }
+
+      const nextTasks = workingTasks.map((t: any) => {
         if (!t || !Array.isArray(t.submissions)) return t;
         let taskChanged = false;
         let recoveredMainUrl = t.submittedFileUrl;
@@ -2078,53 +2196,54 @@ async function healMissingTaskSubmissionUrlsServer(): Promise<void> {
               if (!sr) continue;
               if (isSubmissionKeyDeletedServer(t.id, sr.memberId, sr.memberName, sr.fileName)) continue;
               const matchTaskMember =
-              String(sr.taskId || '') === String(t.id || '') &&
-              (String(sr.memberId || '') === String(s.memberId || '') ||
-                String(sr.memberName || '').trim() === String(s.memberName || '').trim());
-            const matchFile = isFilenameMatchStrict(String(sr.fileName || ''), targetName);
-            if (matchTaskMember || matchFile) {
-              const fid = extractDriveIdServer(String(sr.fileUrl || sr.driveFileId || ''));
-              if (fid) {
-                const viewUrl = `https://drive.google.com/file/d/${fid}/view?usp=sharing`;
-                const dlUrl = `https://drive.google.com/uc?export=download&id=${fid}`;
-                taskChanged = true;
-                keyChanged = true;
-                if (!recoveredMainUrl && t.submittedBy === s.memberId) recoveredMainUrl = viewUrl;
-                return {
-                  ...s,
-                  fileUrl: viewUrl,
-                  driveFileId: fid,
-                  downloadUrl: dlUrl
-                };
+                String(sr.taskId || '') === String(t.id || '') &&
+                (String(sr.memberId || '') === String(s.memberId || '') ||
+                  String(sr.memberName || '').trim() === String(s.memberName || '').trim()) &&
+                isFilenameMatchStrict(String(sr.fileName || ''), targetName);
+              const matchFile = isFilenameMatchStrict(String(sr.fileName || ''), targetName);
+              if (matchTaskMember || matchFile) {
+                const fid = extractDriveIdServer(String(sr.fileUrl || sr.driveFileId || ''));
+                if (fid) {
+                  const viewUrl = `https://drive.google.com/file/d/${fid}/view?usp=sharing`;
+                  const dlUrl = `https://drive.google.com/uc?export=download&id=${fid}`;
+                  taskChanged = true;
+                  keyChanged = true;
+                  if (!recoveredMainUrl && t.submittedBy === s.memberId) recoveredMainUrl = viewUrl;
+                  return {
+                    ...s,
+                    fileUrl: viewUrl,
+                    driveFileId: fid,
+                    downloadUrl: dlUrl
+                  };
+                }
               }
             }
-          }
 
-          // 2. Check DriveFiles sheet
-          for (let i = (driveRows || []).length - 1; i >= 0; i--) {
-            const row = driveRows[i];
-            if (!row) continue;
-            if (isFilenameMatchStrict(String(row.fileName || ''), targetName)) {
-              const fid =
-                String(row.driveFileId || '').trim() ||
-                extractDriveIdServer(String(row.driveViewUrl || row.driveDownloadUrl || ''));
-              if (fid) {
-                const viewUrl = String(row.driveViewUrl || `https://drive.google.com/file/d/${fid}/view?usp=sharing`);
-                const dlUrl = String(row.driveDownloadUrl || `https://drive.google.com/uc?export=download&id=${fid}`);
-                taskChanged = true;
-                keyChanged = true;
-                if (!recoveredMainUrl && t.submittedBy === s.memberId) recoveredMainUrl = viewUrl;
-                return {
-                  ...s,
-                  fileUrl: viewUrl,
-                  driveFileId: fid,
-                  downloadUrl: dlUrl
-                };
+            // 2. Check DriveFiles sheet
+            for (let i = (driveRows || []).length - 1; i >= 0; i--) {
+              const row = driveRows[i];
+              if (!row) continue;
+              if (isFilenameMatchStrict(String(row.fileName || ''), targetName)) {
+                const fid =
+                  String(row.driveFileId || '').trim() ||
+                  extractDriveIdServer(String(row.driveViewUrl || row.driveDownloadUrl || ''));
+                if (fid) {
+                  const viewUrl = String(row.driveViewUrl || `https://drive.google.com/file/d/${fid}/view?usp=sharing`);
+                  const dlUrl = String(row.driveDownloadUrl || `https://drive.google.com/uc?export=download&id=${fid}`);
+                  taskChanged = true;
+                  keyChanged = true;
+                  if (!recoveredMainUrl && t.submittedBy === s.memberId) recoveredMainUrl = viewUrl;
+                  return {
+                    ...s,
+                    fileUrl: viewUrl,
+                    driveFileId: fid,
+                    downloadUrl: dlUrl
+                  };
+                }
               }
             }
-          }
-          return s;
-        });
+            return s;
+          });
 
         if (
           (recoveredMainUrl && t.submittedBy && isSubmissionKeyDeletedServer(t.id, t.submittedBy, t.submittedByName, t.submittedFileName)) ||
@@ -2851,10 +2970,13 @@ async function startServer() {
   });
 
   // 2. Fast Authoritative State Fetch (supports ?sinceRev= and ?forceCloud=1)
+  let lastStateEndpointCloudPull = 0;
   app.get('/api/realtime/state', (req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
     const forceCloud = req.query.forceCloud === '1';
-    if (forceCloud) {
+    const nowMs = Date.now();
+    if (forceCloud || nowMs - lastStateEndpointCloudPull > 3500) {
+      lastStateEndpointCloudPull = nowMs;
       pullFromCloudKV(false).catch(() => {});
     }
 
@@ -3789,10 +3911,10 @@ self.addEventListener('activate', (event) => {
     syncWithFirestoreServer(false).catch(() => {});
     startServerFirestoreListener();
     pullFromCloudKV(false).catch(() => {});
-    // Continuous background cloud KV reconciliation every 15 seconds (primary live sync is via SSE + Firestore onSnapshot)
+    // Continuous background cloud KV reconciliation every 5 seconds
     setInterval(() => {
       pullFromCloudKV(false).catch(() => {});
-    }, 15000);
+    }, 5000);
   });
 }
 
