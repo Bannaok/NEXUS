@@ -373,6 +373,7 @@ export interface SavingsRecord {
 }
 
 export interface TaskSubmission {
+  id?: string;
   memberId: string;
   memberName: string;
   fileUrl: string;

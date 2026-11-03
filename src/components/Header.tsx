@@ -51,8 +51,12 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="sm:hidden flex items-center justify-between w-full py-1 gap-2">
           {/* Member Name */}
           <div className="flex items-center gap-2 min-w-0">
-            <div className="w-7 h-7 rounded-lg bg-white/15 border border-white/20 flex items-center justify-center text-white shrink-0 shadow-xs">
-              <UserCheck className="w-4 h-4 text-emerald-300" />
+            <div className="w-7 h-7 rounded-lg bg-white/15 border border-white/20 flex items-center justify-center text-white shrink-0 shadow-xs overflow-hidden">
+              {user.avatarUrl ? (
+                <img src={user.avatarUrl} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <UserCheck className="w-4 h-4 text-emerald-300" />
+              )}
             </div>
             <div className="min-w-0">
               <div className="text-xs font-bold text-white truncate max-w-[170px]">
@@ -137,14 +141,16 @@ export const Header: React.FC<HeaderProps> = ({
             className="flex items-center gap-2.5 bg-white/10 border border-white/15 px-3 py-1.5 rounded-xl backdrop-blur-xs select-none"
             title={`เข้าสู่ระบบในฐานะ: ${user.fullName}`}
           >
-            <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ${
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs overflow-hidden shrink-0 ${
               user.role === 'developer'
                 ? 'bg-purple-600/90 text-white shadow-xs ring-1 ring-purple-400/50'
                 : user.role === 'admin'
                   ? 'bg-rose-500/80 text-white shadow-xs'
                   : 'bg-emerald-500/80 text-white shadow-xs'
             }`}>
-              {user.role === 'developer' ? (
+              {user.avatarUrl ? (
+                <img src={user.avatarUrl} alt="" className="w-full h-full object-cover" />
+              ) : user.role === 'developer' ? (
                 <Terminal className="w-4 h-4" />
               ) : user.role === 'admin' ? (
                 <ShieldCheck className="w-4 h-4" />

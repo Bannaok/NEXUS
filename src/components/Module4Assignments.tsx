@@ -18,7 +18,10 @@ import {
   Edit,
   X,
   FileCheck,
-  ExternalLink
+  ExternalLink,
+  ChevronDown,
+  ChevronUp,
+  File
 } from 'lucide-react';
 import {
   downloadRealFile,
@@ -163,8 +166,13 @@ export const Module4Assignments: React.FC<Module4Props> = ({
   // Admin submission status modal state
   const [statusTaskModal, setStatusTaskModal] = useState<TaskItem | null>(null);
   const [downloadingFileKey, setDownloadingFileKey] = useState<string | null>(null);
+  const [expandedMemberIds, setExpandedMemberIds] = useState<Record<string, boolean>>({});
 
-  // Submission modal state (for members) with 0-100% progress tracking
+  const toggleMemberExpand = (memberKey: string) => {
+    setExpandedMemberIds(prev => ({ ...prev, [memberKey]: !prev[memberKey] }));
+  };
+
+  // Submission modal state (for members) with 0-100% progress tracking and multi-file support
   const [submittingTaskId, setSubmittingTaskId] = useState<string | null>(null);
   const [submittedFile, setSubmittedFile] = useState<{
     name: string;
@@ -175,6 +183,16 @@ export const Module4Assignments: React.FC<Module4Props> = ({
     driveUrl?: string;
     downloadUrl?: string;
   } | null>(null);
+  const [submittedFiles, setSubmittedFiles] = useState<Array<{
+    id: string;
+    name: string;
+    url: string;
+    size: string;
+    hostedUrl?: string;
+    driveFileId?: string;
+    driveUrl?: string;
+    downloadUrl?: string;
+  }>>([]);
   const [isUploadingSubmission, setIsUploadingSubmission] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [uploadStepText, setUploadStepText] = useState<string>('');
@@ -252,31 +270,49 @@ export const Module4Assignments: React.FC<Module4Props> = ({
       .toLowerCase();
   };
 
-  // Robust matcher for finding a member's submission in a task (handles ID, username, fullName, and prefix-stripped name)
-  const findMemberSubmission = (task: TaskItem, member: MemberAccount): TaskSubmission | undefined => {
-    if (!task || !member) return undefined;
+  // Robust matcher for finding ALL of a member's submissions in a task (supports multiple files per member)
+  const findMemberSubmissions = (task: TaskItem, member: MemberAccount): TaskSubmission[] => {
+    if (!task || !member) return [];
     const normMemberName = normalizePersonName(member.fullName);
 
     // Check if permanently deleted via tombstone or deletedSubmissionsMap
     if (StorageService.isSubmissionDeleted(task.id, member.id, member.username, member.fullName, normMemberName)) {
-      return undefined;
+      return [];
     }
     const delMap = task.deletedSubmissionsMap || {};
     if (delMap[member.id] || (member.username && delMap[member.username]) || (member.fullName && delMap[member.fullName])) {
-      return undefined;
+      return [];
     }
 
     const subs = task.submissions || [];
-    const found = subs.find(s => {
-      if (!s) return false;
-      if (StorageService.isSubmissionDeleted(task.id, s.memberId, s.memberName, s.fileName)) return false;
-      if (s.memberId === member.id) return true;
-      if (member.username && s.memberId?.toLowerCase() === member.username.toLowerCase()) return true;
-      if (member.fullName && s.memberName === member.fullName) return true;
-      if (normMemberName && normalizePersonName(s.memberName) === normMemberName) return true;
-      return false;
+    const memberSubs: TaskSubmission[] = [];
+    const seenFileKeys = new Set<string>();
+
+    subs.forEach((s, idx) => {
+      if (!s) return;
+      if (StorageService.isSubmissionDeleted(task.id, s.memberId, s.memberName, s.fileName)) return;
+      if (s.fileName && delMap[s.fileName]) return;
+      if (s.fileName && delMap[`${member.id}_${s.fileName}`]) return;
+
+      const matches =
+        s.memberId === member.id ||
+        (member.username && s.memberId?.toLowerCase() === member.username.toLowerCase()) ||
+        (member.fullName && s.memberName === member.fullName) ||
+        (normMemberName && normalizePersonName(s.memberName) === normMemberName);
+
+      if (matches) {
+        const fileKey = `${s.fileName || ''}_${s.fileUrl || ''}_${idx}`;
+        if (!seenFileKeys.has(fileKey)) {
+          seenFileKeys.add(fileKey);
+          memberSubs.push({
+            ...s,
+            fileUrl: resolveSubmissionDriveUrl(s, task.submittedFileUrl, task)
+          });
+        }
+      }
     });
-    if (found) return found;
+
+    if (memberSubs.length > 0) return memberSubs;
 
     if (
       task.submittedFileUrl &&
@@ -286,9 +322,9 @@ export const Module4Assignments: React.FC<Module4Props> = ({
        (normMemberName && normalizePersonName(task.submittedByName) === normMemberName))
     ) {
       if (StorageService.isSubmissionDeleted(task.id, task.submittedBy, task.submittedByName, task.submittedFileName)) {
-        return undefined;
+        return [];
       }
-      return {
+      return [{
         memberId: member.id,
         memberName: member.fullName,
         fileUrl: task.submittedFileUrl,
@@ -296,9 +332,14 @@ export const Module4Assignments: React.FC<Module4Props> = ({
         fileSize: task.submittedFileSize || '1.0 MB',
         driveFileId: task.driveFileId,
         submittedAt: task.submittedAt || new Date().toISOString()
-      };
+      }];
     }
-    return undefined;
+    return [];
+  };
+
+  const findMemberSubmission = (task: TaskItem, member: MemberAccount): TaskSubmission | undefined => {
+    const list = findMemberSubmissions(task, member);
+    return list[0];
   };
 
   const resolveSubmissionDriveUrl = (s?: TaskSubmission, fallbackTaskUrl?: string, task?: TaskItem): string => {
@@ -328,58 +369,13 @@ export const Module4Assignments: React.FC<Module4Props> = ({
     return '';
   };
 
+  const getMySubmissions = (task: TaskItem): TaskSubmission[] => {
+    if (!task || !user) return [];
+    return findMemberSubmissions(task, user as any);
+  };
+
   const getMySubmission = (task: TaskItem): TaskSubmission | undefined => {
-    if (!task || !user) return undefined;
-    const normMyName = normalizePersonName(user.fullName);
-
-    if (StorageService.isSubmissionDeleted(task.id, user.id, user.username, user.fullName, normMyName)) {
-      return undefined;
-    }
-    const delMap = task.deletedSubmissionsMap || {};
-    if (delMap[user.id] || (user.username && delMap[user.username]) || (user.fullName && delMap[user.fullName])) {
-      return undefined;
-    }
-
-    const subs = task.submissions || [];
-    const found = subs.find(s => {
-      if (!s) return false;
-      if (StorageService.isSubmissionDeleted(task.id, s.memberId, s.memberName, s.fileName)) return false;
-      if (s.memberId === user.id) return true;
-      if (user.username && s.memberId?.toLowerCase() === user.username.toLowerCase()) return true;
-      if (user.fullName && s.memberName === user.fullName) return true;
-      if (normMyName && normalizePersonName(s.memberName) === normMyName) return true;
-      return false;
-    });
-    if (found) {
-      return {
-        ...found,
-        fileUrl: resolveSubmissionDriveUrl(found, task.submittedFileUrl, task)
-      };
-    }
-
-    if (
-      task.submittedFileUrl &&
-      (task.submittedBy === user.id ||
-       (user.username && task.submittedBy?.toLowerCase() === user.username.toLowerCase()) ||
-       (user.fullName && task.submittedByName === user.fullName) ||
-       (normMyName && normalizePersonName(task.submittedByName) === normMyName))
-    ) {
-      if (StorageService.isSubmissionDeleted(task.id, task.submittedBy, task.submittedByName, task.submittedFileName)) {
-        return undefined;
-      }
-      return {
-        memberId: user.id,
-        memberName: user.fullName,
-        fileUrl: task.driveFileId
-          ? `https://drive.google.com/file/d/${task.driveFileId}/view?usp=sharing`
-          : task.submittedFileUrl,
-        fileName: task.submittedFileName || 'ไฟล์งานที่ส่ง',
-        fileSize: task.submittedFileSize || '1.0 MB',
-        driveFileId: task.driveFileId,
-        submittedAt: task.submittedAt || new Date().toISOString()
-      };
-    }
-    return undefined;
+    return getMySubmissions(task)[0];
   };
 
   const getTaskEffectiveSubmissions = (task: TaskItem): TaskSubmission[] => {
@@ -403,9 +399,9 @@ export const Module4Assignments: React.FC<Module4Props> = ({
     };
 
     schoolMembers.forEach(m => {
-      const sub = findMemberSubmission(task, m);
-      if (sub) {
-        addSub(sub, m.fullName);
+      const subs = findMemberSubmissions(task, m);
+      if (subs.length > 0) {
+        addSub(subs[0], m.fullName);
       }
     });
 
@@ -604,69 +600,73 @@ export const Module4Assignments: React.FC<Module4Props> = ({
 
   const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB limit per file
 
-  const handleFileSubmitUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const readFileAsDataUrl = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve((e.target?.result as string) || '');
+      reader.onerror = (e) => reject(e);
+      reader.readAsDataURL(file);
+    });
+  };
 
-    // Constraint 3: Strict 5MB file size limit
-    if (file.size > MAX_FILE_SIZE) {
-      onShowToast(
-        'warning',
-        'ขนาดไฟล์เกินกำหนด (สูงสุด 5MB)',
-        `ไฟล์ "${file.name}" มีขนาด ${(file.size / (1024 * 1024)).toFixed(2)} MB ซึ่งเกินขนาดสูงสุด 5MB ต่อไฟล์ เพื่อประหยัดพื้นที่จัดเก็บ กรุณาเลือกไฟล์ที่มีขนาดไม่เกิน 5MB`
-      );
+  const handleFilesSubmitUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+
+    const filesArray = Array.from(fileList);
+    const activeTaskId = submittingTaskId || 'task';
+
+    // Strict 5MB file size limit validation per file
+    const validFiles: File[] = [];
+    for (const file of filesArray) {
+      if (file.size > MAX_FILE_SIZE) {
+        onShowToast(
+          'warning',
+          'ขนาดไฟล์เกินกำหนด (สูงสุด 5MB)',
+          `ไฟล์ "${file.name}" มีขนาด ${(file.size / (1024 * 1024)).toFixed(2)} MB ซึ่งเกินขนาดสูงสุด 5MB ต่อไฟล์ เพื่อประหยัดพื้นที่จัดเก็บ กรุณาเลือกไฟล์ที่มีขนาดไม่เกิน 5MB`
+        );
+      } else {
+        validFiles.push(file);
+      }
+    }
+
+    if (validFiles.length === 0) {
       e.target.value = '';
       return;
     }
 
-    const sizeStr = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
-    const activeTaskId = submittingTaskId || 'task';
-    const detId =
-      'sub_' +
-      String(activeTaskId).replace(/[^a-zA-Z0-9_-]/g, '_') +
-      '_' +
-      String(user.id || 'member').replace(/[^a-zA-Z0-9_-]/g, '_');
-    const deterministicHostedUrl = `/api/files/${detId}`;
-
     setIsUploadingSubmission(true);
     setUploadProgress(15);
-    setUploadStepText(`กำลังอ่านและเตรียมไฟล์ "${file.name}"...`);
+    setUploadStepText(`กำลังเตรียมและประมวลผล ${validFiles.length} ไฟล์...`);
 
-    const reader = new FileReader();
-    reader.onprogress = (ev) => {
-      if (ev.lengthComputable && ev.total > 0) {
-        const pct = Math.min(40, Math.round((ev.loaded / ev.total) * 40));
-        setUploadProgress(Math.max(15, pct));
-      }
-    };
+    const newUploadedItems: Array<{
+      id: string;
+      name: string;
+      url: string;
+      size: string;
+      hostedUrl?: string;
+      driveFileId?: string;
+      driveUrl?: string;
+      downloadUrl?: string;
+    }> = [];
 
-    reader.onload = async (event) => {
-      const base64 = event.target?.result as string;
-      setSubmittedFile({
-        name: file.name,
-        url: deterministicHostedUrl,
-        size: sizeStr,
-        hostedUrl: deterministicHostedUrl
-      });
-      setUploadProgress(45);
-      setUploadStepText('กำลังอัปโหลดไฟล์ไปยังคลาวด์และ Google Drive ประจำโรงเรียน...');
+    for (let i = 0; i < validFiles.length; i++) {
+      const file = validFiles[i];
+      const sizeStr = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
+      const fileIndexId = `sub_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 7)}`;
+      const deterministicHostedUrl = `/api/files/${fileIndexId}`;
 
-      // Smooth progress ticker while uploading to server and Google Drive (45% -> 95%)
-      let currentPct = 45;
-      const progressTimer = setInterval(() => {
-        currentPct = Math.min(95, currentPct + 6);
-        setUploadProgress(currentPct);
-        if (currentPct >= 80) {
-          setUploadStepText('กำลังประมวลผลและเชื่อมโยงข้อมูลกับระบบ Google Drive...');
-        }
-      }, 100);
+      const pct = Math.round(15 + (i / validFiles.length) * 75);
+      setUploadProgress(pct);
+      setUploadStepText(`กำลังอัปโหลด "${file.name}" (${i + 1}/${validFiles.length})...`);
 
       try {
+        const base64 = await readFileAsDataUrl(file);
         const res = await fetch('/api/files/upload', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            id: detId,
+            id: fileIndexId,
             fileName: file.name,
             dataUrl: base64,
             schoolId: user.schoolId,
@@ -677,8 +677,6 @@ export const Module4Assignments: React.FC<Module4Props> = ({
             memberId: user.id
           })
         });
-
-        clearInterval(progressTimer);
 
         let hostedUrl = deterministicHostedUrl;
         let driveFileId = '';
@@ -692,7 +690,6 @@ export const Module4Assignments: React.FC<Module4Props> = ({
           driveUrl = data?.driveUrl || (driveFileId ? `https://drive.google.com/file/d/${driveFileId}/view?usp=sharing` : '');
           downloadUrl = data?.downloadUrl || (driveFileId ? `https://drive.google.com/uc?export=download&id=${driveFileId}` : hostedUrl);
         } else {
-          // Client-side fallback to Google Drive
           try {
             const clientDriveUrl = await StorageService.uploadFileToGoogleDrive(
               base64,
@@ -705,7 +702,8 @@ export const Module4Assignments: React.FC<Module4Props> = ({
         }
 
         const bestUrl = driveUrl || hostedUrl;
-        setSubmittedFile({
+        const uploadedItem = {
+          id: fileIndexId,
           name: file.name,
           url: bestUrl,
           size: sizeStr,
@@ -713,85 +711,97 @@ export const Module4Assignments: React.FC<Module4Props> = ({
           driveFileId: driveFileId || undefined,
           driveUrl: driveUrl || undefined,
           downloadUrl: downloadUrl || bestUrl
-        });
-
-        setUploadProgress(100);
-        setIsUploadingSubmission(false);
-        setUploadStepText('✓ อัปโหลดไฟล์เสร็จสมบูรณ์ 100% พร้อมกดยืนยันการส่งงาน');
-        onShowToast(
-          'success',
-          'อัปโหลดไฟล์ครบ 100% แล้ว',
-          `อัปโหลด "${file.name}" (${sizeStr}) ครบ 100% เรียบร้อยแล้ว กดยืนยันการส่งงานได้ทันที`
-        );
-      } catch {
-        clearInterval(progressTimer);
-        setSubmittedFile({
+        };
+        newUploadedItems.push(uploadedItem);
+      } catch (err) {
+        console.error('Error uploading file', file.name, err);
+        newUploadedItems.push({
+          id: fileIndexId,
           name: file.name,
           url: deterministicHostedUrl,
           size: sizeStr,
           hostedUrl: deterministicHostedUrl,
           downloadUrl: deterministicHostedUrl
         });
-        setUploadProgress(100);
-        setIsUploadingSubmission(false);
-        setUploadStepText('✓ อัปโหลดไฟล์เสร็จสมบูรณ์ 100% พร้อมกดยืนยันการส่งงาน');
-        onShowToast(
-          'success',
-          'อัปโหลดไฟล์ครบ 100% แล้ว',
-          `อัปโหลด "${file.name}" ครบ 100% เรียบร้อยแล้ว กดยืนยันการส่งงานได้ทันที`
-        );
       }
-    };
+    }
 
-    reader.onerror = () => {
-      setIsUploadingSubmission(false);
-      setUploadProgress(0);
-      setUploadStepText('');
-      onShowToast('error', 'อ่านไฟล์ไม่สำเร็จ', 'ไม่สามารถอ่านไฟล์ได้ โปรดลองใหม่อีกครั้ง');
-    };
+    setSubmittedFiles(prev => [...prev, ...newUploadedItems]);
+    if (newUploadedItems.length > 0) {
+      setSubmittedFile(newUploadedItems[newUploadedItems.length - 1]);
+    }
 
-    reader.readAsDataURL(file);
+    setUploadProgress(100);
+    setIsUploadingSubmission(false);
+    setUploadStepText(`✓ อัปโหลดสำเร็จครบ ${validFiles.length} ไฟล์แล้ว พร้อมกดยืนยันการส่งงาน`);
+    onShowToast(
+      'success',
+      'อัปโหลดไฟล์เรียบร้อย',
+      `อัปโหลด ${validFiles.length} ไฟล์เสร็จสมบูรณ์ สามารถเลือกไฟล์เพิ่มเติมหรือกดยืนยันการส่งงานได้ทันที`
+    );
     e.target.value = '';
   };
 
   const handleFinalSubmitTask = async (taskId: string) => {
-    if (!submittedFile || uploadProgress < 100 || isUploadingSubmission) {
+    if (submittedFiles.length === 0 && !submittedFile) {
+      onShowToast('warning', 'ยังไม่มีไฟล์', 'กรุณาเลือกไฟล์งานอย่างน้อย 1 ไฟล์ก่อนกดยืนยัน');
+      return;
+    }
+    if (isUploadingSubmission || uploadProgress < 100) {
       onShowToast('warning', 'ยังไม่พร้อมส่ง', 'กรุณารอให้อัปโหลดไฟล์ให้ครบ 100% ก่อนกดยืนยันการส่งงาน');
       return;
     }
     const task = tasks.find(t => t.id === taskId);
     if (!task) return;
 
-    const finalFileUrl = submittedFile.url || submittedFile.hostedUrl || '';
+    const filesToSave = submittedFiles.length > 0 ? submittedFiles : (submittedFile ? [{
+      id: `sub_${Date.now()}`,
+      name: submittedFile.name,
+      url: submittedFile.url,
+      size: submittedFile.size,
+      hostedUrl: submittedFile.hostedUrl,
+      driveFileId: submittedFile.driveFileId,
+      driveUrl: submittedFile.driveUrl,
+      downloadUrl: submittedFile.downloadUrl
+    }] : []);
+
     const nowIso = new Date().toISOString();
-    const newSub: TaskSubmission = {
+    const newSubs: TaskSubmission[] = filesToSave.map((f, idx) => ({
+      id: f.id || `sub_${Date.now()}_${idx}`,
       memberId: user.id,
       memberName: user.fullName,
-      fileUrl: finalFileUrl,
-      fileName: submittedFile.name,
-      fileSize: submittedFile.size,
-      driveFileId: submittedFile.driveFileId,
-      localHostedUrl: submittedFile.hostedUrl,
-      downloadUrl: submittedFile.downloadUrl || finalFileUrl,
+      fileUrl: f.url || f.hostedUrl || '',
+      fileName: f.name,
+      fileSize: f.size,
+      driveFileId: f.driveFileId,
+      localHostedUrl: f.hostedUrl,
+      downloadUrl: f.downloadUrl || f.url,
       submittedAt: nowIso
-    };
+    }));
 
     const normMyName = normalizePersonName(user.fullName);
-    const currentSubs = task.submissions || [];
-    const updatedSubs = [
-      ...currentSubs.filter(s => 
-        s.memberId !== user.id && 
-        (!user.username || s.memberId?.toLowerCase() !== user.username.toLowerCase()) && 
-        s.memberName !== user.fullName &&
-        (!normMyName || normalizePersonName(s.memberName) !== normMyName)
-      ),
-      newSub
-    ];
+    const otherSubs = (task.submissions || []).filter(s => 
+      s.memberId !== user.id && 
+      (!user.username || s.memberId?.toLowerCase() !== user.username.toLowerCase()) && 
+      s.memberName !== user.fullName &&
+      (!normMyName || normalizePersonName(s.memberName) !== normMyName)
+    );
+
+    // Retain any existing files this member already submitted that were not re-submitted with the same name
+    const existingMySubs = findMemberSubmissions(task, user as any).filter(
+      oldS => !filesToSave.some(newF => newF.name === oldS.fileName)
+    );
+
+    const updatedSubs = [...otherSubs, ...existingMySubs, ...newSubs];
 
     const nextDeletedMap = { ...(task.deletedSubmissionsMap || {}) };
     delete nextDeletedMap[user.id];
     if (user.username) delete nextDeletedMap[user.username];
     if (user.fullName) delete nextDeletedMap[user.fullName];
+    filesToSave.forEach(f => {
+      delete nextDeletedMap[f.name];
+      delete nextDeletedMap[`${user.id}_${f.name}`];
+    });
 
     const isAllMembersDone = updatedSubs.length >= totalSchoolMembers;
 
@@ -800,10 +810,10 @@ export const Module4Assignments: React.FC<Module4Props> = ({
       submissions: updatedSubs,
       deletedSubmissionsMap: Object.keys(nextDeletedMap).length > 0 ? nextDeletedMap : undefined,
       isCompleted: isAllMembersDone,
-      submittedFileUrl: finalFileUrl,
-      driveFileId: submittedFile.driveFileId || task.driveFileId,
-      submittedFileName: submittedFile.name,
-      submittedFileSize: submittedFile.size,
+      submittedFileUrl: newSubs[0]?.fileUrl || task.submittedFileUrl,
+      driveFileId: newSubs[0]?.driveFileId || task.driveFileId,
+      submittedFileName: newSubs.length === 1 ? newSubs[0]?.fileName : `${newSubs[0]?.fileName} (+${newSubs.length - 1} ไฟล์)`,
+      submittedFileSize: newSubs[0]?.fileSize,
       submittedBy: user.id,
       submittedByName: user.fullName,
       submittedAt: nowIso
@@ -815,19 +825,27 @@ export const Module4Assignments: React.FC<Module4Props> = ({
     setUploadProgress(0);
     setUploadStepText('');
     setSubmittingTaskId(null);
+    setSubmittedFiles([]);
     setSubmittedFile(null);
     uploadPromiseRef.current = null;
     onShowToast(
       'success',
       'ส่งงานสำเร็จ 🎉',
-      `ส่งงาน "${task.title}" เรียบร้อยแล้ว ระบบซิงค์ข้อมูลและไฟล์ไปยังหน้าผู้ดูแลระบบ (Admin) ทันที`
+      `ส่งงาน "${task.title}" จำนวน ${filesToSave.length} ไฟล์เรียบร้อยแล้ว ระบบซิงค์ข้อมูลและไฟล์ไปยังหน้าผู้ดูแลระบบ (Admin) ทันที`
     );
   };
 
-  // Member can remove their old submitted file to upload a new one
-  const handleMemberRemoveOldFile = (taskId: string) => {
+  // Member can remove individual submitted file or all files
+  const handleMemberRemoveOldFile = (taskId: string, fileName?: string) => {
     const task = tasks.find(t => t.id === taskId);
     if (!task) return;
+
+    if (fileName) {
+      handleDeleteMemberSubmission(taskId, user.id, user.fullName, fileName);
+      onShowToast('info', 'ลบไฟล์แล้ว', `ลบไฟล์ "${fileName}" เรียบร้อยแล้ว`);
+      return;
+    }
+
     const normMyName = normalizePersonName(user.fullName);
     const updatedSubs = (task.submissions || []).filter(s => 
       s.memberId !== user.id && 
@@ -857,7 +875,8 @@ export const Module4Assignments: React.FC<Module4Props> = ({
     };
     onSaveTask(updatedTask);
     setSubmittedFile(null);
-    onShowToast('info', 'ลบไฟล์เดิมแล้ว', 'กรุณาเลือกไฟล์ใหม่ที่ต้องการส่ง');
+    setSubmittedFiles([]);
+    onShowToast('info', 'ลบไฟล์ทั้งหมดแล้ว', 'ลบไฟล์เดิมทั้งหมดเรียบร้อยแล้ว ท่านสามารถเลือกไฟล์ใหม่ที่ต้องการส่งได้');
   };
 
   const handleDeleteMemberSubmission = (
@@ -1132,8 +1151,9 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                     (totalSchoolMembers > 0 && submittedCount >= totalSchoolMembers) ||
                     Boolean(task.isManualCompleted) ||
                     Boolean(task.isCompleted);
-                  const mySubmission = getMySubmission(task);
-                  const hasMemberSubmitted = Boolean(mySubmission) || isFullySubmitted;
+                  const mySubmissions = getMySubmissions(task);
+                  const mySubmission = mySubmissions[0];
+                  const hasMemberSubmitted = mySubmissions.length > 0 || isFullySubmitted;
                   const isGreenCompleted = user.role === 'member' ? hasMemberSubmitted : isFullySubmitted;
                   const displayDesc = cleanDescription(task.description);
 
@@ -1315,7 +1335,7 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                               {hasMemberSubmitted ? (
                                 <>
                                   <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                                  <span>ส่งแล้ว</span>
+                                  <span>{mySubmissions.length > 1 ? `ส่งแล้ว (${mySubmissions.length} ไฟล์)` : 'ส่งแล้ว'}</span>
                                 </>
                               ) : (
                                 <>
@@ -1533,111 +1553,179 @@ export const Module4Assignments: React.FC<Module4Props> = ({
               ) : (
                 <>
                   {schoolMembers.map((mem, idx) => {
-                    const submission = findMemberSubmission(liveStatusTask, mem);
-                    const hasSubmitted = !!submission;
-                    const effectiveFileUrl = resolveSubmissionDriveUrl(submission, liveStatusTask.submittedFileUrl, liveStatusTask);
+                    const memberSubs = findMemberSubmissions(liveStatusTask, mem);
+                    const hasSubmitted = memberSubs.length > 0;
+                    const isExpanded = !!expandedMemberIds[mem.id];
                     const overdue = isOverdue(liveStatusTask.dueDate);
-                    const dlKey = `sub-${liveStatusTask.id}-${mem.id}`;
 
                     return (
                       <div 
                         key={mem.id}
-                        className={`p-3 rounded-2xl border flex items-center justify-between gap-3 ${
+                        className={`p-3 rounded-2xl border transition-all ${
                           hasSubmitted ? 'bg-emerald-50/70 border-emerald-300' : 'bg-slate-50/70 border-slate-200'
                         }`}
                       >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <span className="w-7 h-7 rounded-xl bg-white border border-slate-200 font-mono font-bold text-xs text-slate-700 flex items-center justify-center shrink-0">
-                            {idx + 1}
-                          </span>
-                          <div className="min-w-0">
-                            <div className="font-bold text-xs sm:text-sm text-slate-800 truncate">
-                              {mem.fullName} {mem.position ? `(${mem.position})` : ''}
-                            </div>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              {hasSubmitted ? (
-                                <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md truncate max-w-[220px]">
-                                  ✓ ส่งแล้ว ({submission.fileName})
-                                </span>
-                              ) : (
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  <span className="text-[11px] font-semibold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200">
-                                    ยังไม่ส่งงาน
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <span className="w-7 h-7 rounded-xl bg-white border border-slate-200 font-mono font-bold text-xs text-slate-700 flex items-center justify-center shrink-0">
+                              {idx + 1}
+                            </span>
+                            <div className="min-w-0">
+                              <div className="font-bold text-xs sm:text-sm text-slate-800 truncate">
+                                {mem.fullName} {mem.position ? `(${mem.position})` : ''}
+                              </div>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                {hasSubmitted ? (
+                                  <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md truncate max-w-[220px]">
+                                    ✓ ส่งแล้ว ({memberSubs.length} ไฟล์)
                                   </span>
-                                  {overdue && (
-                                    <span className="text-[10px] font-bold text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded">
-                                      เลยกำหนด
+                                ) : (
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="text-[11px] font-semibold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-200">
+                                      ยังไม่ส่งงาน
                                     </span>
-                                  )}
-                                </div>
-                              )}
+                                    {overdue && (
+                                      <span className="text-[10px] font-bold text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded">
+                                        เลยกำหนด
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </div>
+
+                          {hasSubmitted && (
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {/* Accordion toggle button with icon */}
+                              <button
+                                type="button"
+                                onClick={() => toggleMemberExpand(mem.id)}
+                                className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold inline-flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs ${
+                                  isExpanded
+                                    ? 'bg-emerald-600 text-white border-emerald-600'
+                                    : 'bg-white hover:bg-emerald-100/70 text-emerald-800 border-emerald-300'
+                                }`}
+                                title={isExpanded ? 'ย่อรายการไฟล์' : 'กดเพื่อเลื่อนลงมาแสดงไฟล์ทั้งหมดที่ส่ง'}
+                              >
+                                <span>ไฟล์ที่ส่ง ({memberSubs.length})</span>
+                                <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+                              </button>
+
+                              {/* Delete all member submissions */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setConfirmDeleteModal({
+                                    type: 'submission',
+                                    id: liveStatusTask.id,
+                                    memberId: mem.id,
+                                    memberName: mem.fullName,
+                                    title: `งานทั้งหมดของ ${mem.fullName}`
+                                  });
+                                }}
+                                className="p-1.5 bg-white hover:bg-rose-50 text-rose-600 border border-slate-200 rounded-xl transition-colors cursor-pointer shadow-2xs"
+                                title="ลบงานที่ส่งทั้งหมดของสมาชิกนี้"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          )}
                         </div>
 
-                        {hasSubmitted && (
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            {/* Download button - In-page direct download without navigating away */}
-                            <button
-                              type="button"
-                              disabled={downloadingFileKey === dlKey}
-                              onClick={() =>
-                                handleDownloadFile(
-                                  effectiveFileUrl,
-                                  submission.fileName,
-                                  dlKey,
-                                  liveStatusTask.id,
-                                  submission.memberId || mem.id
-                                )
-                              }
-                              className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-                              title="ดาวน์โหลดไฟล์ต้นฉบับแท้"
-                            >
-                              {downloadingFileKey === dlKey ? (
-                                <>
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
-                                  <span>กำลังดาวน์โหลด...</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Download className="w-3.5 h-3.5" />
-                                  <span>ดาวน์โหลด</span>
-                                </>
-                              )}
-                            </button>
+                        {/* Slide-down accordion list showing all files submitted by this member */}
+                        {hasSubmitted && isExpanded && (
+                          <div className="mt-2.5 pt-2.5 border-t border-emerald-200/90 space-y-2 animate-in fade-in slide-in-from-top-1">
+                            <div className="text-[11px] font-bold text-emerald-900 flex items-center justify-between px-0.5">
+                              <span>รายการไฟล์ทั้งหมดที่สมาชิกส่ง ({memberSubs.length} ไฟล์):</span>
+                            </div>
+                            <div className="space-y-1.5">
+                              {memberSubs.map((sub, fileIdx) => {
+                                const subFileUrl = resolveSubmissionDriveUrl(sub, liveStatusTask.submittedFileUrl, liveStatusTask);
+                                const dlKey = `sub-${liveStatusTask.id}-${mem.id}-${fileIdx}`;
+                                const driveUrl = getGoogleDriveViewUrl(subFileUrl) || (sub.driveFileId ? `https://drive.google.com/file/d/${sub.driveFileId}/view?usp=sharing` : '');
 
-                            {/* Open in Google Drive */}
-                            {getGoogleDriveViewUrl(effectiveFileUrl) && (
-                              <a
-                                href={getGoogleDriveViewUrl(effectiveFileUrl)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="px-2 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold inline-flex items-center gap-1 transition-colors cursor-pointer shadow-2xs no-underline"
-                                title="เปิดดู/ดาวน์โหลดบน Google Drive โดยตรง"
-                              >
-                                <ExternalLink className="w-3.5 h-3.5" />
-                                <span className="hidden sm:inline">Drive</span>
-                              </a>
-                            )}
+                                return (
+                                  <div
+                                    key={sub.id || `${sub.fileName}-${fileIdx}`}
+                                    className="p-2.5 bg-white rounded-xl border border-emerald-200/90 flex items-center justify-between gap-2 shadow-2xs hover:border-emerald-300 transition-colors"
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <span className="w-6 h-6 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-center shrink-0 text-emerald-700">
+                                        <FileText className="w-3.5 h-3.5" />
+                                      </span>
+                                      <div className="min-w-0">
+                                        <div className="text-xs font-bold text-slate-800 truncate" title={sub.fileName}>
+                                          {sub.fileName}
+                                        </div>
+                                        <div className="text-[10px] text-slate-400">
+                                          {sub.fileSize || '1.0 MB'} {sub.submittedAt ? `• ${new Date(sub.submittedAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.` : ''}
+                                        </div>
+                                      </div>
+                                    </div>
 
-                            {/* Delete submission icon */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setConfirmDeleteModal({
-                                  type: 'submission',
-                                  id: liveStatusTask.id,
-                                  memberId: submission?.memberId || mem.id,
-                                  memberName: submission?.memberName || mem.fullName,
-                                  fileName: submission?.fileName,
-                                  title: `งานที่ส่งของ ${mem.fullName}`
-                                });
-                              }}
-                              className="p-1.5 bg-white hover:bg-rose-50 text-rose-600 border border-slate-200 rounded-xl transition-colors cursor-pointer shadow-2xs"
-                              title="ลบงานที่ส่ง"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                                    <div className="flex items-center gap-1.5 shrink-0">
+                                      {/* ไอคอนดาวน์โหลด */}
+                                      <button
+                                        type="button"
+                                        disabled={downloadingFileKey === dlKey}
+                                        onClick={() =>
+                                          handleDownloadFile(
+                                            subFileUrl,
+                                            sub.fileName,
+                                            dlKey,
+                                            liveStatusTask.id,
+                                            sub.memberId || mem.id
+                                          )
+                                        }
+                                        className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white rounded-lg text-xs font-bold inline-flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
+                                        title="ดาวน์โหลดไฟล์นี้"
+                                      >
+                                        {downloadingFileKey === dlKey ? (
+                                          <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+                                        ) : (
+                                          <Download className="w-3.5 h-3.5" />
+                                        )}
+                                        <span className="hidden sm:inline text-[11px]">ดาวน์โหลด</span>
+                                      </button>
+
+                                      {/* ไอคอนเปิดไฟล์ใน Google Drive */}
+                                      {driveUrl && (
+                                        <a
+                                          href={driveUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold inline-flex items-center gap-1 transition-colors cursor-pointer shadow-2xs no-underline"
+                                          title="เปิดดู/ดาวน์โหลดบน Google Drive โดยตรง"
+                                        >
+                                          <ExternalLink className="w-3.5 h-3.5" />
+                                          <span className="hidden sm:inline text-[11px]">Drive</span>
+                                        </a>
+                                      )}
+
+                                      {/* ไอคอนลบไฟล์นี้ */}
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setConfirmDeleteModal({
+                                            type: 'submission',
+                                            id: liveStatusTask.id,
+                                            memberId: sub.memberId || mem.id,
+                                            memberName: sub.memberName || mem.fullName,
+                                            fileName: sub.fileName,
+                                            title: `ไฟล์ "${sub.fileName}" ของ ${mem.fullName}`
+                                          });
+                                        }}
+                                        className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                        title="ลบเฉพาะไฟล์นี้"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </div>
                         )}
                       </div>
@@ -1645,94 +1733,171 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                   })}
 
                   {/* แสดงรายการส่งงานเพิ่มเติมหากมีสมาชิกที่ส่งเข้ามาแต่ไม่ได้อยู่ในรายการ schoolMembers */}
-                  {(liveStatusTask.submissions || [])
-                    .filter(s => s && !StorageService.isSubmissionDeleted(liveStatusTask.id, s.memberId, s.memberName, s.fileName) && !schoolMembers.some(m => findMemberSubmission(liveStatusTask, m)?.memberId === s.memberId || findMemberSubmission(liveStatusTask, m)?.memberName === s.memberName))
-                    .map((sub, extraIdx) => {
-                      const effectiveFileUrl = resolveSubmissionDriveUrl(sub, liveStatusTask.submittedFileUrl, liveStatusTask);
-                      const extraDlKey = `sub-extra-${liveStatusTask.id}-${sub.memberId || extraIdx}`;
+                  {(() => {
+                    const extraSubs = (liveStatusTask.submissions || []).filter(
+                      s => s && !StorageService.isSubmissionDeleted(liveStatusTask.id, s.memberId, s.memberName, s.fileName) &&
+                           !schoolMembers.some(m => findMemberSubmissions(liveStatusTask, m).some(ms => ms.memberId === s.memberId || ms.memberName === s.memberName))
+                    );
+
+                    // Group extra submissions by member
+                    const extraGroups: Record<string, TaskSubmission[]> = {};
+                    extraSubs.forEach(s => {
+                      const key = s.memberId || s.memberName || 'extra';
+                      if (!extraGroups[key]) extraGroups[key] = [];
+                      extraGroups[key].push(s);
+                    });
+
+                    return Object.entries(extraGroups).map(([groupKey, subs], extraIdx) => {
+                      const firstSub = subs[0];
+                      const memberName = firstSub.memberName || firstSub.memberId || `สมาชิกท่านที่ ${schoolMembers.length + extraIdx + 1}`;
+                      const isExpanded = !!expandedMemberIds[`extra_${groupKey}`];
+
                       return (
                         <div
-                          key={`extra-${sub.memberId}-${extraIdx}`}
-                          className="p-3 rounded-2xl border bg-emerald-50/70 border-emerald-300 flex items-center justify-between gap-3"
+                          key={`extra-group-${groupKey}`}
+                          className="p-3 rounded-2xl border bg-emerald-50/70 border-emerald-300 transition-all space-y-2"
                         >
-                          <div className="flex items-center gap-3 min-w-0">
-                            <span className="w-7 h-7 rounded-xl bg-white border border-slate-200 font-mono font-bold text-xs text-slate-700 flex items-center justify-center shrink-0">
-                              {schoolMembers.length + extraIdx + 1}
-                            </span>
-                            <div className="min-w-0">
-                              <div className="font-bold text-xs sm:text-sm text-slate-800 truncate">
-                                {sub.memberName || sub.memberId}
-                              </div>
-                              <div className="flex items-center gap-2 mt-0.5">
-                                <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md truncate max-w-[220px]">
-                                  ✓ ส่งแล้ว ({sub.fileName})
-                                </span>
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <span className="w-7 h-7 rounded-xl bg-white border border-slate-200 font-mono font-bold text-xs text-slate-700 flex items-center justify-center shrink-0">
+                                {schoolMembers.length + extraIdx + 1}
+                              </span>
+                              <div className="min-w-0">
+                                <div className="font-bold text-xs sm:text-sm text-slate-800 truncate">
+                                  {memberName}
+                                </div>
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md truncate max-w-[220px]">
+                                    ✓ ส่งแล้ว ({subs.length} ไฟล์)
+                                  </span>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            {/* Download button - In-page direct download without navigating away */}
-                            <button
-                              type="button"
-                              disabled={downloadingFileKey === extraDlKey}
-                              onClick={() =>
-                                handleDownloadFile(
-                                  effectiveFileUrl,
-                                  sub.fileName,
-                                  extraDlKey,
-                                  liveStatusTask.id,
-                                  sub.memberId
-                                )
-                              }
-                              className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-                              title="ดาวน์โหลดไฟล์ต้นฉบับแท้"
-                            >
-                              {downloadingFileKey === extraDlKey ? (
-                                <>
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
-                                  <span>กำลังดาวน์โหลด...</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Download className="w-3.5 h-3.5" />
-                                  <span>ดาวน์โหลด</span>
-                                </>
-                              )}
-                            </button>
-                            {getGoogleDriveViewUrl(effectiveFileUrl) && (
-                              <a
-                                href={getGoogleDriveViewUrl(effectiveFileUrl)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="px-2 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold inline-flex items-center gap-1 transition-colors cursor-pointer shadow-2xs no-underline"
-                                title="เปิดดู/ดาวน์โหลดบน Google Drive โดยตรง"
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => toggleMemberExpand(`extra_${groupKey}`)}
+                                className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold inline-flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs ${
+                                  isExpanded
+                                    ? 'bg-emerald-600 text-white border-emerald-600'
+                                    : 'bg-white hover:bg-emerald-100/70 text-emerald-800 border-emerald-300'
+                                }`}
+                                title={isExpanded ? 'ย่อรายการไฟล์' : 'กดเพื่อเลื่อนลงมาแสดงไฟล์ทั้งหมดที่ส่ง'}
                               >
-                                <ExternalLink className="w-3.5 h-3.5" />
-                                <span className="hidden sm:inline">Drive</span>
-                              </a>
-                            )}
-                            {/* Delete submission icon for extra submission */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setConfirmDeleteModal({
-                                  type: 'submission',
-                                  id: liveStatusTask.id,
-                                  memberId: sub.memberId,
-                                  memberName: sub.memberName,
-                                  fileName: sub.fileName,
-                                  title: `งานที่ส่งของ ${sub.memberName || sub.memberId || 'สมาชิก'}`
-                                });
-                              }}
-                              className="p-1.5 bg-white hover:bg-rose-50 text-rose-600 border border-slate-200 rounded-xl transition-colors cursor-pointer shadow-2xs"
-                              title="ลบงานที่ส่ง"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                                <span>ไฟล์ที่ส่ง ({subs.length})</span>
+                                <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setConfirmDeleteModal({
+                                    type: 'submission',
+                                    id: liveStatusTask.id,
+                                    memberId: firstSub.memberId,
+                                    memberName: firstSub.memberName,
+                                    title: `งานทั้งหมดของ ${memberName}`
+                                  });
+                                }}
+                                className="p-1.5 bg-white hover:bg-rose-50 text-rose-600 border border-slate-200 rounded-xl transition-colors cursor-pointer shadow-2xs"
+                                title="ลบงานที่ส่งทั้งหมด"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
                           </div>
+
+                          {isExpanded && (
+                            <div className="mt-2.5 pt-2.5 border-t border-emerald-200/90 space-y-1.5 animate-in fade-in slide-in-from-top-1">
+                              {subs.map((s, fIdx) => {
+                                const effectiveUrl = resolveSubmissionDriveUrl(s, liveStatusTask.submittedFileUrl, liveStatusTask);
+                                const extraDlKey = `sub-extra-${liveStatusTask.id}-${s.memberId || fIdx}-${fIdx}`;
+                                const driveUrl = getGoogleDriveViewUrl(effectiveUrl) || (s.driveFileId ? `https://drive.google.com/file/d/${s.driveFileId}/view?usp=sharing` : '');
+
+                                return (
+                                  <div
+                                    key={s.id || `${s.fileName}-${fIdx}`}
+                                    className="p-2.5 bg-white rounded-xl border border-emerald-200/90 flex items-center justify-between gap-2 shadow-2xs"
+                                  >
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <span className="w-6 h-6 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center justify-center shrink-0 text-emerald-700">
+                                        <FileText className="w-3.5 h-3.5" />
+                                      </span>
+                                      <div className="min-w-0">
+                                        <div className="text-xs font-bold text-slate-800 truncate" title={s.fileName}>
+                                          {s.fileName}
+                                        </div>
+                                        <div className="text-[10px] text-slate-400">
+                                          {s.fileSize || '1.0 MB'}
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-1.5 shrink-0">
+                                      <button
+                                        type="button"
+                                        disabled={downloadingFileKey === extraDlKey}
+                                        onClick={() =>
+                                          handleDownloadFile(
+                                            effectiveUrl,
+                                            s.fileName,
+                                            extraDlKey,
+                                            liveStatusTask.id,
+                                            s.memberId
+                                          )
+                                        }
+                                        className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white rounded-lg text-xs font-bold inline-flex items-center gap-1 cursor-pointer shadow-2xs"
+                                        title="ดาวน์โหลดไฟล์นี้"
+                                      >
+                                        {downloadingFileKey === extraDlKey ? (
+                                          <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+                                        ) : (
+                                          <Download className="w-3.5 h-3.5" />
+                                        )}
+                                        <span className="hidden sm:inline text-[11px]">ดาวน์โหลด</span>
+                                      </button>
+
+                                      {driveUrl && (
+                                        <a
+                                          href={driveUrl}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold inline-flex items-center gap-1 cursor-pointer shadow-2xs no-underline"
+                                          title="เปิดดูบน Google Drive"
+                                        >
+                                          <ExternalLink className="w-3.5 h-3.5" />
+                                          <span className="hidden sm:inline text-[11px]">Drive</span>
+                                        </a>
+                                      )}
+
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setConfirmDeleteModal({
+                                            type: 'submission',
+                                            id: liveStatusTask.id,
+                                            memberId: s.memberId,
+                                            memberName: s.memberName,
+                                            fileName: s.fileName,
+                                            title: `ไฟล์ "${s.fileName}" ของ ${memberName}`
+                                          });
+                                        }}
+                                        className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                        title="ลบเฉพาะไฟล์นี้"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
                       );
-                    })}
+                    });
+                  })()}
                 </>
               )}
             </div>
@@ -1936,15 +2101,17 @@ export const Module4Assignments: React.FC<Module4Props> = ({
       {/* MODAL: Member Submit / Edit File Upload */}
       {submittingTaskId && (() => {
         const currentTask = tasks.find(t => t.id === submittingTaskId);
-        const mySub = currentTask ? getMySubmission(currentTask) : undefined;
+        const mySubs = currentTask ? getMySubmissions(currentTask) : [];
+        const hasExisting = mySubs.length > 0;
+        const totalNewFiles = submittedFiles.length;
 
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-in fade-in">
-            <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
                 <div className="min-w-0 pr-2">
                   <h3 className="text-sm sm:text-base font-bold text-slate-800">
-                    {mySub ? 'แก้ไขงานที่ส่ง / เปลี่ยนไฟล์ใหม่' : 'ส่งงาน / อัปโหลดไฟล์แนบ'}
+                    {hasExisting ? 'ส่งงานเพิ่มเติม / จัดการไฟล์ที่ส่ง' : 'ส่งงาน / อัปโหลดไฟล์แนบ'}
                   </h3>
                   {currentTask && (
                     <p className="text-[11px] text-slate-500 truncate mt-0.5">
@@ -1957,6 +2124,9 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                   onClick={() => {
                     setSubmittingTaskId(null);
                     setSubmittedFile(null);
+                    setSubmittedFiles([]);
+                    setUploadProgress(0);
+                    setUploadStepText('');
                   }}
                   className="text-slate-400 hover:text-slate-600 p-1.5 rounded-xl cursor-pointer shrink-0"
                 >
@@ -1964,166 +2134,230 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                 </button>
               </div>
 
-              {/* กรณีมีไฟล์เดิมที่ส่งไว้แล้ว: แสดงไฟล์เดิม พร้อมปุ่มดาวน์โหลด และปุ่มลบไฟล์เดิม */}
-              {mySub && !submittedFile && (
-                <div className="p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-2xl space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100/90 px-2.5 py-0.5 rounded-lg">
-                      ไฟล์เดิมที่ส่งไว้แล้ว
-                    </span>
-                    <button
-                      type="button"
-                      disabled={downloadingFileKey === mySub.fileName}
-                      onClick={() => handleDownloadFile(mySub.fileUrl, mySub.fileName, mySub.fileName, currentTask?.id, user.id)}
-                      className="text-[11px] font-bold text-emerald-700 hover:text-emerald-900 inline-flex items-center gap-1 cursor-pointer"
-                    >
-                      {downloadingFileKey === mySub.fileName ? (
-                        <>
-                          <Loader2 className="w-3 h-3 animate-spin" />
-                          <span>กำลังดาวน์โหลด...</span>
-                        </>
-                      ) : (
-                        <>
-                          <Download className="w-3.5 h-3.5" />
-                          <span>ดาวน์โหลดไฟล์เดิม</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-2 p-2.5 bg-white rounded-xl border border-emerald-200/80 text-xs">
-                    <div className="flex items-center gap-2 truncate">
-                      <FileText className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span className="font-semibold text-slate-800 truncate" title={mySub.fileName}>
-                        {mySub.fileName}
+              <div className="overflow-y-auto space-y-3.5 flex-1 pr-1">
+                {/* กรณีมีไฟล์เดิมที่ส่งไว้แล้ว: แสดงรายการไฟล์เดิมทั้งหมด พร้อมปุ่มดาวน์โหลด ดู Drive และลบไฟล์ */}
+                {hasExisting && (
+                  <div className="p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-2xl space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100/90 px-2.5 py-0.5 rounded-lg">
+                        ไฟล์ที่ส่งไปแล้ว ({mySubs.length} ไฟล์)
                       </span>
-                      <span className="text-[10px] text-slate-400 shrink-0">
-                        ({mySub.fileSize || '1.0 MB'})
-                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleMemberRemoveOldFile(currentTask!.id)}
+                        className="text-[11px] font-bold text-rose-600 hover:text-rose-800 inline-flex items-center gap-1 cursor-pointer"
+                        title="ลบไฟล์ที่ส่งไว้แล้วทั้งหมด"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>ลบไฟล์เดิมทั้งหมด</span>
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleMemberRemoveOldFile(currentTask!.id)}
-                      className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-[11px] font-bold shrink-0 transition-colors cursor-pointer flex items-center gap-1"
-                      title="กดลบไฟล์เก่าเพื่อเลือกไฟล์ใหม่"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                      <span>ลบไฟล์เก่า</span>
-                    </button>
+
+                    <div className="space-y-1.5">
+                      {mySubs.map((sub, sIdx) => {
+                        const driveUrl = getGoogleDriveViewUrl(sub.fileUrl) || (sub.driveFileId ? `https://drive.google.com/file/d/${sub.driveFileId}/view?usp=sharing` : '');
+                        const dlKey = `my-file-${currentTask?.id}-${sIdx}`;
+
+                        return (
+                          <div
+                            key={sub.id || `${sub.fileName}-${sIdx}`}
+                            className="flex items-center justify-between gap-2 p-2.5 bg-white rounded-xl border border-emerald-200/80 text-xs shadow-2xs"
+                          >
+                            <div className="flex items-center gap-2 min-w-0">
+                              <FileText className="w-4 h-4 text-emerald-600 shrink-0" />
+                              <div className="min-w-0">
+                                <div className="font-semibold text-slate-800 truncate" title={sub.fileName}>
+                                  {sub.fileName}
+                                </div>
+                                <div className="text-[10px] text-slate-400">
+                                  {sub.fileSize || '1.0 MB'} {sub.submittedAt ? `• ${new Date(sub.submittedAt).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.` : ''}
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1 shrink-0">
+                              {/* ดาวน์โหลด */}
+                              <button
+                                type="button"
+                                disabled={downloadingFileKey === dlKey}
+                                onClick={() => handleDownloadFile(sub.fileUrl, sub.fileName, dlKey, currentTask?.id, user.id)}
+                                className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white rounded-lg text-[11px] font-bold inline-flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
+                                title="ดาวน์โหลดไฟล์นี้"
+                              >
+                                {downloadingFileKey === dlKey ? (
+                                  <Loader2 className="w-3 h-3 animate-spin text-white" />
+                                ) : (
+                                  <Download className="w-3 h-3" />
+                                )}
+                                <span className="hidden sm:inline">โหลด</span>
+                              </button>
+
+                              {/* Drive */}
+                              {driveUrl && (
+                                <a
+                                  href={driveUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-[11px] font-bold inline-flex items-center gap-1 transition-colors cursor-pointer shadow-2xs no-underline"
+                                  title="เปิดดูใน Google Drive"
+                                >
+                                  <ExternalLink className="w-3 h-3" />
+                                  <span className="hidden sm:inline">Drive</span>
+                                </a>
+                              )}
+
+                              {/* ลบเฉพาะไฟล์นี้ */}
+                              <button
+                                type="button"
+                                onClick={() => handleMemberRemoveOldFile(currentTask!.id, sub.fileName)}
+                                className="p-1 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-lg transition-colors cursor-pointer"
+                                title="ลบเฉพาะไฟล์นี้"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                  <p className="text-[10px] text-slate-500">
-                    * ท่านสามารถกด "ลบไฟล์เก่า" เพื่อยกเลิกไฟล์เดิม หรือเลือกไฟล์ใหม่ด้านล่างเพื่อส่งแทนที่ไฟล์เดิมได้ทันที
-                  </p>
-                </div>
-              )}
+                )}
 
-              <div className="space-y-3">
-                <label className="border-2 border-dashed border-purple-200 hover:border-purple-400 rounded-2xl p-5 flex flex-col items-center justify-center cursor-pointer bg-purple-50/40 hover:bg-purple-50/70 transition-colors">
-                  <Upload className="w-8 h-8 text-purple-600 mb-2" />
-                  <span className="text-xs font-bold text-slate-800">
-                    {mySub ? 'คลิกเพื่อเลือกไฟล์ใหม่ (ส่งแทนที่ไฟล์เดิม)' : 'คลิกเพื่ออัปโหลดไฟล์งาน'}
-                  </span>
-                  <span className="text-[10px] text-slate-500 mt-0.5">
-                    รองรับทุกประเภทไฟล์ (Word .docx, Excel .xlsx, PDF, รูปภาพ ฯลฯ สูงสุดไม่เกิน 5MB ต่อไฟล์)
-                  </span>
-                  <input
-                    type="file"
-                    onChange={handleFileSubmitUpload}
-                    className="hidden"
-                  />
-                </label>
+                {/* Dropzone สำหรับเลือกไฟล์ (รองรับหลายไฟล์ หรือกี่ไฟล์ก็ได้ แต่ละไฟล์ <= 5MB) */}
+                <div className="space-y-2.5">
+                  <label className="border-2 border-dashed border-purple-200 hover:border-purple-400 rounded-2xl p-5 flex flex-col items-center justify-center cursor-pointer bg-purple-50/40 hover:bg-purple-50/70 transition-colors text-center">
+                    <Upload className="w-8 h-8 text-purple-600 mb-2" />
+                    <span className="text-xs sm:text-sm font-bold text-slate-800">
+                      {hasExisting ? 'คลิกเพื่อเลือกไฟล์งานเพิ่มเติม' : 'คลิกเพื่ออัปโหลดไฟล์งาน'}
+                    </span>
+                    <span className="text-[11px] font-semibold text-purple-700 mt-1">
+                      สามารถส่งไฟล์มากกว่า 2 ไฟล์ หรือส่งกี่ไฟล์ก็ได้ (ไม่จำกัดจำนวนไฟล์)
+                    </span>
+                    <span className="text-[10px] text-slate-500 mt-0.5">
+                      แต่ละไฟล์ขนาดสูงสุดไม่เกิน 5MB • รองรับ Word (.docx), Excel (.xlsx), PDF, รูปภาพ และเอกสารอื่นๆ
+                    </span>
+                    <input
+                      type="file"
+                      multiple
+                      onChange={handleFilesSubmitUpload}
+                      className="hidden"
+                    />
+                  </label>
 
-                {submittedFile && (
-                  <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl flex items-center justify-between text-xs text-emerald-950">
-                    <div className="flex items-center gap-2 truncate">
-                      <FileText className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <div className="truncate">
-                        <div className="font-bold truncate">{submittedFile.name}</div>
-                        <div className="text-[10px] text-emerald-700">ขนาด: {submittedFile.size} • พร้อมส่งแทนที่</div>
+                  {/* รายการไฟล์ใหม่ที่อัปโหลดและเตรียมส่ง */}
+                  {submittedFiles.length > 0 && (
+                    <div className="space-y-1.5 animate-in fade-in">
+                      <div className="text-[11px] font-bold text-slate-700 flex items-center justify-between">
+                        <span>ไฟล์ใหม่ที่เตรียมส่ง ({submittedFiles.length} ไฟล์):</span>
+                        <button
+                          type="button"
+                          onClick={() => setSubmittedFiles([])}
+                          className="text-[10px] text-rose-600 hover:underline cursor-pointer"
+                        >
+                          ล้างไฟล์ใหม่ทั้งหมด
+                        </button>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        {submittedFiles.map((sf, sfIdx) => (
+                          <div
+                            key={sf.id || sfIdx}
+                            className="p-2.5 bg-emerald-50 border border-emerald-300 rounded-xl flex items-center justify-between text-xs text-emerald-950"
+                          >
+                            <div className="flex items-center gap-2 truncate min-w-0">
+                              <FileText className="w-4 h-4 text-emerald-600 shrink-0" />
+                              <div className="truncate">
+                                <div className="font-bold truncate">{sf.name}</div>
+                                <div className="text-[10px] text-emerald-700">
+                                  ขนาด: {sf.size} • พร้อมยืนยันการส่ง
+                                </div>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSubmittedFiles(prev => prev.filter(item => item.id !== sf.id));
+                              }}
+                              className="text-rose-600 hover:text-rose-800 font-bold text-xs p-1 hover:bg-rose-50 rounded-lg shrink-0 cursor-pointer"
+                              title="ยกเลิกไฟล์นี้"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ))}
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSubmittedFile(null);
-                        setUploadProgress(0);
-                        setUploadStepText('');
-                      }}
-                      className="text-rose-600 hover:text-rose-800 font-bold text-xs px-2 py-1 bg-white border border-rose-200 rounded-lg shrink-0 cursor-pointer"
-                    >
-                      ยกเลิกไฟล์นี้
-                    </button>
-                  </div>
-                )}
+                  )}
 
-                {/* Upload Progress Indicator with Percentage 0% - 100% */}
-                {(isUploadingSubmission || uploadProgress > 0) && (
-                  <div className="p-3.5 bg-purple-50 border border-purple-200 rounded-2xl space-y-2 animate-in fade-in">
-                    <div className="flex items-center justify-between text-xs font-bold">
-                      <span className="flex items-center gap-1.5 text-purple-900 truncate pr-2">
-                        <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-600 shrink-0" />
-                        <span className="truncate">{uploadStepText || 'กำลังประมวลผลและอัปโหลดไฟล์...'}</span>
-                      </span>
-                      <span className="font-mono text-purple-800 font-extrabold shrink-0 bg-purple-100 border border-purple-200 px-2 py-0.5 rounded-md">
-                        {uploadProgress}%
-                      </span>
+                  {/* Upload Progress Indicator with Percentage 0% - 100% */}
+                  {(isUploadingSubmission || (uploadProgress > 0 && uploadProgress < 100)) && (
+                    <div className="p-3.5 bg-purple-50 border border-purple-200 rounded-2xl space-y-2 animate-in fade-in">
+                      <div className="flex items-center justify-between text-xs font-bold">
+                        <span className="flex items-center gap-1.5 text-purple-900 truncate pr-2">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-600 shrink-0" />
+                          <span className="truncate">{uploadStepText || 'กำลังประมวลผลและอัปโหลดไฟล์...'}</span>
+                        </span>
+                        <span className="font-mono text-purple-800 font-extrabold shrink-0 bg-purple-100 border border-purple-200 px-2 py-0.5 rounded-md">
+                          {uploadProgress}%
+                        </span>
+                      </div>
+                      <div className="w-full bg-purple-200/80 h-2.5 rounded-full overflow-hidden p-0.5">
+                        <div
+                          className="bg-gradient-to-r from-purple-600 via-indigo-600 to-emerald-500 h-full rounded-full transition-all duration-300 ease-out"
+                          style={{ width: `${Math.max(4, uploadProgress)}%` }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-purple-700 font-medium">
+                        <span>{uploadProgress < 100 ? 'กำลังอัปโหลดข้อมูลและเชื่อมโยงระบบ...' : '✓ อัปโหลดครบ 100% พร้อมกดยืนยันการส่งงาน'}</span>
+                        <span className="font-bold">{uploadProgress === 100 ? 'เสร็จสิ้น 100%' : `${uploadProgress}% / 100%`}</span>
+                      </div>
                     </div>
-                    <div className="w-full bg-purple-200/80 h-2.5 rounded-full overflow-hidden p-0.5">
-                      <div
-                        className="bg-gradient-to-r from-purple-600 via-indigo-600 to-emerald-500 h-full rounded-full transition-all duration-300 ease-out"
-                        style={{ width: `${Math.max(4, uploadProgress)}%` }}
-                      />
-                    </div>
-                    <div className="flex items-center justify-between text-[10px] text-purple-700 font-medium">
-                      <span>{uploadProgress < 100 ? 'กำลังอัปโหลดข้อมูลและเชื่อมโยงระบบ...' : '✓ อัปโหลดครบ 100% พร้อมกดยืนยันการส่งงาน'}</span>
-                      <span className="font-bold">{uploadProgress === 100 ? 'เสร็จสิ้น 100%' : `${uploadProgress}% / 100%`}</span>
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSubmittingTaskId(null);
-                      setSubmittedFile(null);
-                      setUploadProgress(0);
-                      setUploadStepText('');
-                    }}
-                    className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
-                  >
-                    ปิด
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!submittedFile || isUploadingSubmission || uploadProgress < 100}
-                    onClick={() => handleFinalSubmitTask(submittingTaskId)}
-                    className={`px-4 py-2 text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-all ${
-                      uploadProgress === 100 && submittedFile && !isUploadingSubmission
-                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer active:scale-95'
-                        : 'bg-slate-300 dark:bg-slate-700 text-slate-500 dark:text-slate-400 cursor-not-allowed border border-slate-300 dark:border-slate-600'
-                    }`}
-                  >
-                    {isUploadingSubmission ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-500" />
-                    ) : uploadProgress === 100 ? (
-                      <CheckCircle2 className="w-3.5 h-3.5 text-white" />
-                    ) : (
-                      <Clock className="w-3.5 h-3.5 text-slate-400" />
-                    )}
-                    <span>
-                      {isUploadingSubmission
-                        ? `กำลังอัปโหลดไฟล์... ${uploadProgress}%`
-                        : !submittedFile
-                        ? 'กรุณาเลือกไฟล์งาน'
-                        : uploadProgress < 100
-                        ? `รออัปโหลดครบ 100% (${uploadProgress}%)`
-                        : mySub
-                        ? 'บันทึกส่งงานใหม่'
-                        : 'ยืนยันการส่งงาน'}
-                    </span>
-                  </button>
+                  )}
                 </div>
+              </div>
+
+              {/* Modal Footer Buttons */}
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSubmittingTaskId(null);
+                    setSubmittedFile(null);
+                    setSubmittedFiles([]);
+                    setUploadProgress(0);
+                    setUploadStepText('');
+                  }}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+                >
+                  ปิด
+                </button>
+                <button
+                  type="button"
+                  disabled={submittedFiles.length === 0 || isUploadingSubmission || uploadProgress < 100}
+                  onClick={() => handleFinalSubmitTask(submittingTaskId)}
+                  className={`px-4 py-2 text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-all ${
+                    submittedFiles.length > 0 && uploadProgress === 100 && !isUploadingSubmission
+                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer active:scale-95'
+                      : 'bg-slate-300 dark:bg-slate-700 text-slate-500 dark:text-slate-400 cursor-not-allowed border border-slate-300 dark:border-slate-600'
+                  }`}
+                >
+                  {isUploadingSubmission ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-500" />
+                  ) : uploadProgress === 100 && submittedFiles.length > 0 ? (
+                    <CheckCircle2 className="w-3.5 h-3.5 text-white" />
+                  ) : (
+                    <Clock className="w-3.5 h-3.5 text-slate-400" />
+                  )}
+                  <span>
+                    {isUploadingSubmission
+                      ? `กำลังอัปโหลดไฟล์... ${uploadProgress}%`
+                      : submittedFiles.length === 0
+                      ? (hasExisting ? 'เลือกไฟล์เพิ่มเพื่อส่ง' : 'กรุณาเลือกไฟล์งาน')
+                      : uploadProgress < 100
+                      ? `รออัปโหลดครบ 100% (${uploadProgress}%)`
+                      : `ยืนยันการส่งงาน (${submittedFiles.length} ไฟล์)`}
+                  </span>
+                </button>
               </div>
             </div>
           </div>
@@ -2234,41 +2468,79 @@ export const Module4Assignments: React.FC<Module4Props> = ({
             <div className="pt-2 border-t border-slate-100 flex flex-col gap-2">
               {/* Member Action: Send / Edit Submission */}
               {user.role === 'member' && selectedTaskDetailModal.type !== 'announcement' && (() => {
-                const mySubInModal = getMySubmission(selectedTaskDetailModal);
+                const mySubsInModal = getMySubmissions(selectedTaskDetailModal);
+                const hasSent = mySubsInModal.length > 0;
                 return (
                   <div className="space-y-2">
-                    {mySubInModal && (
-                      <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-1.5 truncate">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                          <span className="font-bold text-emerald-800 truncate">ส่งแล้ว: {mySubInModal.fileName}</span>
+                    {hasSent && (
+                      <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl space-y-1.5 text-xs">
+                        <div className="flex items-center justify-between font-bold text-emerald-800">
+                          <span className="flex items-center gap-1.5">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <span>ไฟล์ที่ท่านส่งแล้ว ({mySubsInModal.length} ไฟล์):</span>
+                          </span>
                         </div>
-                        <button
-                          type="button"
-                          disabled={downloadingFileKey === mySubInModal.fileName}
-                          onClick={() =>
-                            handleDownloadFile(
-                              mySubInModal.fileUrl,
-                              mySubInModal.fileName,
-                              mySubInModal.fileName,
-                              selectedTaskDetailModal.id,
-                              user.id
-                            )
-                          }
-                          className="text-[11px] font-bold text-emerald-700 hover:text-emerald-900 shrink-0 inline-flex items-center gap-1 cursor-pointer"
-                        >
-                          {downloadingFileKey === mySubInModal.fileName ? (
-                            <>
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                              <span>กำลังดาวน์โหลด...</span>
-                            </>
-                          ) : (
-                            <>
-                              <Download className="w-3 h-3" />
-                              <span>ดาวน์โหลด</span>
-                            </>
-                          )}
-                        </button>
+                        <div className="space-y-1">
+                          {mySubsInModal.map((sub, sIdx) => {
+                            const driveUrl = getGoogleDriveViewUrl(sub.fileUrl) || (sub.driveFileId ? `https://drive.google.com/file/d/${sub.driveFileId}/view?usp=sharing` : '');
+                            const dlKey = `detail-modal-dl-${sub.fileName}-${sIdx}`;
+
+                            return (
+                              <div
+                                key={sub.id || `${sub.fileName}-${sIdx}`}
+                                className="flex items-center justify-between gap-2 p-1.5 bg-white rounded-lg border border-emerald-200/80"
+                              >
+                                <div className="flex items-center gap-1.5 truncate min-w-0">
+                                  <FileText className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                  <span className="font-semibold text-slate-800 truncate" title={sub.fileName}>
+                                    {sub.fileName}
+                                  </span>
+                                  <span className="text-[10px] text-slate-400 shrink-0">
+                                    ({sub.fileSize || '1.0 MB'})
+                                  </span>
+                                </div>
+
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <button
+                                    type="button"
+                                    disabled={downloadingFileKey === dlKey}
+                                    onClick={() =>
+                                      handleDownloadFile(
+                                        sub.fileUrl,
+                                        sub.fileName,
+                                        dlKey,
+                                        selectedTaskDetailModal.id,
+                                        user.id
+                                      )
+                                    }
+                                    className="text-[11px] font-bold text-emerald-700 hover:text-emerald-900 inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-emerald-50 rounded cursor-pointer"
+                                    title="ดาวน์โหลดไฟล์"
+                                  >
+                                    {downloadingFileKey === dlKey ? (
+                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                    ) : (
+                                      <Download className="w-3 h-3" />
+                                    )}
+                                    <span>โหลด</span>
+                                  </button>
+
+                                  {driveUrl && (
+                                    <a
+                                      href={driveUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-[11px] font-bold text-blue-700 hover:text-blue-900 inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-blue-50 rounded no-underline cursor-pointer"
+                                      title="เปิดดูใน Google Drive"
+                                    >
+                                      <ExternalLink className="w-3 h-3" />
+                                      <span>Drive</span>
+                                    </a>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     )}
                     <button
@@ -2279,8 +2551,8 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                       }}
                       className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all shadow-2xs cursor-pointer active:scale-95"
                     >
-                      {mySubInModal ? <Edit className="w-4 h-4" /> : <Upload className="w-4 h-4" />}
-                      <span>{mySubInModal ? 'แก้ไขงานที่ส่ง (ลบไฟล์เก่า / อัปโหลดใหม่)' : 'ส่งงานภาระงานนี้'}</span>
+                      {hasSent ? <Edit className="w-4 h-4" /> : <Upload className="w-4 h-4" />}
+                      <span>{hasSent ? 'ส่งไฟล์เพิ่มเติม / จัดการไฟล์ที่ส่ง' : 'ส่งงานภาระงานนี้'}</span>
                     </button>
                   </div>
                 );

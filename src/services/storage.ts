@@ -495,17 +495,27 @@ function mergeSingleTaskSubmissionsClient(existingTask: TaskItem, incomingTask: 
   const incomingSubs = Array.isArray(incomingTask.submissions) ? incomingTask.submissions : [];
 
   const subMap = new Map<string, TaskSubmission>();
-  const getKey = (s: TaskSubmission) => String(s?.memberId || s?.memberName || '').trim();
+  const getKey = (s: TaskSubmission) => {
+    if (!s) return '';
+    if ((s as any).id) return String((s as any).id).trim();
+    const mem = String(s.memberId || s.memberName || '').trim();
+    const file = String(s.fileName || '').trim();
+    return `${mem}__${file}`;
+  };
 
   const isSubDeleted = (taskId: string, s: TaskSubmission): boolean => {
     if (!s) return true;
     const k = getKey(s);
+    if ((s as any).id && isSubmissionKeyDeleted(taskId, (s as any).id)) return true;
+    if (s.fileName && isSubmissionKeyDeleted(taskId, s.fileName)) return true;
     if (isSubmissionKeyDeleted(taskId, s.memberId, s.memberName, s.fileName, k)) return true;
     const delAt =
+      ((s as any).id ? deletedMap[(s as any).id] : '') ||
+      (s.fileName && s.memberId ? deletedMap[`${s.memberId}_${s.fileName}`] : '') ||
+      (s.fileName ? deletedMap[s.fileName] : '') ||
       (k ? deletedMap[k] : '') ||
       (s.memberId ? (deletedMap[s.memberId] || deletedMap[s.memberId.toLowerCase()]) : '') ||
-      (s.memberName ? (deletedMap[s.memberName] || deletedMap[s.memberName.toLowerCase()]) : '') ||
-      (s.fileName ? deletedMap[s.fileName] : '');
+      (s.memberName ? (deletedMap[s.memberName] || deletedMap[s.memberName.toLowerCase()]) : '');
     if (delAt) {
       if (!s.submittedAt) return true;
       const delTime = new Date(delAt).getTime();
@@ -3591,15 +3601,32 @@ export const StorageService = {
 
     // 1. Register permanent tombstone keys
     const tombstoneKeys: string[] = [];
-    [normId, normName, normFile].forEach(id => {
-      if (id) {
-        const k = makeSubTombstoneKey(taskId, id);
-        if (k) {
-          deletedSubmissionKeysSet.add(k);
-          tombstoneKeys.push(k);
+    if (normFile) {
+      // Deleting a specific file
+      const k1 = makeSubTombstoneKey(taskId, normFile);
+      if (k1) {
+        deletedSubmissionKeysSet.add(k1);
+        tombstoneKeys.push(k1);
+      }
+      if (normId) {
+        const k2 = makeSubTombstoneKey(taskId, `${normId}_${normFile}`);
+        if (k2) {
+          deletedSubmissionKeysSet.add(k2);
+          tombstoneKeys.push(k2);
         }
       }
-    });
+    } else {
+      // Deleting the entire member's submissions
+      [normId, normName].forEach(id => {
+        if (id) {
+          const k = makeSubTombstoneKey(taskId, id);
+          if (k) {
+            deletedSubmissionKeysSet.add(k);
+            tombstoneKeys.push(k);
+          }
+        }
+      });
+    }
 
     try {
       localStorage.setItem('ams_deleted_submission_keys', JSON.stringify(Array.from(deletedSubmissionKeysSet).slice(-3000)));
@@ -3611,16 +3638,20 @@ export const StorageService = {
     // 2. Update task's deletedSubmissionsMap
     const nowIso = new Date().toISOString();
     const nextDeletedMap: Record<string, string> = { ...(targetTask.deletedSubmissionsMap || {}) };
-    if (normId) {
-      nextDeletedMap[normId] = nowIso;
-      nextDeletedMap[normId.toLowerCase()] = nowIso;
-    }
-    if (normName) {
-      nextDeletedMap[normName] = nowIso;
-      nextDeletedMap[normName.toLowerCase()] = nowIso;
-    }
     if (normFile) {
       nextDeletedMap[normFile] = nowIso;
+      if (normId) {
+        nextDeletedMap[`${normId}_${normFile}`] = nowIso;
+      }
+    } else {
+      if (normId) {
+        nextDeletedMap[normId] = nowIso;
+        nextDeletedMap[normId.toLowerCase()] = nowIso;
+      }
+      if (normName) {
+        nextDeletedMap[normName] = nowIso;
+        nextDeletedMap[normName.toLowerCase()] = nowIso;
+      }
     }
 
     // Find the submission being removed to get file info for deletion
@@ -3633,9 +3664,13 @@ export const StorageService = {
     // 3. Filter out submissions
     const nextSubs = (targetTask.submissions || []).filter(s => {
       if (!s) return false;
+      if (normFile) {
+        const matchesMember = !normId || s.memberId === normId || s.memberId?.toLowerCase() === normId.toLowerCase() || s.memberName === normName;
+        if (s.fileName === normFile && matchesMember) return false;
+        return true;
+      }
       if (normId && (s.memberId === normId || s.memberId?.toLowerCase() === normId.toLowerCase())) return false;
       if (normName && (s.memberName === normName || s.memberName?.toLowerCase() === normName.toLowerCase())) return false;
-      if (normFile && s.fileName === normFile) return false;
       if (isSubmissionKeyDeleted(taskId, s.memberId, s.memberName, s.fileName)) return false;
       return true;
     });
@@ -3645,11 +3680,24 @@ export const StorageService = {
     let nextSubmittedByName = targetTask.submittedByName;
     let nextSubmittedFileName = targetTask.submittedFileName;
 
-    if (
+    if (normFile && nextSubmittedFileName === normFile) {
+      const remainingForMember = nextSubs.filter(s =>
+        s.memberId === normId || s.memberId?.toLowerCase() === normId.toLowerCase() || s.memberName === normName
+      );
+      if (remainingForMember.length > 0) {
+        const last = remainingForMember[remainingForMember.length - 1];
+        nextSubmittedFileUrl = last.fileUrl;
+        nextSubmittedFileName = last.fileName;
+      } else {
+        nextSubmittedFileUrl = undefined;
+        nextSubmittedBy = undefined;
+        nextSubmittedByName = undefined;
+        nextSubmittedFileName = undefined;
+      }
+    } else if (!normFile && (
       (nextSubmittedBy && (nextSubmittedBy === normId || nextSubmittedBy.toLowerCase() === normId.toLowerCase())) ||
-      (nextSubmittedByName && (nextSubmittedByName === normName || nextSubmittedByName.toLowerCase() === normName.toLowerCase())) ||
-      (nextSubmittedFileName && nextSubmittedFileName === normFile)
-    ) {
+      (nextSubmittedByName && (nextSubmittedByName === normName || nextSubmittedByName.toLowerCase() === normName.toLowerCase()))
+    )) {
       nextSubmittedFileUrl = undefined;
       nextSubmittedBy = undefined;
       nextSubmittedByName = undefined;
