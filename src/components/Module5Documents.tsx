@@ -87,8 +87,9 @@ export const Module5Documents: React.FC<Module5Props> = ({
   useEffect(() => {
     StorageService.pullRemoteState(false).catch(() => {});
     const timer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       StorageService.pullRemoteState(false).catch(() => {});
-    }, 1000);
+    }, 6000);
     return () => clearInterval(timer);
   }, []);
 

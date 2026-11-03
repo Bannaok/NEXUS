@@ -6,9 +6,28 @@
 }
 
 @layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+
   body {
     font-family: 'Sarabun', 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
     font-feature-settings: "zero" 0;
+    overscroll-behavior-y: none;
+  }
+
+  /* Eliminate 300ms tap delay on mobile browsers & installed standalone PWA */
+  button,
+  a,
+  input,
+  select,
+  textarea,
+  label,
+  [role="button"] {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
   }
   
   /* Numeric alignment with clean open "0" (no slash or dot inside zero) */
@@ -17,6 +36,23 @@
     font-family: 'Sarabun', 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif !important;
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum" 1, "zero" 0 !important;
+  }
+}
+
+/* Mobile & Installed PWA High-Speed Touch & GPU Optimization */
+@media (max-width: 767px) {
+  .backdrop-blur-xs,
+  .backdrop-blur-sm,
+  .backdrop-blur,
+  .backdrop-blur-md,
+  .backdrop-blur-lg,
+  .backdrop-blur-xl {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  .animate-in {
+    animation-duration: 80ms !important;
   }
 }
 

@@ -2014,35 +2014,35 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
   return (
     <div className="space-y-4">
       {/* Top Navigation: 1) เช็กเวลา&เงินฝาก 2) 100วัน พร้อมปุ่มเครื่องหมาย + */}
-      <div className="bg-emerald-50/90 p-2 rounded-2xl border border-emerald-200/90 shadow-xs flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2 flex-wrap">
+      <div className="bg-emerald-50/90 p-2 rounded-2xl border border-emerald-200/90 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+        <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 w-full sm:w-auto">
           {/* Button/Tab 1: เช็กเวลา&เงินฝาก */}
           <button
             type="button"
             onClick={() => setActiveTab('main')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+            className={`px-3 sm:px-4 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer w-full sm:w-auto ${
               activeTab === 'main'
                 ? 'bg-emerald-600 text-white shadow-xs'
                 : 'bg-white hover:bg-emerald-100/60 text-slate-700 border border-emerald-200/60'
             }`}
           >
-            <CalendarCheck className="w-4 h-4" />
-            <span>เช็กเวลา&เงินฝาก</span>
+            <CalendarCheck className="w-4 h-4 shrink-0" />
+            <span className="whitespace-nowrap">เช็กเวลา&เงินฝาก</span>
           </button>
 
           {/* Button/Tab 2: 100วัน */}
           <button
             type="button"
             onClick={() => setActiveTab('school_days')}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+            className={`px-3 sm:px-4 py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer w-full sm:w-auto ${
               activeTab === 'school_days'
                 ? 'bg-emerald-600 text-white shadow-xs'
                 : 'bg-white hover:bg-emerald-100/60 text-slate-700 border border-emerald-200/60'
             }`}
           >
-            <CalendarDays className="w-4 h-4" />
-            <span>100วัน</span>
-            <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold ${
+            <CalendarDays className="w-4 h-4 shrink-0" />
+            <span className="whitespace-nowrap">100วัน</span>
+            <span className={`text-[10px] px-1.5 sm:px-2 py-0.5 rounded-full font-mono font-bold shrink-0 ${
               activeTab === 'school_days'
                 ? 'bg-emerald-700 text-white'
                 : 'bg-emerald-100 text-emerald-800'
@@ -2052,35 +2052,37 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
           </button>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap shrink-0">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto shrink-0">
           {user.role === 'admin' ? (
             <>
-              <select
-                value={selectedAcademicYear}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  if (val === 'add_new') {
-                    setIsAddYearModalOpen(true);
-                  } else {
-                    setSelectedAcademicYear(val);
-                  }
-                }}
-                className="px-3 py-2 rounded-xl bg-white hover:bg-emerald-50 text-emerald-900 border border-emerald-300 text-xs font-bold outline-none cursor-pointer shadow-2xs transition-colors"
-              >
-                {availableAcademicYears.map(yr => (
-                  <option key={yr} value={yr}>ปีการศึกษา {yr}</option>
-                ))}
-                <option value="add_new">+ เพิ่มปีการศึกษา...</option>
-              </select>
+              <div className="grid grid-cols-2 sm:flex sm:items-center gap-2 w-full sm:w-auto">
+                <select
+                  value={selectedAcademicYear}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val === 'add_new') {
+                      setIsAddYearModalOpen(true);
+                    } else {
+                      setSelectedAcademicYear(val);
+                    }
+                  }}
+                  className="px-3 py-2 rounded-xl bg-white hover:bg-emerald-50 text-emerald-900 border border-emerald-300 text-xs font-bold outline-none cursor-pointer shadow-2xs transition-colors w-full sm:w-auto truncate"
+                >
+                  {availableAcademicYears.map(yr => (
+                    <option key={yr} value={yr}>ปีการศึกษา {yr}</option>
+                  ))}
+                  <option value="add_new">+ เพิ่มปีการศึกษา...</option>
+                </select>
 
-              <select
-                value={selectedSemester}
-                onChange={(e) => setSelectedSemester(e.target.value as '1' | '2')}
-                className="px-3 py-2 rounded-xl bg-white hover:bg-emerald-50 text-emerald-900 border border-emerald-300 text-xs font-bold outline-none cursor-pointer shadow-2xs transition-colors"
-              >
-                <option value="1">ภาคเรียนที่ 1</option>
-                <option value="2">ภาคเรียนที่ 2</option>
-              </select>
+                <select
+                  value={selectedSemester}
+                  onChange={(e) => setSelectedSemester(e.target.value as '1' | '2')}
+                  className="px-3 py-2 rounded-xl bg-white hover:bg-emerald-50 text-emerald-900 border border-emerald-300 text-xs font-bold outline-none cursor-pointer shadow-2xs transition-colors w-full sm:w-auto truncate"
+                >
+                  <option value="1">ภาคเรียนที่ 1</option>
+                  <option value="2">ภาคเรียนที่ 2</option>
+                </select>
+              </div>
 
               {activeTab === 'main' && registeredHomeroomGrades.length > 0 && (
                 <div className="flex items-center gap-1.5 flex-wrap">
@@ -4828,6 +4830,29 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
                 >
                   <Banknote className="w-4 h-4 text-rose-600" />
                   <span>ต้องการถอนเงิน (คงเหลือ ฿{getStudentBalance(selectedStudentModal.id).toLocaleString()})</span>
+                </button>
+              </div>
+
+              {/* Section 4: ปุ่มบันทึกข้อมูล (เพิ่มตามคำขอเพื่อให้สมาชิกสบายใจ) */}
+              <div className="pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (editingDepositStudentId === selectedStudentModal.id) {
+                      handleSaveEditedDeposit(selectedStudentModal, getStudentTodayDepositRecord(selectedStudentModal.id));
+                    } else {
+                      const amt = Number(todayDeposits[selectedStudentModal.id]);
+                      if (amt > 0 && !getStudentTodayDepositRecord(selectedStudentModal.id)) {
+                        handleSingleDeposit(selectedStudentModal, amt);
+                      }
+                    }
+                    onShowToast('success', 'บันทึกเรียบร้อย', `บันทึกข้อมูลของ ${selectedStudentModal.prefix}${selectedStudentModal.firstName} ${selectedStudentModal.lastName} เรียบร้อยแล้ว`);
+                    setSelectedStudentModal(null);
+                  }}
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm active:scale-98"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>บันทึกข้อมูล</span>
                 </button>
               </div>
             </div>

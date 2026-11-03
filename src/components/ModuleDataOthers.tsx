@@ -11,6 +11,7 @@ import {
 import { StorageService } from '../services/storage';
 import { 
   Users, 
+  User,
   UserPlus, 
   Search, 
   Eye, 
@@ -2395,6 +2396,80 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
     name: string;
   } | null>(null);
 
+  // State & handler for downloading official government student profile PDF
+  const [downloadingStudentId, setDownloadingStudentId] = useState<string | null>(null);
+
+  // Helper for rendering Thai Citizen ID boxes in official format (13 digits: X - XXXX - XXXXX - XX - X)
+  const renderOfficialDigitBoxes = (digitsStr?: string, defaultLength = 13) => {
+    const cleanDigits = (digitsStr || '').replace(/\D/g, '');
+    const boxes = [];
+    for (let i = 0; i < defaultLength; i++) {
+      const digit = cleanDigits[i] || '';
+      boxes.push(
+        <span
+          key={i}
+          className="inline-flex items-center justify-center w-5 h-6.5 border border-black text-xs sm:text-[13px] font-mono font-bold bg-white text-black leading-none"
+        >
+          {digit}
+        </span>
+      );
+      if (defaultLength === 13 && (i === 0 || i === 4 || i === 9 || i === 11)) {
+        boxes.push(
+          <span key={`sep-${i}`} className="text-black font-bold px-0.5 select-none text-xs sm:text-[13px]">
+            -
+          </span>
+        );
+      }
+    }
+    return <div className="inline-flex items-center align-middle">{boxes}</div>;
+  };
+
+  const handleDownloadStudentOfficialPdf = async (student: Student) => {
+    if (downloadingStudentId) return;
+    setDownloadingStudentId(student.id);
+
+    let sheetEl = document.getElementById('student-official-a4-print');
+    if (!sheetEl) {
+      setViewingStudent(student);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      sheetEl = document.getElementById('student-official-a4-print');
+    }
+
+    if (!sheetEl) {
+      setDownloadingStudentId(null);
+      onShowToast('error', 'เกิดข้อผิดพลาด', 'ไม่พบเอกสารระเบียนประวัตินักเรียน กรุณาลองใหม่อีกครั้ง');
+      return;
+    }
+
+    try {
+      const cleanName = `${student.prefix}${student.firstName}_${student.lastName}`.replace(/\s+/g, '_');
+      const fileName = `ระเบียนประวัตินักเรียน_${cleanName}_ชั้น${student.gradeLevel}.pdf`;
+      const ok = await exportSheetsToPdf({
+        container: sheetEl,
+        filename: fileName,
+        orientation: 'portrait',
+      });
+      if (ok) {
+        onShowToast('success', 'ดาวน์โหลดสำเร็จ 🎉', `ดาวน์โหลดระเบียนประวัติ ${student.prefix}${student.firstName} ${student.lastName} (ฉบับทางการ) เรียบร้อยแล้ว`);
+      } else {
+        onShowToast('info', 'กำลังเปิดหน้าต่างพิมพ์', 'ระบบกำลังส่งต่อไปยังหน้าต่างพิมพ์เพื่อบันทึกเป็น PDF');
+        window.print();
+      }
+    } catch (err) {
+      console.error('Error downloading student official PDF:', err);
+      onShowToast('error', 'เกิดข้อผิดพลาด', 'ไม่สามารถสร้างไฟล์ PDF ได้ กรุณาลองใหม่อีกครั้ง');
+    } finally {
+      setDownloadingStudentId(null);
+    }
+  };
+
+  const handlePrintStudentOfficial = (student: Student) => {
+    setViewingStudent(student);
+    setTimeout(() => {
+      window.print();
+    }, 120);
+  };
+
   // Complete Student Form State
   const defaultStudentForm: Student = {
     id: '',
@@ -2817,17 +2892,17 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
       {activeSubTab === 'students' && (
         <div className="space-y-4">
           {/* Filter Bar */}
-          <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-wrap items-center justify-between gap-2.5">
-            <div className="flex items-center gap-2 flex-wrap flex-1 min-w-0">
-              {/* Search input - Hidden on mobile, visible on desktop */}
-              <div className="hidden sm:block relative min-w-[200px] sm:min-w-[220px]">
+          <div className="bg-white p-3.5 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center justify-between gap-2.5">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 flex-1 min-w-0">
+              {/* Search input */}
+              <div className="relative min-w-0 sm:min-w-[200px] sm:max-w-[260px]">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="ค้นหาชื่อ, นามสกุล หรือรหัสนักเรียน..."
-                  className="w-full text-xs pl-9 pr-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full text-xs pl-9 pr-3 py-2 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs"
                 />
               </div>
 
@@ -2914,12 +2989,12 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
 
               {/* Room Filter Buttons when grade has multiple rooms */}
               {availableRoomsForSelectedGrade.length > 1 && (
-                <div className="flex items-center gap-1 bg-blue-50/80 px-2 py-1 rounded-xl border border-blue-200">
-                  <span className="text-[11px] font-bold text-blue-900 px-1">ห้อง:</span>
+                <div className="w-full sm:w-auto flex items-center gap-1 bg-blue-50/80 px-2 py-1 rounded-xl border border-blue-200 overflow-x-auto scrollbar-none whitespace-nowrap">
+                  <span className="text-[11px] font-bold text-blue-900 px-1 shrink-0">ห้อง:</span>
                   <button
                     type="button"
                     onClick={() => setSelectedStudentRoom('ALL')}
-                    className={`px-2 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    className={`px-2 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer shrink-0 ${
                       selectedStudentRoom === 'ALL'
                         ? 'bg-blue-600 text-white shadow-2xs'
                         : 'bg-white text-blue-700 hover:bg-blue-100 border border-blue-200'
@@ -2932,7 +3007,7 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                       key={rm}
                       type="button"
                       onClick={() => setSelectedStudentRoom(rm)}
-                      className={`px-2 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                      className={`px-2 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer shrink-0 ${
                         selectedStudentRoom === rm
                           ? 'bg-blue-600 text-white shadow-2xs'
                           : 'bg-white text-blue-700 hover:bg-blue-100 border border-blue-200'
@@ -2945,17 +3020,17 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
               )}
             </div>
 
-            <div className="flex items-center gap-2 flex-wrap shrink-0">
+            <div className="flex items-center gap-1.5 sm:gap-2 w-full sm:w-auto shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100">
               {/* Batch Grade Promotion Button in Action Bar */}
               {user.role === 'admin' && (
                 <button
                   type="button"
                   onClick={() => handleOpenPromotionModal(selectedGrade !== 'all' && selectedGrade !== 'ประถม' && selectedGrade !== 'มัธยม' ? selectedGrade : 'ป.1')}
-                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white text-xs font-semibold rounded-xl transition-all flex items-center gap-1.5 shadow-xs shrink-0 cursor-pointer"
+                  className="flex-1 sm:flex-initial justify-center px-2 py-2 sm:px-3 sm:py-1.5 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white text-xs font-semibold rounded-xl transition-all flex items-center gap-1 sm:gap-1.5 shadow-xs shrink-0 cursor-pointer min-w-0"
                   title="เปิดหน้าต่างปรับระดับชั้นเรียน/เลื่อนชั้นเรียน"
                 >
-                  <GraduationCap className="w-3.5 h-3.5" />
-                  <span>แก้ระดับชั้น</span>
+                  <GraduationCap className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">แก้ระดับชั้น</span>
                 </button>
               )}
 
@@ -2967,20 +3042,20 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                   side: 'front',
                   grade: selectedGrade !== 'all' && selectedGrade !== 'ประถม' && selectedGrade !== 'มัธยม' ? selectedGrade : 'all'
                 })}
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-semibold rounded-xl transition-all flex items-center gap-1.5 shadow-xs shrink-0 cursor-pointer"
+                className="flex-1 sm:flex-initial justify-center px-2 py-2 sm:px-3 sm:py-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-semibold rounded-xl transition-all flex items-center gap-1 sm:gap-1.5 shadow-xs shrink-0 cursor-pointer min-w-0"
                 title="ดาวน์โหลด/พิมพ์บัตรนักเรียน (ขนาด 85.6 × 54 มม. แนวนอน บนกระดาษ A4 มีทั้งหน้าบัตรและหลังบัตร)"
               >
-                <Download className="w-3.5 h-3.5" />
-                <span>บัตรนักเรียน</span>
+                <Download className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">บัตรนักเรียน</span>
               </button>
 
               {user.role === 'admin' && (
                 <button
                   onClick={handleOpenAddStudent}
-                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl transition-colors flex items-center gap-1.5 shadow-xs shrink-0 active:scale-95 cursor-pointer"
+                  className="flex-1 sm:flex-initial justify-center px-2 py-2 sm:px-3 sm:py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl transition-colors flex items-center gap-1 sm:gap-1.5 shadow-xs shrink-0 active:scale-95 cursor-pointer min-w-0"
                 >
-                  <UserPlus className="w-3.5 h-3.5" />
-                  <span>เพิ่ม</span>
+                  <UserPlus className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">เพิ่ม</span>
                 </button>
               )}
             </div>
@@ -3256,21 +3331,15 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                                   type="button"
                                   onClick={() => setViewingStudent(student)}
                                   className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                                  title="ดูประวัติฉบับเต็ม"
+                                  title="ดูระเบียนประวัติฉบับทางการ"
                                 >
                                   <Eye className="w-3.5 h-3.5" />
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => {
-                                    setViewingStudent(student);
-                                    setTimeout(() => {
-                                      window.print();
-                                    }, 200);
-                                    onShowToast('success', 'ดาวน์โหลด PDF', `เตรียมพิมพ์/บันทึกประวัติ ${student.prefix}${student.firstName} ${student.lastName} เป็นไฟล์ PDF`);
-                                  }}
+                                  onClick={() => setViewingStudent(student)}
                                   className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
-                                  title="ดาวน์โหลดประวัตินักเรียนเป็น PDF"
+                                  title="ดูตัวอย่างและดาวน์โหลดระเบียนประวัติ PDF (ฉบับทางการ)"
                                 >
                                   <Download className="w-3.5 h-3.5" />
                                 </button>
@@ -3370,11 +3439,20 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
 
                         <div className="flex items-center gap-1">
                           <button
+                            type="button"
                             onClick={() => setViewingStudent(student)}
-                            className="p-1.5 text-blue-600 bg-blue-50 rounded-lg cursor-pointer"
-                            title="ดูประวัติ"
+                            className="p-1.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg cursor-pointer transition-colors"
+                            title="ดูระเบียนประวัติฉบับทางการ"
                           >
                             <Eye className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setViewingStudent(student)}
+                            className="p-1.5 text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-lg cursor-pointer transition-colors"
+                            title="ดูตัวอย่างและดาวน์โหลด PDF (ฉบับทางการ)"
+                          >
+                            <Download className="w-3.5 h-3.5" />
                           </button>
                           {user.role === 'admin' && (
                             <>
@@ -3938,285 +4016,482 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
         </div>
       )}
 
-      {/* MODAL: View Full Student Profile */}
+      {/* MODAL: View & Download Official Student Profile (ฉบับทางการหน่วยงานราชการ) */}
       {viewingStudent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in">
-          <div className="bg-white rounded-2xl max-w-3xl w-full p-4 sm:p-6 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <span className="p-2 rounded-xl bg-blue-50 text-blue-600">
-                  <Users className="w-5 h-5" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-xs p-2 sm:p-4 overflow-y-auto animate-in fade-in duration-150">
+          <style dangerouslySetInnerHTML={{ __html: `
+            #student-official-a4-print, #student-official-a4-print * {
+              font-family: 'Sarabun', 'TH Sarabun New', serif !important;
+              color: #000000 !important;
+            }
+            #student-official-a4-print th, #student-official-a4-print td {
+              border-color: #1e293b !important;
+            }
+            @media print {
+              body * {
+                visibility: hidden !important;
+              }
+              #student-official-a4-print, #student-official-a4-print * {
+                visibility: visible !important;
+                color: #000000 !important;
+              }
+              #student-official-a4-print {
+                position: fixed !important;
+                left: 0 !important;
+                top: 0 !important;
+                width: 210mm !important;
+                height: auto !important;
+                margin: 0 !important;
+                padding: 10mm 15mm 15mm 15mm !important;
+                border: none !important;
+                box-shadow: none !important;
+                background: white !important;
+                z-index: 999999 !important;
+              }
+              .no-print {
+                display: none !important;
+              }
+            }
+          `}} />
+
+          <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[96vh] flex flex-col shadow-2xl overflow-hidden border border-slate-300">
+            {/* Top Bar: Official Document Actions */}
+            <div className="p-3 sm:p-4 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="p-2 rounded-xl bg-emerald-50 text-emerald-700 shrink-0">
+                  <FileText className="w-5 h-5" />
                 </span>
-                <div>
-                  <h3 className="text-base font-bold text-slate-800">
-                    ข้อมูลประวัตินักเรียนและครอบครัวฉบับสมบูรณ์
+                <div className="min-w-0">
+                  <h3 className="text-sm sm:text-base font-bold text-slate-900 truncate">
+                    ระเบียนประวัตินักเรียนรายบุคคล (ฉบับทางการใช้ในหน่วยงานราชการ)
                   </h3>
-                  <p className="text-xs text-slate-500">
-                    {viewingStudent.studentCode ? `รหัสประจำตัว: ${viewingStudent.studentCode} • ` : ''}ชั้น {viewingStudent.gradeLevel}/{viewingStudent.room || '1'}
+                  <p className="text-xs text-slate-500 truncate">
+                    {viewingStudent.prefix}{viewingStudent.firstName} {viewingStudent.lastName}
+                    {viewingStudent.studentCode ? ` • รหัส #${viewingStudent.studentCode}` : ''}
+                    {` • ชั้น ${viewingStudent.gradeLevel}/${viewingStudent.room || '1'}`}
                     {viewingStudent.rollNumber ? ` • เลขที่ ${viewingStudent.rollNumber}` : ''}
                   </p>
                 </div>
               </div>
-              <button
-                onClick={() => setViewingStudent(null)}
-                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 cursor-pointer text-base"
-              >
-                ✕
-              </button>
-            </div>
 
-            <div className="space-y-4">
-              {/* Card 1: Student Personal Info & Address */}
-              <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 p-4 bg-slate-50 rounded-2xl border border-slate-200">
-                <div
-                  onClick={() => {
-                    if (viewingStudent.photoUrl) {
-                      onOpenLightbox(
-                        viewingStudent.photoUrl,
-                        `${viewingStudent.prefix}${viewingStudent.firstName} ${viewingStudent.lastName}`,
-                        `ชั้น ${viewingStudent.gradeLevel}/${viewingStudent.room || '1'}`
-                      );
-                    }
-                  }}
-                  className="w-24 h-28 rounded-xl bg-slate-200 overflow-hidden border border-slate-300 shrink-0 cursor-pointer hover:ring-2 hover:ring-blue-400 transition-all flex items-center justify-center shadow-2xs"
-                >
-                  {viewingStudent.photoUrl ? (
-                    <img src={viewingStudent.photoUrl} alt="" className="w-full h-full object-cover" />
-                  ) : (
-                    <span className="text-2xl font-bold text-slate-400">{viewingStudent.firstName[0]}</span>
-                  )}
-                </div>
-
-                <div className="flex-1 space-y-1.5 text-center sm:text-left w-full">
-                  <h4 className="text-base font-bold text-slate-800">
-                    {viewingStudent.prefix}{viewingStudent.firstName} {viewingStudent.lastName}
-                    {viewingStudent.nickname && <span className="text-blue-600 font-semibold ml-2">({viewingStudent.nickname})</span>}
-                  </h4>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-1 text-xs text-slate-600 pt-1">
-                    <div>วันเกิด: <strong className="text-slate-800">{viewingStudent.birthDate ? formatIsoToThaiDisplay(viewingStudent.birthDate, 'full') : '-'}</strong></div>
-                    <div>อายุ: <strong className="text-slate-800">{viewingStudent.age ? `${viewingStudent.age} ปี` : '-'}</strong></div>
-                    <div>ศาสนา: <strong className="text-slate-800">{viewingStudent.religion || 'พุทธ'}</strong></div>
-                    <div>เลขที่: <strong className="text-slate-800">{viewingStudent.rollNumber ?? '-'}</strong></div>
-                    <div>โรคประจำตัว: <strong className="text-rose-600">{viewingStudent.chronicDisease || 'ไม่มี'}</strong></div>
-                    <div>เงินมา ร.ร.: <strong className="text-emerald-700">{viewingStudent.dailyAllowance ?? 0} บาท/วัน</strong></div>
-                  </div>
-                  <div className="text-xs text-slate-600 pt-1.5 border-t border-slate-200/80">
-                    <span className="text-slate-500 font-medium">ที่อยู่ปัจจุบัน: </span>
-                    <strong className="text-slate-800">{viewingStudent.address || 'ไม่ได้ระบุ'}</strong>
-                  </div>
-                </div>
-              </div>
-
-              {/* Card 2: Father & Mother Info */}
-              <div className="p-4 bg-white rounded-2xl border border-slate-200 space-y-3">
-                <h5 className="font-bold text-xs text-slate-800 uppercase tracking-wider flex items-center gap-1.5 pb-1 border-b border-slate-100">
-                  <Users className="w-3.5 h-3.5 text-blue-500" />
-                  <span>ข้อมูลบิดา - มารดา</span>
-                </h5>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                  {/* Father */}
-                  <div className="p-3 bg-blue-50/40 rounded-xl border border-blue-100/80 space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-blue-900">ข้อมูลบิดา:</span>
-                      <div className="flex gap-1">
-                        {viewingStudent.fatherDeceased && (
-                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-rose-100 text-rose-700 font-bold">เสียชีวิต</span>
-                        )}
-                        {viewingStudent.fatherMissing && (
-                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-100 text-amber-800 font-bold">สาบสูญ</span>
-                        )}
-                      </div>
-                    </div>
-                    <p className="text-slate-800 font-medium">
-                      {(viewingStudent.fatherPrefix || 'นาย') + ' ' + (viewingStudent.fatherName || '-')}
-                    </p>
-                    <p className="text-slate-600 text-[11px]">อายุ: {viewingStudent.fatherAge ? `${viewingStudent.fatherAge} ปี` : '-'}</p>
-                    <p className="text-slate-600 text-[11px]">อาชีพ: {viewingStudent.fatherOccupation || '-'}</p>
-                    <p className="text-slate-600 text-[11px]">รายได้: {viewingStudent.fatherIncome ? `${viewingStudent.fatherIncome.toLocaleString()} บาท/เดือน` : '-'}</p>
-                    <p className="text-slate-600 text-[11px]">การศึกษาสูงสุด: {viewingStudent.fatherEducation || '-'}</p>
-                    <p className="text-blue-700 font-medium text-[11px]">เบอร์โทร: {viewingStudent.fatherPhone || '-'}</p>
-                  </div>
-
-                  {/* Mother */}
-                  <div className="p-3 bg-pink-50/40 rounded-xl border border-pink-100/80 space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-pink-900">ข้อมูลมารดา:</span>
-                      <div className="flex gap-1">
-                        {viewingStudent.motherDeceased && (
-                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-rose-100 text-rose-700 font-bold">เสียชีวิต</span>
-                        )}
-                        {viewingStudent.motherMissing && (
-                          <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-100 text-amber-800 font-bold">สาบสูญ</span>
-                        )}
-                      </div>
-                    </div>
-                    <p className="text-slate-800 font-medium">
-                      {(viewingStudent.motherPrefix || 'นาง') + ' ' + (viewingStudent.motherName || '-')}
-                    </p>
-                    <p className="text-slate-600 text-[11px]">อายุ: {viewingStudent.motherAge ? `${viewingStudent.motherAge} ปี` : '-'}</p>
-                    <p className="text-slate-600 text-[11px]">อาชีพ: {viewingStudent.motherOccupation || '-'}</p>
-                    <p className="text-slate-600 text-[11px]">รายได้: {viewingStudent.motherIncome ? `${viewingStudent.motherIncome.toLocaleString()} บาท/เดือน` : '-'}</p>
-                    <p className="text-slate-600 text-[11px]">การศึกษาสูงสุด: {viewingStudent.motherEducation || '-'}</p>
-                    <p className="text-pink-700 font-medium text-[11px]">เบอร์โทร: {viewingStudent.motherPhone || '-'}</p>
-                  </div>
-                </div>
-
-                {/* Parents Marital Status */}
-                <div className="p-2.5 bg-slate-50 rounded-xl text-xs flex items-center justify-between flex-wrap gap-2">
-                  <span className="text-slate-600 font-medium">สถานภาพของบิดา-มารดา:</span>
-                  <span className="font-bold text-slate-800">
-                    {viewingStudent.parentsMaritalStatus || 'อยู่ด้วยกัน'}
-                    {viewingStudent.parentsMaritalStatus === 'อื่นๆ' && viewingStudent.parentsMaritalStatusOther ? ` (${viewingStudent.parentsMaritalStatusOther})` : ''}
-                  </span>
-                </div>
-              </div>
-
-              {/* Card 3: Guardian Info */}
-              <div className="p-4 bg-white rounded-2xl border border-slate-200 space-y-2">
-                <h5 className="font-bold text-xs text-slate-800 uppercase tracking-wider flex items-center gap-1.5 pb-1 border-b border-slate-100">
-                  <Home className="w-3.5 h-3.5 text-indigo-500" />
-                  <span>ข้อมูลผู้ปกครอง</span>
-                </h5>
-                <div className="p-3 bg-indigo-50/40 rounded-xl border border-indigo-100/70 text-xs space-y-1.5">
-                  <div className="flex flex-wrap items-center justify-between gap-1">
-                    <span className="font-bold text-indigo-900">
-                      ผู้ปกครอง: {(viewingStudent.guardianPrefix || '') + ' ' + (viewingStudent.guardianName || '-')}
-                    </span>
-                    <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-[11px] font-semibold">
-                      ความสัมพันธ์: {viewingStudent.guardianRelation || 'บิดา'}
-                      {viewingStudent.guardianRelation === 'อื่นๆ' && viewingStudent.guardianRelationOther ? ` (${viewingStudent.guardianRelationOther})` : ''}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-slate-600 text-[11px]">
-                    <div>อายุ: <strong className="text-slate-800">{viewingStudent.guardianAge ? `${viewingStudent.guardianAge} ปี` : '-'}</strong></div>
-                    <div>อาชีพ: <strong className="text-slate-800">{viewingStudent.guardianOccupation || '-'}</strong></div>
-                    <div>รายได้: <strong className="text-slate-800">{viewingStudent.guardianIncome ? `${viewingStudent.guardianIncome.toLocaleString()} บ./ด.` : '-'}</strong></div>
-                    <div>การศึกษา: <strong className="text-slate-800">{viewingStudent.guardianEducation || '-'}</strong></div>
-                  </div>
-                  <div className="flex flex-wrap items-center justify-between gap-1 pt-1 border-t border-indigo-100/60 text-[11px]">
-                    <div>เบอร์โทรศัพท์: <strong className="text-indigo-700">{viewingStudent.guardianPhone || '-'}</strong></div>
-                    <div>ที่อยู่ปัจจุบันผู้ปกครอง: <strong className="text-slate-800">{viewingStudent.guardianAddress || viewingStudent.address || '-'}</strong></div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Card 4: Siblings Info */}
-              <div className="p-4 bg-white rounded-2xl border border-slate-200 space-y-2">
-                <h5 className="font-bold text-xs text-slate-800 uppercase tracking-wider flex items-center gap-1.5 pb-1 border-b border-slate-100">
-                  <Users className="w-3.5 h-3.5 text-emerald-500" />
-                  <span>ข้อมูลพี่น้องร่วมสายโลหิต</span>
-                </h5>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                  <div className="p-2.5 bg-slate-50 rounded-xl text-center">
-                    <span className="text-slate-500 text-[11px] block">ลำดับบุตร</span>
-                    <strong className="text-slate-800 text-sm">
-                      {viewingStudent.isOnlyChild ? 'บุตรคนเดียว' : `บุตรคนที่ ${viewingStudent.birthOrder || 1}`}
-                    </strong>
-                  </div>
-                  <div className="p-2.5 bg-slate-50 rounded-xl text-center">
-                    <span className="text-slate-500 text-[11px] block">พี่น้องทั้งหมด</span>
-                    <strong className="text-slate-800 text-sm">{viewingStudent.totalSiblings || 1} คน</strong>
-                  </div>
-                  <div className="p-2.5 bg-slate-50 rounded-xl text-center">
-                    <span className="text-slate-500 text-[11px] block">พี่ชาย/น้องชาย</span>
-                    <strong className="text-slate-800 text-sm">{viewingStudent.brothersCount ?? 0} คน</strong>
-                  </div>
-                  <div className="p-2.5 bg-slate-50 rounded-xl text-center">
-                    <span className="text-slate-500 text-[11px] block">พี่สาว/น้องสาว</span>
-                    <strong className="text-slate-800 text-sm">{viewingStudent.sistersCount ?? 0} คน</strong>
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs pt-1">
-                  <div className="p-2 bg-slate-50 rounded-xl text-slate-600 text-[11px]">
-                    พี่ต่างบิดา-มารดา: <strong className="text-slate-800">{viewingStudent.hasOlderHalfSiblings ? `${viewingStudent.olderHalfSiblingsCount || 0} คน` : 'ไม่มี'}</strong>
-                  </div>
-                  <div className="p-2 bg-slate-50 rounded-xl text-slate-600 text-[11px]">
-                    น้องต่างบิดา-มารดา: <strong className="text-slate-800">{viewingStudent.hasYoungerHalfSiblings ? `${viewingStudent.youngerHalfSiblingsCount || 0} คน` : 'ไม่มี'}</strong>
-                  </div>
-                  <div className="p-2 bg-emerald-50 rounded-xl text-emerald-800 text-[11px] font-medium border border-emerald-100">
-                    พี่น้องกำลังศึกษาอยู่: <strong>{viewingStudent.studyingSiblingsCount ?? 1} คน</strong>
-                  </div>
-                </div>
-              </div>
-
-              {/* Card 5: Housing & Travel */}
-              <div className="p-4 bg-white rounded-2xl border border-slate-200 space-y-2">
-                <h5 className="font-bold text-xs text-slate-800 uppercase tracking-wider flex items-center gap-1.5 pb-1 border-b border-slate-100">
-                  <MapPin className="w-3.5 h-3.5 text-amber-500" />
-                  <span>สถานะที่อยู่อาศัยและการเดินทางมาโรงเรียน</span>
-                </h5>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                  <div className="p-2.5 bg-slate-50 rounded-xl space-y-1">
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">สถานะที่อยู่อาศัย:</span>
-                      <strong className="text-slate-800">
-                        {viewingStudent.housingStatus || 'บ้านตัวเอง'}
-                        {viewingStudent.housingStatus === 'เช่า' && viewingStudent.rentAmount ? ` (${viewingStudent.rentAmount.toLocaleString()} บ./ด.)` : ''}
-                        {viewingStudent.housingStatus === 'อื่นๆ' && viewingStudent.housingStatusOther ? ` (${viewingStudent.housingStatusOther})` : ''}
-                      </strong>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">พักอาศัยอยู่กับ:</span>
-                      <strong className="text-slate-800">
-                        {viewingStudent.livingWith || 'บิดามารดา'}
-                        {viewingStudent.livingWith === 'อื่นๆ' && viewingStudent.livingWithOther ? ` (${viewingStudent.livingWithOther})` : ''}
-                      </strong>
-                    </div>
-                  </div>
-
-                  <div className="p-2.5 bg-slate-50 rounded-xl space-y-1">
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">การเดินทาง:</span>
-                      <strong className="text-slate-800">
-                        {viewingStudent.travelMethod || 'เดิน'}
-                        {viewingStudent.travelMethod === 'อื่นๆ' && viewingStudent.travelMethodOther ? ` (${viewingStudent.travelMethodOther})` : ''}
-                      </strong>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-500">ระยะทาง/เวลา:</span>
-                      <strong className="text-slate-800">
-                        {viewingStudent.distanceToSchool || '-'} • {viewingStudent.travelTimeToSchool || '-'}
-                      </strong>
-                    </div>
-                  </div>
-                </div>
-
-                {viewingStudent.householdBurden && viewingStudent.householdBurden.length > 0 && (
-                  <div className="pt-2 border-t border-slate-100 text-xs">
-                    <span className="text-slate-500 text-[11px] block mb-1 font-medium">ภาระพึ่งพิงของครัวเรือน:</span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {viewingStudent.householdBurden.map(b => (
-                        <span key={b} className="px-2 py-0.5 rounded-lg bg-amber-50 text-amber-800 text-[10px] font-semibold border border-amber-200">
-                          {b}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-              {user.role === 'admin' ? (
+              <div className="flex items-center gap-2 shrink-0">
                 <button
                   type="button"
-                  onClick={() => setDeleteConfirmTarget({
-                    type: 'student',
-                    id: viewingStudent.id,
-                    name: `${viewingStudent.prefix}${viewingStudent.firstName} ${viewingStudent.lastName}`
-                  })}
-                  className="px-3.5 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 border border-rose-200"
+                  disabled={downloadingStudentId === viewingStudent.id}
+                  onClick={() => handleDownloadStudentOfficialPdf(viewingStudent)}
+                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
+                  title="ดาวน์โหลดระเบียนประวัติ"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>ลบข้อมูลนักเรียนนี้</span>
+                  {downloadingStudentId === viewingStudent.id ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>กำลังดาวน์โหลด...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-4 h-4" />
+                      <span>ดาวน์โหลด</span>
+                    </>
+                  )}
                 </button>
-              ) : <div />}
-              <button
-                onClick={() => setViewingStudent(null)}
-                className="px-5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+
+                <button
+                  type="button"
+                  onClick={() => setViewingStudent(null)}
+                  className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+                  title="ปิด"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Scrollable Document Area */}
+            <div className="p-3 sm:p-6 overflow-auto bg-slate-200/70 flex justify-center flex-1">
+              <div
+                id="student-official-a4-print"
+                className="a4-portrait-paper bg-white shadow-xl border border-black text-black leading-normal text-[13px] sm:text-[13.5px] flex flex-col justify-between shrink-0 mx-auto box-border"
+                style={{
+                  fontFamily: "'Sarabun', 'TH Sarabun New', serif",
+                  width: '210mm',
+                  minWidth: '210mm',
+                  maxWidth: '210mm',
+                  minHeight: '297mm',
+                  padding: '10mm 14mm 21mm 14mm',
+                }}
               >
-                ปิดหน้าต่าง
-              </button>
+                <div className="space-y-2">
+                  {/* 1. Official Header */}
+                  <div className="text-center">
+                    {schoolInfo.logoUrl ? (
+                      <img
+                        src={schoolInfo.logoUrl}
+                        alt="ตราสัญลักษณ์โรงเรียน"
+                        className="w-16 h-16 object-contain mx-auto mb-1.5"
+                      />
+                    ) : (
+                      <div className="w-14 h-14 rounded-full border border-black flex items-center justify-center text-xl mx-auto mb-1.5 bg-white text-black">
+                        🏫
+                      </div>
+                    )}
+                    <h1 className="text-lg sm:text-xl font-black text-black tracking-tight">
+                      แบบระเบียนประวัตินักเรียนรายบุคคล
+                    </h1>
+                    <p className="text-xs sm:text-[13px] font-bold text-black mt-1 leading-normal">
+                      {schoolInfo.schoolName.startsWith('โรงเรียน') ? schoolInfo.schoolName : `โรงเรียน${schoolInfo.schoolName}`}
+                      <span className="font-normal text-black ml-2">
+                        สังกัด {schoolInfo.affiliation || 'สำนักงานคณะกรรมการการศึกษาขั้นพื้นฐาน'}
+                      </span>
+                    </p>
+                    <p className="text-xs sm:text-[13px] text-black mt-0.5 font-bold">
+                      ปีการศึกษา {schoolInfo.academicYear}
+                    </p>
+                  </div>
+
+                  {/* 2. Top Identification Box with Photo */}
+                  <div className="pt-2 border-t-2 border-black flex items-start justify-between gap-4">
+                    <div className="flex-1 space-y-1.5 text-[13px] sm:text-[13.5px]">
+                      <div className="flex items-baseline justify-between gap-2 border-b border-dotted border-black pb-1">
+                        <div>
+                          <span className="font-bold text-black text-sm sm:text-base">ชื่อ–นามสกุล: </span>
+                          <span className="font-black text-black text-base sm:text-lg ml-1">
+                            {viewingStudent.prefix}{viewingStudent.firstName} {viewingStudent.lastName}
+                          </span>
+                          {viewingStudent.nickname && (
+                            <span className="text-black ml-2 font-semibold text-sm">(ชื่อเล่น: {viewingStudent.nickname})</span>
+                          )}
+                        </div>
+                        <div>
+                          <span className="font-bold text-black">เลขประจำตัวนักเรียน: </span>
+                          <span className="font-mono font-bold text-black text-sm sm:text-base ml-1">
+                            {viewingStudent.studentCode || viewingStudent.rollNumber || '-'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2 border-b border-dotted border-black pb-1">
+                        <span className="font-bold text-black shrink-0">เลขประจำตัวประชาชน (13 หลัก): </span>
+                        {renderOfficialDigitBoxes(viewingStudent.idCard || viewingStudent.citizenId || '')}
+                      </div>
+
+                      <div className="grid grid-cols-4 gap-2 border-b border-dotted border-black pb-1">
+                        <div>
+                          <span className="font-bold text-black">เพศ: </span>
+                          <span className="font-medium text-black">{viewingStudent.gender || (viewingStudent.prefix.includes('หญิง') ? 'หญิง' : 'ชาย')}</span>
+                        </div>
+                        <div className="col-span-2">
+                          <span className="font-bold text-black">วัน/เดือน/ปีเกิด: </span>
+                          <span className="font-medium text-black">{viewingStudent.birthDate ? formatIsoToThaiDisplay(viewingStudent.birthDate, 'full') : '-'}</span>
+                        </div>
+                        <div>
+                          <span className="font-bold text-black">อายุ: </span>
+                          <span className="font-medium text-black">{viewingStudent.age ? `${viewingStudent.age} ปี` : '-'}</span>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-4 gap-2 border-b border-dotted border-black pb-1">
+                        <div>
+                          <span className="font-bold text-black">ศาสนา: </span>
+                          <span className="font-medium text-black">{viewingStudent.religion || 'พุทธ'}</span>
+                        </div>
+                        <div>
+                          <span className="font-bold text-black">หมู่เลือด: </span>
+                          <span className="font-medium text-black">{viewingStudent.bloodGroup || '-'}</span>
+                        </div>
+                        <div className="col-span-2">
+                          <span className="font-bold text-black">ระดับชั้น: </span>
+                          <span className="font-bold text-black">{viewingStudent.gradeLevel} ห้อง {viewingStudent.room || '1'} (เลขที่ {viewingStudent.rollNumber ?? '-'})</span>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 border-b border-dotted border-black pb-1">
+                        <div>
+                          <span className="font-bold text-black">โรคประจำตัว / การแพ้ยา: </span>
+                          <span className="font-medium text-black">{viewingStudent.chronicDisease || 'ไม่มี'}</span>
+                        </div>
+                        <div>
+                          <span className="font-bold text-black">ค่าใช้จ่ายมาโรงเรียน: </span>
+                          <span className="font-medium text-black">{viewingStudent.dailyAllowance ? `${viewingStudent.dailyAllowance} บาท/วัน` : '-'}</span>
+                        </div>
+                      </div>
+
+                      <div className="border-b border-dotted border-black pb-1">
+                        <span className="font-bold text-black">ที่อยู่ปัจจุบัน: </span>
+                        <span className="font-medium text-black">{viewingStudent.address || '-'}</span>
+                      </div>
+                    </div>
+
+                    {/* Photo Frame */}
+                    <div className="shrink-0 text-center">
+                      <div className="w-[3.4cm] h-[4.4cm] border-2 border-black p-0.5 bg-white flex items-center justify-center overflow-hidden">
+                        {viewingStudent.photoUrl ? (
+                          <img
+                            src={viewingStudent.photoUrl}
+                            alt={viewingStudent.firstName}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-full bg-white flex flex-col items-center justify-center text-black border border-dashed border-black p-1">
+                            <User className="w-9 h-9 text-black" />
+                            <span className="text-xs mt-1 text-black text-center font-medium leading-tight">
+                              รูปถ่ายนักเรียน<br />ขนาด 1.5 - 2 นิ้ว
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 3. Section 1: ข้อมูลบิดา - มารดา */}
+                  <div>
+                    <div className="bg-gray-100 px-3 py-1 border border-black font-bold text-black text-sm sm:text-[14px]">
+                      1. ข้อมูลบิดา - มารดา
+                    </div>
+                    <table className="w-full border-collapse border border-t-0 border-black text-xs sm:text-[13px] text-black">
+                      <tbody>
+                        <tr className="border-b border-black">
+                          <td className="w-1/2 p-2 border-r border-black align-top space-y-1">
+                            <div className="font-bold text-black text-[13.5px]">ข้อมูลบิดา:</div>
+                            <div>
+                              <span className="font-bold">ชื่อ–นามสกุล: </span>
+                              <span className="font-semibold">{(viewingStudent.fatherPrefix || 'นาย') + ' ' + (viewingStudent.fatherName || '-')}</span>
+                              {viewingStudent.fatherDeceased && <span className="ml-1 text-black font-bold">(เสียชีวิต)</span>}
+                              {viewingStudent.fatherMissing && <span className="ml-1 text-black font-bold">(สาบสูญ)</span>}
+                            </div>
+                            <div className="grid grid-cols-2 gap-1">
+                              <div><span className="font-bold">อายุ: </span>{viewingStudent.fatherAge ? `${viewingStudent.fatherAge} ปี` : '-'}</div>
+                              <div><span className="font-bold">อาชีพ: </span>{viewingStudent.fatherOccupation || '-'}</div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-1">
+                              <div><span className="font-bold">รายได้: </span>{viewingStudent.fatherIncome ? `${viewingStudent.fatherIncome.toLocaleString()} บาท/เดือน` : '-'}</div>
+                              <div><span className="font-bold">วุฒิการศึกษา: </span>{viewingStudent.fatherEducation || '-'}</div>
+                            </div>
+                            <div>
+                              <span className="font-bold">หมายเลขโทรศัพท์: </span>{viewingStudent.fatherPhone || '-'}
+                            </div>
+                          </td>
+                          <td className="w-1/2 p-2 align-top space-y-1">
+                            <div className="font-bold text-black text-[13.5px]">ข้อมูลมารดา:</div>
+                            <div>
+                              <span className="font-bold">ชื่อ–นามสกุล: </span>
+                              <span className="font-semibold">{(viewingStudent.motherPrefix || 'นาง') + ' ' + (viewingStudent.motherName || '-')}</span>
+                              {viewingStudent.motherDeceased && <span className="ml-1 text-black font-bold">(เสียชีวิต)</span>}
+                              {viewingStudent.motherMissing && <span className="ml-1 text-black font-bold">(สาบสูญ)</span>}
+                            </div>
+                            <div className="grid grid-cols-2 gap-1">
+                              <div><span className="font-bold">อายุ: </span>{viewingStudent.motherAge ? `${viewingStudent.motherAge} ปี` : '-'}</div>
+                              <div><span className="font-bold">อาชีพ: </span>{viewingStudent.motherOccupation || '-'}</div>
+                            </div>
+                            <div className="grid grid-cols-2 gap-1">
+                              <div><span className="font-bold">รายได้: </span>{viewingStudent.motherIncome ? `${viewingStudent.motherIncome.toLocaleString()} บาท/เดือน` : '-'}</div>
+                              <div><span className="font-bold">วุฒิการศึกษา: </span>{viewingStudent.motherEducation || '-'}</div>
+                            </div>
+                            <div>
+                              <span className="font-bold">หมายเลขโทรศัพท์: </span>{viewingStudent.motherPhone || '-'}
+                            </div>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td colSpan={2} className="p-2 bg-white">
+                            <span className="font-bold text-black">สถานภาพของบิดา-มารดา: </span>
+                            <span className="font-medium text-black">
+                              {viewingStudent.parentsMaritalStatus || 'อยู่ด้วยกัน'}
+                              {viewingStudent.parentsMaritalStatus === 'อื่นๆ' && viewingStudent.parentsMaritalStatusOther ? ` (${viewingStudent.parentsMaritalStatusOther})` : ''}
+                            </span>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* 4. Section 2: ข้อมูลผู้ปกครอง */}
+                  <div>
+                    <div className="bg-gray-100 px-3 py-1 border border-black font-bold text-black text-sm sm:text-[14px]">
+                      2. ข้อมูลผู้ปกครอง (กรณีผู้ปกครองมิใช่บิดาหรือมารดา หรือผู้ปกครองที่ให้การดูแล)
+                    </div>
+                    <div className="border border-t-0 border-black p-2 space-y-1.5 text-xs sm:text-[13px] text-black">
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <span className="font-bold">ความเกี่ยวข้อง: </span>
+                          <span className="font-medium">
+                            {viewingStudent.guardianRelation || 'บิดา'}
+                            {viewingStudent.guardianRelation === 'อื่นๆ' && viewingStudent.guardianRelationOther ? ` (${viewingStudent.guardianRelationOther})` : ''}
+                          </span>
+                        </div>
+                        <div className="col-span-2">
+                          <span className="font-bold">ชื่อ–นามสกุลผู้ปกครอง: </span>
+                          <span className="font-semibold">{(viewingStudent.guardianPrefix || '') + ' ' + (viewingStudent.guardianName || '-')}</span>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-4 gap-2">
+                        <div><span className="font-bold">อายุ: </span>{viewingStudent.guardianAge ? `${viewingStudent.guardianAge} ปี` : '-'}</div>
+                        <div><span className="font-bold">อาชีพ: </span>{viewingStudent.guardianOccupation || '-'}</div>
+                        <div><span className="font-bold">รายได้: </span>{viewingStudent.guardianIncome ? `${viewingStudent.guardianIncome.toLocaleString()} บ./ด.` : '-'}</div>
+                        <div><span className="font-bold">โทรศัพท์: </span>{viewingStudent.guardianPhone || '-'}</div>
+                      </div>
+                      <div>
+                        <span className="font-bold">ที่อยู่ปัจจุบันของผู้ปกครอง: </span>
+                        <span className="font-medium">{viewingStudent.guardianAddress || viewingStudent.address || '-'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 5. Section 3: ข้อมูลพี่น้องร่วมสายโลหิต & สภาพแวดล้อมที่อยู่อาศัย */}
+                  <div>
+                    <div className="bg-gray-100 px-3 py-1 border border-black font-bold text-black text-sm sm:text-[14px]">
+                      3. ข้อมูลพี่น้องร่วมสายโลหิต สภาพแวดล้อมที่อยู่อาศัย และการเดินทาง
+                    </div>
+                    <div className="border border-t-0 border-black p-2 space-y-1.5 text-xs sm:text-[13px] text-black">
+                      <div className="grid grid-cols-4 gap-2">
+                        <div>
+                          <span className="font-bold">ลำดับบุตร: </span>
+                          <span className="font-medium">{viewingStudent.isOnlyChild ? 'บุตรคนเดียว' : `คนที่ ${viewingStudent.birthOrder || 1} จาก ${viewingStudent.totalSiblings || 1} คน`}</span>
+                        </div>
+                        <div>
+                          <span className="font-bold">พี่ชาย/น้องชาย: </span>
+                          <span className="font-medium">{viewingStudent.brothersCount ?? 0} คน</span>
+                        </div>
+                        <div>
+                          <span className="font-bold">พี่สาว/น้องสาว: </span>
+                          <span className="font-medium">{viewingStudent.sistersCount ?? 0} คน</span>
+                        </div>
+                        <div>
+                          <span className="font-bold">กำลังศึกษาอยู่: </span>
+                          <span className="font-medium">{viewingStudent.studyingSiblingsCount ?? 1} คน</span>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <span className="font-bold">สถานะที่อยู่อาศัย: </span>
+                          <span className="font-medium">
+                            {viewingStudent.housingStatus || 'บ้านตัวเอง'}
+                            {viewingStudent.housingStatus === 'เช่า' && viewingStudent.rentAmount ? ` (${viewingStudent.rentAmount.toLocaleString()} บ./ด.)` : ''}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="font-bold">พักอาศัยอยู่กับ: </span>
+                          <span className="font-medium">
+                            {viewingStudent.livingWith || 'บิดามารดา'}
+                            {viewingStudent.livingWith === 'อื่นๆ' && viewingStudent.livingWithOther ? ` (${viewingStudent.livingWithOther})` : ''}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="font-bold">การเดินทางมา ร.ร.: </span>
+                          <span className="font-medium">
+                            {viewingStudent.travelMethod || 'เดิน'}
+                            {viewingStudent.distanceToSchool ? ` (${viewingStudent.distanceToSchool})` : ''}
+                          </span>
+                        </div>
+                      </div>
+                      {viewingStudent.householdBurden && viewingStudent.householdBurden.length > 0 && (
+                        <div>
+                          <span className="font-bold">ภาระพึ่งพิงของครัวเรือน: </span>
+                          <span className="font-medium">{viewingStudent.householdBurden.join(', ')}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 6. Section 4: Official Signatures */}
+                <div className="mt-4 pt-2 pb-[2.1cm]">
+                  <div className="grid grid-cols-3 gap-3 text-center text-xs sm:text-[13px] text-black leading-normal">
+                    {/* Signature 1: Parent / Informant */}
+                    <div className="pt-2 space-y-1">
+                      <p className="whitespace-nowrap overflow-hidden">ลงชื่อ ..................................................</p>
+                      <p className="font-medium whitespace-nowrap overflow-hidden">
+                        ( .................................................. )
+                      </p>
+                      <p className="text-black text-xs">ผู้ปกครอง / ผู้ให้ข้อมูล</p>
+                      <p className="text-xs text-black">วันที่ ...... เดือน .................... พ.ศ. ........</p>
+                    </div>
+
+                    {/* Signature 2: Homeroom Teacher / Inspector */}
+                    <div className="pt-2 space-y-1">
+                      <p className="whitespace-nowrap overflow-hidden">ลงชื่อ ..................................................</p>
+                      <p className="font-medium whitespace-nowrap overflow-hidden">
+                        ( .................................................. )
+                      </p>
+                      <p className="text-black text-xs">ครูประจำชั้น / ผู้บันทึกข้อมูล</p>
+                      <p className="text-xs text-black">วันที่ ...... เดือน .................... พ.ศ. ........</p>
+                    </div>
+
+                    {/* Signature 3: School Director */}
+                    <div className="pt-2 space-y-1">
+                      <p className="whitespace-nowrap overflow-hidden">ลงชื่อ ..................................................</p>
+                      <p className="font-bold text-black whitespace-nowrap overflow-hidden">
+                        ( {schoolInfo.directorName || '..................................................'} )
+                      </p>
+                      <p className="text-black text-xs">
+                        ผู้อำนวยการ{schoolInfo.schoolName.startsWith('โรงเรียน') ? schoolInfo.schoolName : `โรงเรียน${schoolInfo.schoolName}`}
+                      </p>
+                      <p className="text-xs text-black">วันที่ ...... เดือน .................... พ.ศ. ........</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom Bar: Action buttons */}
+            <div className="p-3 bg-white border-t border-slate-200 flex flex-wrap items-center justify-between gap-2 shrink-0">
+              <div className="flex items-center gap-2">
+                {user.role === 'admin' && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const st = viewingStudent;
+                        setViewingStudent(null);
+                        handleOpenEditStudent(st);
+                      }}
+                      className="px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 border border-blue-200"
+                    >
+                      <Edit className="w-3.5 h-3.5" />
+                      <span>แก้ไขข้อมูล</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDeleteConfirmTarget({
+                        type: 'student',
+                        id: viewingStudent.id,
+                        name: `${viewingStudent.prefix}${viewingStudent.firstName} ${viewingStudent.lastName}`
+                      })}
+                      className="px-3 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 border border-rose-200"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>ลบข้อมูลนักเรียนนี้</span>
+                    </button>
+                  </>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={downloadingStudentId === viewingStudent.id}
+                  onClick={() => handleDownloadStudentOfficialPdf(viewingStudent)}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 disabled:opacity-50"
+                >
+                  {downloadingStudentId === viewingStudent.id ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>กำลังดาวน์โหลด...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-4 h-4" />
+                      <span>ดาวน์โหลด</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewingStudent(null)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+                >
+                  ปิดหน้าต่าง
+                </button>
+              </div>
             </div>
           </div>
         </div>

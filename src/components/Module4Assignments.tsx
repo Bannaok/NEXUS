@@ -112,7 +112,13 @@ export const Module4Assignments: React.FC<Module4Props> = ({
   const formatThaiTaskDate = (dateRangeStr?: string) => {
     if (!dateRangeStr) return '';
     const convertSingleDate = (dStr: string) => {
-      const trimmed = dStr.trim();
+      let trimmed = dStr.trim();
+      if (trimmed.includes('T')) {
+        trimmed = trimmed.split('T')[0];
+      }
+      if (trimmed.includes(' ')) {
+        trimmed = trimmed.split(' ')[0];
+      }
       if (/^\d{2}-\d{2}-\d{4}$/.test(trimmed)) {
         return trimmed;
       }
@@ -218,16 +224,16 @@ export const Module4Assignments: React.FC<Module4Props> = ({
   // Keep Admin and Member assignments & submissions continuously synchronized in real time
   useEffect(() => {
     StorageService.pullRemoteState(false).catch(() => {});
-    StorageService.pullFromGoogleCloudKV().catch(() => {});
     StorageService.recoverMissingTaskFileUrls(true).catch(() => {});
     let tick = 0;
     const timer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       tick += 1;
       StorageService.pullRemoteState(false).catch(() => {});
-      if (tick % 4 === 0) {
+      if (tick % 3 === 0) {
         StorageService.recoverMissingTaskFileUrls(true).catch(() => {});
       }
-    }, 1000);
+    }, 6000);
     return () => clearInterval(timer);
   }, []);
 
@@ -546,7 +552,7 @@ export const Module4Assignments: React.FC<Module4Props> = ({
   const isOverdue = (dueDateStr: string) => {
     if (!dueDateStr) return false;
     const parts = dueDateStr.split(' ถึง ');
-    const lastDate = parts[parts.length - 1].trim();
+    const lastDate = parts[parts.length - 1].trim().split('T')[0].split(' ')[0];
     return todayStr > lastDate;
   };
 
@@ -1354,19 +1360,24 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                         </span>
 
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5 flex-nowrap overflow-x-auto max-w-full no-scrollbar pb-0.5">
-                            <span className={`text-[10px] sm:text-[11px] font-bold px-2 py-0.5 rounded-lg shrink-0 flex items-center gap-1 ${
-                              isGreenCompleted ? 'bg-emerald-600 text-white shadow-2xs' :
-                              isUrgent ? 'bg-rose-100 text-rose-700' :
-                              isHigh ? 'bg-amber-100 text-amber-700' :
-                              'bg-purple-50 text-purple-700 border border-purple-200'
-                            }`}>
-                              {isGreenCompleted
-                                ? (user.role === 'member'
-                                    ? (isFullySubmitted ? '✓ ส่งแล้ว (ส่งครบ)' : '✓ ส่งแล้ว')
-                                    : '✓ ส่งครบแล้ว')
-                                : (isUrgent ? 'ด่วนที่สุด' : isHigh ? 'ด่วน' : 'ปกติ')}
-                            </span>
+                          <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap max-w-full no-scrollbar pb-0.5">
+                            {(!isGreenCompleted && !isUrgent && !isHigh) ? (
+                              <span className="hidden sm:inline-flex text-[10px] sm:text-[11px] font-bold px-2 py-0.5 rounded-lg shrink-0 items-center gap-1 bg-purple-50 text-purple-700 border border-purple-200">
+                                ปกติ
+                              </span>
+                            ) : (
+                              <span className={`text-[10px] sm:text-[11px] font-bold px-2 py-0.5 rounded-lg shrink-0 flex items-center gap-1 ${
+                                isGreenCompleted ? 'bg-emerald-600 text-white shadow-2xs' :
+                                isUrgent ? 'bg-rose-100 text-rose-700' :
+                                'bg-amber-100 text-amber-700'
+                              }`}>
+                                {isGreenCompleted
+                                  ? (user.role === 'member'
+                                      ? (isFullySubmitted ? '✓ ส่งแล้ว (ส่งครบ)' : '✓ ส่งแล้ว')
+                                      : '✓ ส่งครบแล้ว')
+                                  : (isUrgent ? 'ด่วนที่สุด' : 'ด่วน')}
+                              </span>
+                            )}
 
                             {user.role === 'admin' && submittedCount > 0 && (
                               <span
@@ -1374,10 +1385,10 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                                   e.stopPropagation();
                                   setStatusTaskModal(task);
                                 }}
-                                className="text-[10px] sm:text-[11px] font-bold px-2 py-0.5 rounded-lg shrink-0 flex items-center gap-1 bg-emerald-100 text-emerald-800 border border-emerald-300 cursor-pointer hover:bg-emerald-200 transition-colors"
+                                className="text-[10px] sm:text-[11px] font-bold px-2 py-0.5 rounded-lg shrink-0 hidden sm:inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 border border-emerald-300 cursor-pointer hover:bg-emerald-200 transition-colors"
                                 title="คลิกเพื่อดูไฟล์งานที่สมาชิกส่ง"
                               >
-                                ✓ มีผู้ส่งงานแล้ว ({submittedCount}/{totalSchoolMembers} คน)
+                                <span>✓ มีผู้ส่งงานแล้ว ({submittedCount}/{totalSchoolMembers} คน)</span>
                               </span>
                             )}
 
@@ -1388,7 +1399,8 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                                   : 'text-purple-900 bg-purple-50 border-purple-200'
                               }`}>
                                 <Clock className={`w-3 h-3 shrink-0 ${isGreenCompleted ? 'text-emerald-700' : 'text-purple-600'}`} />
-                                <span className="whitespace-nowrap">กำหนดส่ง: {formatThaiTaskDate(task.dueDate)}</span>
+                                <span className="hidden sm:inline">กำหนดส่ง: </span>
+                                <span>{formatThaiTaskDate(task.dueDate)}</span>
                               </span>
                             )}
                           </div>
@@ -1710,7 +1722,7 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                   สถานะการส่งงาน: {liveStatusTask.title}
                 </h3>
                 <p className="text-xs text-slate-500">
-                  กำหนดส่ง: {liveStatusTask.dueDate}
+                  กำหนดส่ง: {formatThaiTaskDate(liveStatusTask.dueDate)}
                 </p>
               </div>
               <button

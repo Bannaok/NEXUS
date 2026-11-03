@@ -1002,6 +1002,37 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
     syncAssessmentDataToGrades(nextData);
   };
 
+  // Update all 5 competency items at once for a student (e.g. from mobile popup quick fill)
+  const updateAllCompetenciesForStudent = (student: Student, level: number) => {
+    if (isReadOnlyForUser) return;
+    const key = getRecordKey(student.id);
+    const current = getStudentAssessment(student);
+    const updatedComp: Competency5Criteria = {
+      ...current.competency,
+      comp1: level,
+      comp2: level,
+      comp3: level,
+      comp4: level,
+      comp5: level,
+      overallLevel: level,
+      evaluated: true
+    };
+
+    const updatedRecord: StudentAssessmentRecord = {
+      ...current,
+      competency: updatedComp
+    };
+
+    const nextData = { ...assessmentData, [key]: updatedRecord };
+    setAssessmentData(nextData);
+    try {
+      localStorage.setItem(ASSESSMENT_DATA_KEY, JSON.stringify(nextData));
+    } catch (e) {
+      console.error(e);
+    }
+    syncAssessmentDataToGrades(nextData);
+  };
+
   // Open characteristics modal
   const handleOpenCharacteristicsModal = (st: Student) => {
     setEvaluatingStudent(st);
@@ -3450,6 +3481,7 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
                 onClick={() => {
                   syncAssessmentDataToGrades();
                   onShowToast('success', 'บันทึกเรียบร้อย', `บันทึกคะแนนของ ${mobileGradingStudent.prefix}${mobileGradingStudent.firstName} ${mobileGradingStudent.lastName} เรียบร้อยแล้ว`);
+                  setMobileGradingStudent(null);
                 }}
                 className="flex-1 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
               >
@@ -3546,9 +3578,7 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
                             type="button"
                             disabled={isReadOnlyForUser}
                             onClick={() => {
-                              ['comp1', 'comp2', 'comp3', 'comp4', 'comp5'].forEach(k => {
-                                updateCompetency(evaluatingCompetencyStudent, k as keyof Competency5Criteria, q.val);
-                              });
+                              updateAllCompetenciesForStudent(evaluatingCompetencyStudent, q.val);
                             }}
                             className={`px-2 py-1 text-[11px] font-bold border rounded-lg transition-all active:scale-95 cursor-pointer ${q.color}`}
                           >
@@ -3631,6 +3661,7 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
                 onClick={() => {
                   syncAssessmentDataToGrades();
                   onShowToast('success', 'บันทึกเรียบร้อย', `บันทึกสมรรถนะสำคัญของ ${evaluatingCompetencyStudent.prefix}${evaluatingCompetencyStudent.firstName} ${evaluatingCompetencyStudent.lastName} เรียบร้อยแล้ว`);
+                  setEvaluatingCompetencyStudent(null);
                 }}
                 className="flex-1 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 rounded-xl shadow-xs transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
               >

@@ -195,47 +195,80 @@ function normalizeSchoolId(rawSchoolId?: string, rawSchoolName?: string, adminsL
   return rawSchoolId || 'admin-school-01';
 }
 
+// Cached active school ID & session for O(1) tenant key resolution on mobile/PWA
+let cachedActiveSchoolId: string | null | undefined = undefined;
+let cachedSessionRaw: string | null | undefined = undefined;
+let cachedSessionObj: UserSession | null = null;
+
+function invalidateActiveSchoolIdCache(): void {
+  cachedActiveSchoolId = undefined;
+}
+
 function getActiveSchoolId(): string | null {
+  if (cachedActiveSchoolId !== undefined) {
+    return cachedActiveSchoolId;
+  }
   try {
     if (typeof window === 'undefined') return null;
     const raw = sessionStorage.getItem(KEYS.SESSION);
-    if (!raw) return null;
-    const session = JSON.parse(raw) as UserSession;
+    if (!raw) {
+      cachedActiveSchoolId = null;
+      return null;
+    }
+    const session = (raw === cachedSessionRaw && cachedSessionObj)
+      ? cachedSessionObj
+      : (JSON.parse(raw) as UserSession);
+    cachedSessionRaw = raw;
+    cachedSessionObj = session;
+
     if (session && session.role !== 'developer') {
       const adminsCached = memoryCache.get(KEYS.ADMINS);
-      const adminsRaw = nativeGetItem ? nativeGetItem(KEYS.ADMINS) : localStorage.getItem(KEYS.ADMINS);
-      const admins: SchoolAdminAccount[] = Array.isArray(adminsCached)
-        ? adminsCached
-        : adminsRaw
-        ? JSON.parse(adminsRaw)
-        : INITIAL_ADMINS;
+      let admins: SchoolAdminAccount[];
+      if (Array.isArray(adminsCached)) {
+        admins = adminsCached;
+      } else {
+        const adminsRaw = nativeGetItem ? nativeGetItem(KEYS.ADMINS) : localStorage.getItem(KEYS.ADMINS);
+        admins = adminsRaw ? JSON.parse(adminsRaw) : INITIAL_ADMINS;
+        memoryCache.set(KEYS.ADMINS, admins);
+      }
 
       if (session.role === 'admin') {
         const matchedAdmin = admins.find(
           a => a.id === session.id || a.username?.toLowerCase() === session.username?.toLowerCase()
         );
         if (matchedAdmin) {
-          return normalizeSchoolId(matchedAdmin.id, matchedAdmin.schoolName, admins);
+          cachedActiveSchoolId = normalizeSchoolId(matchedAdmin.id, matchedAdmin.schoolName, admins);
+          return cachedActiveSchoolId;
         }
       } else if (session.role === 'member') {
         const membersCached = memoryCache.get(KEYS.MEMBERS);
-        const membersRaw = nativeGetItem ? nativeGetItem(KEYS.MEMBERS) : localStorage.getItem(KEYS.MEMBERS);
-        const members: MemberAccount[] = Array.isArray(membersCached)
-          ? membersCached
-          : membersRaw
-          ? JSON.parse(membersRaw)
-          : INITIAL_MEMBERS;
+        let members: MemberAccount[];
+        if (Array.isArray(membersCached)) {
+          members = membersCached;
+        } else {
+          const membersRaw = nativeGetItem ? nativeGetItem(KEYS.MEMBERS) : localStorage.getItem(KEYS.MEMBERS);
+          members = membersRaw ? JSON.parse(membersRaw) : INITIAL_MEMBERS;
+          memoryCache.set(KEYS.MEMBERS, members);
+        }
         const matchedMember = members.find(
           m => m.id === session.id || m.username?.toLowerCase() === session.username?.toLowerCase()
         );
         if (matchedMember) {
-          return normalizeSchoolId(matchedMember.schoolId || session.schoolId, matchedMember.schoolName || session.schoolName, admins);
+          cachedActiveSchoolId = normalizeSchoolId(
+            matchedMember.schoolId || session.schoolId,
+            matchedMember.schoolName || session.schoolName,
+            admins
+          );
+          return cachedActiveSchoolId;
         }
       }
-      return normalizeSchoolId(session.schoolId, session.schoolName, admins);
+      cachedActiveSchoolId = normalizeSchoolId(session.schoolId, session.schoolName, admins);
+      return cachedActiveSchoolId;
     }
+    cachedActiveSchoolId = null;
     return null;
   } catch {
+    cachedActiveSchoolId = null;
     return null;
   }
 }
@@ -263,6 +296,7 @@ function resolveTenantKey(key: string): string {
 // ============================================================================
 const CLIENT_ID = `client_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 8)}`;
 const memoryCache = new Map<string, any>();
+const serializedMemoryCache = new Map<string, string>();
 const keyTimestamps = new Map<string, number>();
 const locallyModifiedKeys = new Set<string>();
 const localWriteTimestamps = new Map<string, number>();
@@ -273,6 +307,61 @@ let isInternalStorageWrite = false;
 let broadcastChannel: BroadcastChannel | null = null;
 let sseConnection: EventSource | null = null;
 let firestoreUnsubscribe: (() => void) | null = null;
+let isPullingRemoteState = false;
+let isPullingCloudKV = false;
+let lastRemotePullTime = 0;
+
+const pendingDiskWrites = new Map<string, { value: any; skipRemotePush: boolean; timestamp: number }>();
+let diskFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+function flushPendingDiskWrites(): void {
+  if (diskFlushTimer) {
+    clearTimeout(diskFlushTimer);
+    diskFlushTimer = null;
+  }
+  if (pendingDiskWrites.size === 0) return;
+  const entries = Array.from(pendingDiskWrites.entries());
+  pendingDiskWrites.clear();
+
+  for (const [resolvedKey, item] of entries) {
+    try {
+      const serialized =
+        typeof item.value === 'string' ? item.value : JSON.stringify(item.value);
+      serializedMemoryCache.set(resolvedKey, serialized);
+      if (nativeSetItem) {
+        isInternalStorageWrite = true;
+        try {
+          nativeSetItem(resolvedKey, serialized);
+        } finally {
+          isInternalStorageWrite = false;
+        }
+      } else {
+        localStorage.setItem(resolvedKey, serialized);
+      }
+    } catch {
+      try {
+        const compactSerialized = JSON.stringify(sanitizeValueForSync(item.value));
+        serializedMemoryCache.set(resolvedKey, compactSerialized);
+        if (nativeSetItem) {
+          isInternalStorageWrite = true;
+          try {
+            nativeSetItem(resolvedKey, compactSerialized);
+          } finally {
+            isInternalStorageWrite = false;
+          }
+        } else {
+          localStorage.setItem(resolvedKey, compactSerialized);
+        }
+      } catch {
+        // Ignore quota overflow; memoryCache & remote server still hold full data
+      }
+    }
+
+    if (!item.skipRemotePush) {
+      pushToRemoteServer(resolvedKey, item.value, item.timestamp);
+    }
+  }
+}
 
 // Preserve native localStorage methods before hooking
 const nativeSetItem: ((key: string, value: string) => void) | null =
@@ -1811,6 +1900,11 @@ function applyIncomingUpdates(
     if (value === null || value === undefined) {
       if (memoryCache.has(resolvedKey) || (nativeGetItem && nativeGetItem(resolvedKey) !== null)) {
         memoryCache.delete(resolvedKey);
+        serializedMemoryCache.delete(resolvedKey);
+        pendingDiskWrites.delete(resolvedKey);
+        if (resolvedKey === KEYS.ADMINS || resolvedKey === KEYS.MEMBERS) {
+          invalidateActiveSchoolIdCache();
+        }
         keyTimestamps.set(resolvedKey, Math.max(localTs, incomingTs || now));
         try {
           window.localStorage.removeItem(resolvedKey);
@@ -1824,14 +1918,21 @@ function applyIncomingUpdates(
 
     const currentCached = memoryCache.get(resolvedKey);
     const serializedIncoming = JSON.stringify(value);
+    const cachedSerialized = serializedMemoryCache.get(resolvedKey);
     const serializedCurrent =
-      currentCached !== undefined
+      cachedSerialized !== undefined
+        ? cachedSerialized
+        : currentCached !== undefined
         ? JSON.stringify(currentCached)
         : nativeGetItem
         ? nativeGetItem(resolvedKey)
         : null;
 
     memoryCache.set(resolvedKey, value);
+    serializedMemoryCache.set(resolvedKey, serializedIncoming);
+    if (resolvedKey === KEYS.ADMINS || resolvedKey === KEYS.MEMBERS) {
+      invalidateActiveSchoolIdCache();
+    }
     keyTimestamps.set(resolvedKey, Math.max(localTs, incomingTs || 1));
 
     if (serializedIncoming !== serializedCurrent) {
@@ -1841,7 +1942,9 @@ function applyIncomingUpdates(
           nativeSetItem(resolvedKey, serializedIncoming);
         } catch {
           try {
-            nativeSetItem(resolvedKey, JSON.stringify(sanitizeValueForSync(value)));
+            const compact = JSON.stringify(sanitizeValueForSync(value));
+            serializedMemoryCache.set(resolvedKey, compact);
+            nativeSetItem(resolvedKey, compact);
           } catch {
             // ignore quota error
           }
@@ -1877,12 +1980,13 @@ function getLocal<T>(key: string, fallback: T): T {
         if (key === KEYS.SCHOOL_INFO) {
           const schoolId = getActiveSchoolId();
           const adminsCached = memoryCache.get(KEYS.ADMINS);
-          const adminsRaw = nativeGetItem ? nativeGetItem(KEYS.ADMINS) : localStorage.getItem(KEYS.ADMINS);
-          const admins: SchoolAdminAccount[] = Array.isArray(adminsCached)
-            ? adminsCached
-            : adminsRaw
-            ? JSON.parse(adminsRaw)
-            : INITIAL_ADMINS;
+          let admins: SchoolAdminAccount[];
+          if (Array.isArray(adminsCached)) {
+            admins = adminsCached;
+          } else {
+            const adminsRaw = nativeGetItem ? nativeGetItem(KEYS.ADMINS) : localStorage.getItem(KEYS.ADMINS);
+            admins = adminsRaw ? JSON.parse(adminsRaw) : INITIAL_ADMINS;
+          }
           const match = admins.find(a => a.id === schoolId);
           return {
             ...INITIAL_SCHOOL_INFO,
@@ -1900,6 +2004,7 @@ function getLocal<T>(key: string, fallback: T): T {
 
     const parsed = JSON.parse(val) as T;
     memoryCache.set(resolvedKey, parsed);
+    serializedMemoryCache.set(resolvedKey, val);
     return parsed;
   } catch (err) {
     console.error('Failed to parse from localStorage key:', key, err);
@@ -1912,41 +2017,15 @@ function setLocal<T>(key: string, value: T, skipRemotePush = false): void {
     const resolvedKey = resolveTenantKey(key);
     const now = Date.now();
     memoryCache.set(resolvedKey, value);
+    // Invalidate cached serialized string so any immediate localStorage.getItem(key) re-serializes on demand
+    serializedMemoryCache.delete(resolvedKey);
+    if (resolvedKey === KEYS.ADMINS || resolvedKey === KEYS.MEMBERS) {
+      invalidateActiveSchoolIdCache();
+    }
     keyTimestamps.set(resolvedKey, now);
     localWriteTimestamps.set(resolvedKey, now);
     if (!skipRemotePush) {
       locallyModifiedKeys.add(resolvedKey);
-    }
-
-    // Write to localStorage inside its own inner try/catch so QuotaExceededError on large files NEVER aborts BroadcastChannel, UI subscribers, or remote server sync
-    try {
-      const serialized = JSON.stringify(value);
-      if (nativeSetItem) {
-        isInternalStorageWrite = true;
-        try {
-          nativeSetItem(resolvedKey, serialized);
-        } finally {
-          isInternalStorageWrite = false;
-        }
-      } else {
-        localStorage.setItem(resolvedKey, serialized);
-      }
-    } catch {
-      try {
-        const compactSerialized = JSON.stringify(sanitizeValueForSync(value));
-        if (nativeSetItem) {
-          isInternalStorageWrite = true;
-          try {
-            nativeSetItem(resolvedKey, compactSerialized);
-          } finally {
-            isInternalStorageWrite = false;
-          }
-        } else {
-          localStorage.setItem(resolvedKey, compactSerialized);
-        }
-      } catch {
-        // Ignore localStorage quota overflow; memoryCache & remote server still hold full data
-      }
     }
 
     // 1. Instant 0ms Cross-Tab Broadcast in same browser
@@ -1963,12 +2042,13 @@ function setLocal<T>(key: string, value: T, skipRemotePush = false): void {
       }
     }
 
-    // 2. Notify local React subscribers immediately
+    // 2. Notify local React subscribers immediately (0ms main-thread UI response on mobile)
     notifySubscribers([resolvedKey]);
 
-    // 3. Push to Firebase Firestore, Real-Time Server, D1 & Global Cloud KV
-    if (!skipRemotePush) {
-      pushToRemoteServer(resolvedKey, value, now);
+    // 3. Defer heavy JSON.stringify + localStorage disk write + remote push by 16ms so mobile tap animations paint at 60fps
+    pendingDiskWrites.set(resolvedKey, { value, skipRemotePush, timestamp: now });
+    if (!diskFlushTimer) {
+      diskFlushTimer = setTimeout(flushPendingDiskWrites, 16);
     }
   } catch (err) {
     console.error('Failed to save to localStorage key:', key, err);
@@ -1989,11 +2069,21 @@ function installLocalStorageSyncHook() {
         return nativeGetItem(key);
       }
       const resolvedKey = resolveTenantKey(key);
+      const cachedStr = serializedMemoryCache.get(resolvedKey);
+      if (cachedStr !== undefined) {
+        return cachedStr;
+      }
       if (memoryCache.has(resolvedKey)) {
         const cached = memoryCache.get(resolvedKey);
-        return typeof cached === 'string' ? cached : JSON.stringify(cached);
+        const str = typeof cached === 'string' ? cached : JSON.stringify(cached);
+        serializedMemoryCache.set(resolvedKey, str);
+        return str;
       }
-      return nativeGetItem(resolvedKey);
+      const raw = nativeGetItem(resolvedKey);
+      if (raw !== null) {
+        serializedMemoryCache.set(resolvedKey, raw);
+      }
+      return raw;
     };
 
     window.localStorage.setItem = function (key: string, value: string) {
@@ -2011,7 +2101,7 @@ function installLocalStorageSyncHook() {
         return;
       }
       const resolvedKey = resolveTenantKey(key);
-      nativeSetItem(resolvedKey, value);
+      serializedMemoryCache.set(resolvedKey, value);
       try {
         let parsed: any = value;
         try {
@@ -2021,6 +2111,9 @@ function installLocalStorageSyncHook() {
         }
         const now = Date.now();
         memoryCache.set(resolvedKey, parsed);
+        if (resolvedKey === KEYS.ADMINS || resolvedKey === KEYS.MEMBERS) {
+          invalidateActiveSchoolIdCache();
+        }
         keyTimestamps.set(resolvedKey, now);
         localWriteTimestamps.set(resolvedKey, now);
         locallyModifiedKeys.add(resolvedKey);
@@ -2033,9 +2126,12 @@ function installLocalStorageSyncHook() {
           });
         }
         notifySubscribers([resolvedKey]);
-        pushToRemoteServer(resolvedKey, parsed, now);
+        pendingDiskWrites.set(resolvedKey, { value: parsed, skipRemotePush: false, timestamp: now });
+        if (!diskFlushTimer) {
+          diskFlushTimer = setTimeout(flushPendingDiskWrites, 16);
+        }
       } catch {
-        // ignore
+        nativeSetItem(resolvedKey, value);
       }
     };
   } catch {
@@ -2060,6 +2156,8 @@ export const StorageService = {
   // Pull directly from Global Cloud KV (Google Apps Script RealtimeCloudKV)
   async pullFromGoogleCloudKV(forceAcceptAccounts = false): Promise<boolean> {
     if (typeof window === 'undefined') return false;
+    if (isPullingCloudKV && !forceAcceptAccounts) return false;
+    isPullingCloudKV = true;
     try {
       const url = `${DEFAULT_GAS_WEBAPP_URL}?action=getSheet&spreadsheetId=${MASTER_SPREADSHEET_ID}&sheet=${CLOUD_KV_SHEET}&_t=${Date.now()}`;
       const res = await fetch(url, { method: 'GET', headers: { Accept: 'application/json' } });
@@ -2113,6 +2211,8 @@ export const StorageService = {
       }
     } catch {
       // ignore
+    } finally {
+      isPullingCloudKV = false;
     }
     return false;
   },
@@ -2251,138 +2351,151 @@ export const StorageService = {
   // Pull latest state from Firebase Firestore, Real-Time Server, Cloudflare D1, and Global Cloud KV
   async pullRemoteState(forceFull = false): Promise<boolean> {
     if (typeof window === 'undefined') return false;
-    let updatedAny = false;
-    let serverReached = false;
-
-    const mergedStore: Record<string, any> = {};
-    const mergedTimestamps: Record<string, number> = {};
-
-    const mergeInto = (storeObj: Record<string, any>, tsObj: Record<string, number>) => {
-      for (const [k, v] of Object.entries(storeObj)) {
-        if (!k || INTERNAL_SKIP_KEYS.has(k)) continue;
-        const ts = Number(tsObj[k]) || 0;
-        const existingTs = mergedTimestamps[k] || 0;
-        if (!(k in mergedStore) || ts >= existingTs) {
-          mergedStore[k] = v;
-          mergedTimestamps[k] = ts;
-        }
-      }
-    };
-
-    // Periodically also pull from Google Cloud KV directly (every 4.5s or on forceFull) so cross-container (ais-dev <-> ais-pre) sync works immediately
-    const nowMs = Date.now();
-    let directCloudKvPromise: Promise<boolean> = Promise.resolve(false);
-    if (forceFull || nowMs - lastDirectCloudPullTime > 4500) {
-      lastDirectCloudPullTime = nowMs;
-      directCloudKvPromise = this.pullFromGoogleCloudKV().catch(() => false);
+    if (!forceFull) {
+      if (isPullingRemoteState) return false;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return false;
+      const nowCheck = Date.now();
+      if (nowCheck - lastRemotePullTime < 2500) return false;
     }
+    isPullingRemoteState = true;
+    lastRemotePullTime = Date.now();
 
-    // 1. Pull from Firebase Firestore on initial boot or forced full sync (live changes arrive via onSnapshot)
-    const firestorePromise = forceFull
-      ? pullAllFromFirestore().catch(() => ({
-          store: {} as Record<string, any>,
-          timestamps: {} as Record<string, number>
-        }))
-      : Promise.resolve({
-          store: {} as Record<string, any>,
-          timestamps: {} as Record<string, number>
-        });
+    try {
+      let updatedAny = false;
+      let serverReached = false;
 
-    // 2. Pull from Express Server (/api/realtime/state)
-    const sinceParam = forceFull ? 0 : lastKnownRev;
-    const forceCloudParam = forceFull ? '&forceCloud=1' : '';
-    const serverPromise = fetch(`/api/realtime/state?sinceRev=${sinceParam}${forceCloudParam}`, {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store'
-    })
-      .then(async res => {
-        if (!res.ok) return null;
-        serverReached = true;
-        return await res.json();
+      const mergedStore: Record<string, any> = {};
+      const mergedTimestamps: Record<string, number> = {};
+
+      const mergeInto = (storeObj: Record<string, any>, tsObj: Record<string, number>) => {
+        for (const [k, v] of Object.entries(storeObj)) {
+          if (!k || INTERNAL_SKIP_KEYS.has(k)) continue;
+          const ts = Number(tsObj[k]) || 0;
+          const existingTs = mergedTimestamps[k] || 0;
+          if (!(k in mergedStore) || ts >= existingTs) {
+            mergedStore[k] = v;
+            mergedTimestamps[k] = ts;
+          }
+        }
+      };
+
+      // Periodically also pull from Google Cloud KV directly (every 20s or on forceFull) so cross-container sync works without clogging mobile CPU
+      const nowMs = Date.now();
+      let directCloudKvPromise: Promise<boolean> = Promise.resolve(false);
+      if (forceFull || nowMs - lastDirectCloudPullTime > 20000) {
+        lastDirectCloudPullTime = nowMs;
+        directCloudKvPromise = this.pullFromGoogleCloudKV().catch(() => false);
+      }
+
+      // 1. Pull from Firebase Firestore on initial boot or forced full sync (live changes arrive via onSnapshot)
+      const firestorePromise = forceFull
+        ? pullAllFromFirestore().catch(() => ({
+            store: {} as Record<string, any>,
+            timestamps: {} as Record<string, number>
+          }))
+        : Promise.resolve({
+            store: {} as Record<string, any>,
+            timestamps: {} as Record<string, number>
+          });
+
+      // 2. Pull from Express Server (/api/realtime/state)
+      const sinceParam = forceFull ? 0 : lastKnownRev;
+      const forceCloudParam = forceFull ? '&forceCloud=1' : '';
+      const serverPromise = fetch(`/api/realtime/state?sinceRev=${sinceParam}${forceCloudParam}`, {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store'
       })
-      .catch(() => null);
+        .then(async res => {
+          if (!res.ok) return null;
+          serverReached = true;
+          return await res.json();
+        })
+        .catch(() => null);
 
-    const [firestoreData, serverData] = await Promise.all([
-      firestorePromise,
-      serverPromise,
-      forceFull
-        ? Promise.race([directCloudKvPromise, new Promise<boolean>(r => setTimeout(() => r(false), 3500))])
-        : Promise.resolve(false)
-    ]);
+      const [firestoreData, serverData] = await Promise.all([
+        firestorePromise,
+        serverPromise,
+        forceFull
+          ? Promise.race([directCloudKvPromise, new Promise<boolean>(r => setTimeout(() => r(false), 3500))])
+          : Promise.resolve(false)
+      ]);
 
-    if (serverData && serverData.status === 'success' && serverData.store && typeof serverData.store === 'object') {
-      if (typeof serverData.rev === 'number') {
-        lastKnownRev = serverData.rev;
+      if (serverData && serverData.status === 'success' && serverData.store && typeof serverData.store === 'object') {
+        if (typeof serverData.rev === 'number') {
+          lastKnownRev = serverData.rev;
+        }
+        mergeInto(serverData.store, serverData.timestamps || {});
       }
-      mergeInto(serverData.store, serverData.timestamps || {});
-    }
 
-    if (firestoreData && firestoreData.store && Object.keys(firestoreData.store).length > 0) {
-      mergeInto(firestoreData.store, firestoreData.timestamps || {});
-    }
+      if (firestoreData && firestoreData.store && Object.keys(firestoreData.store).length > 0) {
+        mergeInto(firestoreData.store, firestoreData.timestamps || {});
+      }
 
-    if (Object.keys(mergedStore).length > 0) {
-      const changed = applyIncomingUpdates(mergedStore, mergedTimestamps);
-      if (changed.length > 0) updatedAny = true;
+      if (Object.keys(mergedStore).length > 0) {
+        const changed = applyIncomingUpdates(mergedStore, mergedTimestamps);
+        if (changed.length > 0) updatedAny = true;
+        return updatedAny;
+      }
+
+      if (serverData && serverData.status === 'up_to_date') {
+        return false;
+      }
+
+      // Fallback if both Firestore and /api/realtime/state are unreachable
+      if (!serverReached && Object.keys(mergedStore).length === 0) {
+        try {
+          const [d1Master, d1Kv, cloudUpdated] = await Promise.all([
+            D1Service.fetchAll(),
+            fetch('/api/d1?action=getRealtimeState', { cache: 'no-store' })
+              .then(r => (r.ok ? r.json() : null))
+              .catch(() => null),
+            this.pullFromGoogleCloudKV()
+          ]);
+
+          if (cloudUpdated) updatedAny = true;
+
+          const incoming: Record<string, any> = {};
+          const incomingTs: Record<string, number> = {};
+
+          if (d1Master.success && d1Master.data) {
+            if (d1Master.data.developer) {
+              incoming[KEYS.DEVELOPER_ACCOUNT] = d1Master.data.developer;
+              incomingTs[KEYS.DEVELOPER_ACCOUNT] = 1;
+            }
+            if (Array.isArray(d1Master.data.admins) && d1Master.data.admins.length > 0) {
+              incoming[KEYS.ADMINS] = d1Master.data.admins;
+              incomingTs[KEYS.ADMINS] = 1;
+            }
+            if (Array.isArray(d1Master.data.members) && d1Master.data.members.length > 0) {
+              incoming[KEYS.MEMBERS] = d1Master.data.members;
+              incomingTs[KEYS.MEMBERS] = 1;
+            }
+            if (Array.isArray(d1Master.data.academicYears) && d1Master.data.academicYears.length > 0) {
+              incoming[KEYS.ACADEMIC_YEARS] = d1Master.data.academicYears;
+              incomingTs[KEYS.ACADEMIC_YEARS] = 1;
+            }
+          }
+
+          if (d1Kv && d1Kv.status === 'success' && d1Kv.store) {
+            Object.assign(incoming, d1Kv.store);
+            Object.assign(incomingTs, d1Kv.timestamps || {});
+          }
+
+          if (Object.keys(incoming).length > 0) {
+            const changed = applyIncomingUpdates(incoming, incomingTs);
+            if (changed.length > 0) updatedAny = true;
+          } else {
+            this.seedServerWithLocalData();
+          }
+        } catch {
+          // ignore
+        }
+      }
+
       return updatedAny;
+    } finally {
+      isPullingRemoteState = false;
     }
-
-    if (serverData && serverData.status === 'up_to_date') {
-      return false;
-    }
-
-    // Fallback if both Firestore and /api/realtime/state are unreachable
-    if (!serverReached && Object.keys(mergedStore).length === 0) {
-      try {
-        const [d1Master, d1Kv, cloudUpdated] = await Promise.all([
-          D1Service.fetchAll(),
-          fetch('/api/d1?action=getRealtimeState', { cache: 'no-store' })
-            .then(r => (r.ok ? r.json() : null))
-            .catch(() => null),
-          this.pullFromGoogleCloudKV()
-        ]);
-
-        if (cloudUpdated) updatedAny = true;
-
-        const incoming: Record<string, any> = {};
-        const incomingTs: Record<string, number> = {};
-
-        if (d1Master.success && d1Master.data) {
-          if (d1Master.data.developer) {
-            incoming[KEYS.DEVELOPER_ACCOUNT] = d1Master.data.developer;
-            incomingTs[KEYS.DEVELOPER_ACCOUNT] = 1;
-          }
-          if (Array.isArray(d1Master.data.admins) && d1Master.data.admins.length > 0) {
-            incoming[KEYS.ADMINS] = d1Master.data.admins;
-            incomingTs[KEYS.ADMINS] = 1;
-          }
-          if (Array.isArray(d1Master.data.members) && d1Master.data.members.length > 0) {
-            incoming[KEYS.MEMBERS] = d1Master.data.members;
-            incomingTs[KEYS.MEMBERS] = 1;
-          }
-          if (Array.isArray(d1Master.data.academicYears) && d1Master.data.academicYears.length > 0) {
-            incoming[KEYS.ACADEMIC_YEARS] = d1Master.data.academicYears;
-            incomingTs[KEYS.ACADEMIC_YEARS] = 1;
-          }
-        }
-
-        if (d1Kv && d1Kv.status === 'success' && d1Kv.store) {
-          Object.assign(incoming, d1Kv.store);
-          Object.assign(incomingTs, d1Kv.timestamps || {});
-        }
-
-        if (Object.keys(incoming).length > 0) {
-          const changed = applyIncomingUpdates(incoming, incomingTs);
-          if (changed.length > 0) updatedAny = true;
-        } else {
-          this.seedServerWithLocalData();
-        }
-      } catch {
-        // ignore
-      }
-    }
-
-    return updatedAny;
   },
 
   seedServerWithLocalData(): void {
@@ -2518,19 +2631,25 @@ export const StorageService = {
 
     connectSSE();
 
-    // 6. Fast lightweight delta check every 1.2 seconds & on focus/visibility/online
+    // 6. Lightweight delta check every 5 seconds & on focus/visibility/online (SSE + Firestore onSnapshot handle real-time push)
     setInterval(() => {
       this.pullRemoteState(false);
-    }, 1200);
+    }, 5000);
 
     window.addEventListener('focus', () => {
       this.pullRemoteState(false);
     });
 
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === 'hidden') {
+        flushPendingDiskWrites();
+      } else if (document.visibilityState === 'visible') {
         this.pullRemoteState(false);
       }
+    });
+
+    window.addEventListener('pagehide', () => {
+      flushPendingDiskWrites();
     });
 
     window.addEventListener('online', () => {
@@ -2560,16 +2679,23 @@ export const StorageService = {
   // Session & Auth
   getSession(): UserSession | null {
     try {
-      if (typeof window !== 'undefined' && nativeGetItem && nativeGetItem(KEYS.SESSION)) {
-        localStorage.removeItem(KEYS.SESSION);
-      }
+      if (typeof window === 'undefined') return null;
       const val = sessionStorage.getItem(KEYS.SESSION);
-      if (!val) return null;
+      if (!val) {
+        cachedSessionRaw = null;
+        cachedSessionObj = null;
+        return null;
+      }
+      if (val === cachedSessionRaw && cachedSessionObj) {
+        return cachedSessionObj;
+      }
       const parsed = JSON.parse(val) as UserSession;
       if (parsed && parsed.username && parsed.isLoggedIn) {
         if (parsed.role !== 'developer') {
           parsed.schoolId = normalizeSchoolId(parsed.schoolId, parsed.schoolName);
         }
+        cachedSessionRaw = val;
+        cachedSessionObj = parsed;
         return parsed;
       }
       return null;
@@ -2580,6 +2706,7 @@ export const StorageService = {
 
   setSession(session: UserSession | null): void {
     try {
+      invalidateActiveSchoolIdCache();
       if (typeof window !== 'undefined') {
         localStorage.removeItem(KEYS.SESSION);
       }
@@ -2587,8 +2714,13 @@ export const StorageService = {
         if (session.role !== 'developer') {
           session.schoolId = normalizeSchoolId(session.schoolId, session.schoolName);
         }
-        sessionStorage.setItem(KEYS.SESSION, JSON.stringify(session));
+        const serialized = JSON.stringify(session);
+        cachedSessionRaw = serialized;
+        cachedSessionObj = session;
+        sessionStorage.setItem(KEYS.SESSION, serialized);
       } else {
+        cachedSessionRaw = null;
+        cachedSessionObj = null;
         sessionStorage.removeItem(KEYS.SESSION);
       }
     } catch (err) {

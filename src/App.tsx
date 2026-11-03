@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   UserSession, 
   SchoolInfo, 
@@ -110,99 +110,110 @@ export default function App() {
     });
   };
 
-  const reloadAllStates = () => {
-    const latestAdmins = StorageService.getAdmins();
-    const latestMembers = StorageService.getMembers();
-    setAdmins(latestAdmins);
-    setMembers(latestMembers);
-    setAcademicYears(StorageService.getAcademicYears());
+  const reloadAllStates = (changedKeys?: string[]) => {
+    const isSelective = Array.isArray(changedKeys) && changedKeys.length > 0;
+    const baseKeySet = isSelective
+      ? new Set(changedKeys.map(k => (k ? k.split('__')[0] : '')))
+      : null;
 
-    // Ensure active session's schoolId stays strictly aligned with latest synced admins/members
-    const currentSession = StorageService.getSession();
-    if (currentSession && currentSession.role !== 'developer') {
-      let resolvedSchoolId = StorageService.getNormalizedSchoolId(currentSession.schoolId, currentSession.schoolName);
-      if (currentSession.role === 'member') {
-        const matchedMem = latestMembers.find(
-          m => m.id === currentSession.id || m.username.toLowerCase() === currentSession.username.toLowerCase()
-        );
-        if (matchedMem && matchedMem.schoolId) {
-          resolvedSchoolId = StorageService.getNormalizedSchoolId(matchedMem.schoolId, matchedMem.schoolName);
+    const shouldUpdate = (baseKey: string) => !baseKeySet || baseKeySet.has(baseKey);
+
+    if (shouldUpdate('ams_school_admins') || shouldUpdate('ams_members')) {
+      const latestAdmins = StorageService.getAdmins();
+      const latestMembers = StorageService.getMembers();
+      if (shouldUpdate('ams_school_admins')) setAdmins(latestAdmins);
+      if (shouldUpdate('ams_members')) setMembers(latestMembers);
+
+      // Ensure active session's schoolId stays strictly aligned with latest synced admins/members
+      const currentSession = StorageService.getSession();
+      if (currentSession && currentSession.role !== 'developer') {
+        let resolvedSchoolId = StorageService.getNormalizedSchoolId(currentSession.schoolId, currentSession.schoolName);
+        if (currentSession.role === 'member') {
+          const matchedMem = latestMembers.find(
+            m => m.id === currentSession.id || m.username.toLowerCase() === currentSession.username.toLowerCase()
+          );
+          if (matchedMem && matchedMem.schoolId) {
+            resolvedSchoolId = StorageService.getNormalizedSchoolId(matchedMem.schoolId, matchedMem.schoolName);
+          }
+        } else if (currentSession.role === 'admin') {
+          const matchedAdm = latestAdmins.find(
+            a => a.id === currentSession.id || a.username.toLowerCase() === currentSession.username.toLowerCase()
+          );
+          if (matchedAdm) {
+            resolvedSchoolId = matchedAdm.id;
+          }
         }
-      } else if (currentSession.role === 'admin') {
-        const matchedAdm = latestAdmins.find(
-          a => a.id === currentSession.id || a.username.toLowerCase() === currentSession.username.toLowerCase()
-        );
-        if (matchedAdm) {
-          resolvedSchoolId = matchedAdm.id;
+        const matchedSchool = latestAdmins.find(a => a.id === resolvedSchoolId);
+        const matchedMemberObj =
+          currentSession.role === 'member'
+            ? latestMembers.find(m => m.id === currentSession.id || m.username.toLowerCase() === currentSession.username.toLowerCase())
+            : undefined;
+
+        // Enforce temporary suspension: if the school's Admin is suspended, block both the Admin and all Members of that school immediately
+        if (matchedSchool?.isSuspended || matchedMemberObj?.isSuspended) {
+          StorageService.setSession(null);
+          setUser(null);
+          setIsInspectingSchool(false);
+          showToast(
+            'error',
+            'ระงับการใช้งานชั่วคราว',
+            matchedSchool?.isSuspended
+              ? `โรงเรียน "${matchedSchool.schoolName}" ถูกระงับการใช้งานชั่วคราวโดยผู้พัฒนาระบบ ทั้ง Admin และสมาชิกในสังกัดไม่สามารถเข้าใช้งานได้ในขณะนี้`
+              : 'บัญชีของคุณถูกระงับการใช้งานชั่วคราว ไม่สามารถเข้าใช้งานได้ในขณะนี้'
+          );
+          return;
         }
-      }
-      const matchedSchool = latestAdmins.find(a => a.id === resolvedSchoolId);
-      const matchedMemberObj =
-        currentSession.role === 'member'
-          ? latestMembers.find(m => m.id === currentSession.id || m.username.toLowerCase() === currentSession.username.toLowerCase())
-          : undefined;
 
-      // Enforce temporary suspension: if the school's Admin is suspended, block both the Admin and all Members of that school immediately
-      if (matchedSchool?.isSuspended || matchedMemberObj?.isSuspended) {
-        StorageService.setSession(null);
-        setUser(null);
-        setIsInspectingSchool(false);
-        showToast(
-          'error',
-          'ระงับการใช้งานชั่วคราว',
-          matchedSchool?.isSuspended
-            ? `โรงเรียน "${matchedSchool.schoolName}" ถูกระงับการใช้งานชั่วคราวโดยผู้พัฒนาระบบ ทั้ง Admin และสมาชิกในสังกัดไม่สามารถเข้าใช้งานได้ในขณะนี้`
-            : 'บัญชีของคุณถูกระงับการใช้งานชั่วคราว ไม่สามารถเข้าใช้งานได้ในขณะนี้'
-        );
-        return;
-      }
+        const expectedRoom = matchedMemberObj
+          ? (matchedMemberObj.room || (matchedMemberObj.gradeLevel ? '1' : undefined))
+          : currentSession.assignedRoom;
+        const expectedGrade = matchedMemberObj ? matchedMemberObj.gradeLevel : currentSession.assignedGrade;
+        const expectedAvatar = matchedMemberObj?.avatarUrl || currentSession.avatarUrl;
 
-      const expectedRoom = matchedMemberObj
-        ? (matchedMemberObj.room || (matchedMemberObj.gradeLevel ? '1' : undefined))
-        : currentSession.assignedRoom;
-      const expectedGrade = matchedMemberObj ? matchedMemberObj.gradeLevel : currentSession.assignedGrade;
-      const expectedAvatar = matchedMemberObj?.avatarUrl || currentSession.avatarUrl;
-
-      if (
-        resolvedSchoolId !== currentSession.schoolId ||
-        (matchedSchool?.schoolName && matchedSchool.schoolName !== currentSession.schoolName) ||
-        (matchedMemberObj && (expectedGrade !== currentSession.assignedGrade || expectedRoom !== currentSession.assignedRoom || expectedAvatar !== currentSession.avatarUrl))
-      ) {
-        const updatedSession: UserSession = {
-          ...currentSession,
-          schoolId: resolvedSchoolId,
-          schoolName: matchedSchool?.schoolName || currentSession.schoolName,
-          assignedGrade: expectedGrade,
-          assignedRoom: expectedRoom,
-          avatarUrl: expectedAvatar
-        };
-        StorageService.setSession(updatedSession);
-        setUser(updatedSession);
+        if (
+          resolvedSchoolId !== currentSession.schoolId ||
+          (matchedSchool?.schoolName && matchedSchool.schoolName !== currentSession.schoolName) ||
+          (matchedMemberObj && (expectedGrade !== currentSession.assignedGrade || expectedRoom !== currentSession.assignedRoom || expectedAvatar !== currentSession.avatarUrl))
+        ) {
+          const updatedSession: UserSession = {
+            ...currentSession,
+            schoolId: resolvedSchoolId,
+            schoolName: matchedSchool?.schoolName || currentSession.schoolName,
+            assignedGrade: expectedGrade,
+            assignedRoom: expectedRoom,
+            avatarUrl: expectedAvatar
+          };
+          StorageService.setSession(updatedSession);
+          setUser(updatedSession);
+        }
       }
     }
 
-    setSchoolInfo(StorageService.getSchoolInfo());
-    setStudents(StorageService.getStudents());
-    setPersonnel(StorageService.getPersonnel());
-    setDailyTracking(StorageService.getDailyTracking());
-    setSubjects(StorageService.getSubjects());
-    setGrades(StorageService.getGrades());
-    setAttendance(StorageService.getAttendance());
-    setAttendanceConfig(StorageService.getAttendanceConfig());
-    setSavings(StorageService.getSavings());
-    setTasks(StorageService.getTasks());
-    setDocuments(StorageService.getDocuments());
-    setWebsites(StorageService.getWebsites());
-    setCalendarEvents(StorageService.getCalendarEvents());
-    setCustomButtons(StorageService.getCustomButtons());
-    setGoogleConfig(StorageService.getGoogleConfig());
+    if (shouldUpdate('ams_academic_years')) setAcademicYears(StorageService.getAcademicYears());
+    if (shouldUpdate('ams_school_info') || shouldUpdate('ams_school_admins')) setSchoolInfo(StorageService.getSchoolInfo());
+    if (shouldUpdate('ams_students')) setStudents(StorageService.getStudents());
+    if (shouldUpdate('ams_personnel')) setPersonnel(StorageService.getPersonnel());
+    if (shouldUpdate('ams_daily_tracking')) setDailyTracking(StorageService.getDailyTracking());
+    if (shouldUpdate('ams_subjects')) setSubjects(StorageService.getSubjects());
+    if (shouldUpdate('ams_grades')) setGrades(StorageService.getGrades());
+    if (shouldUpdate('ams_attendance')) setAttendance(StorageService.getAttendance());
+    if (shouldUpdate('ams_attendance_config') || shouldUpdate('ams_attendance_configs_by_term')) {
+      setAttendanceConfig(StorageService.getAttendanceConfig());
+    }
+    if (shouldUpdate('ams_savings')) setSavings(StorageService.getSavings());
+    if (shouldUpdate('ams_tasks')) setTasks(StorageService.getTasks());
+    if (shouldUpdate('ams_documents')) setDocuments(StorageService.getDocuments());
+    if (shouldUpdate('ams_websites')) setWebsites(StorageService.getWebsites());
+    if (shouldUpdate('ams_calendar')) setCalendarEvents(StorageService.getCalendarEvents());
+    if (shouldUpdate('ams_custom_buttons')) setCustomButtons(StorageService.getCustomButtons());
+    if (shouldUpdate('ams_google_config')) setGoogleConfig(StorageService.getGoogleConfig());
   };
 
   // Real-Time Cross-Device / Cross-Browser / Cross-Email Sync Engine
   useEffect(() => {
     StorageService.initRealtimeSync();
-    const unsubscribe = StorageService.subscribe(() => {
-      reloadAllStates();
+    const unsubscribe = StorageService.subscribe((changedKeys) => {
+      reloadAllStates(changedKeys);
     });
     return () => {
       unsubscribe();
@@ -250,13 +261,17 @@ export default function App() {
     showToast('info', 'ออกจากระบบแล้ว', 'ออกจากระบบสำเร็จ นำท่านสู่หน้าลงชื่อเข้าใช้งาน');
   };
 
-  // 15-Minute Inactivity Auto-Logout Security Watcher
+  // 15-Minute Inactivity Auto-Logout Security Watcher (throttled to avoid mobile touch/scroll lag)
   useEffect(() => {
     if (!user) return;
 
     let timer: ReturnType<typeof setTimeout>;
+    let lastResetMs = 0;
 
     const resetInactivityTimer = () => {
+      const now = Date.now();
+      if (now - lastResetMs < 15000) return;
+      lastResetMs = now;
       clearTimeout(timer);
       timer = setTimeout(() => {
         StorageService.setSession(null);
@@ -266,7 +281,7 @@ export default function App() {
       }, 15 * 60 * 1000); // 15 minutes
     };
 
-    const trackedEvents = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'];
+    const trackedEvents = ['pointerdown', 'keydown', 'touchstart'];
     trackedEvents.forEach(evt => window.addEventListener(evt, resetInactivityTimer, { passive: true }));
     resetInactivityTimer();
 
@@ -596,38 +611,44 @@ export default function App() {
     }
   }, [activeTab, disableAssignments, disableDocuments, user?.id, user?.role]);
 
-  const schoolMembersForTasks = (currentUserSchoolIdForTasks
-    ? members.filter(m => StorageService.getNormalizedSchoolId(m.schoolId, m.schoolName) === currentUserSchoolIdForTasks)
-    : members
-  ).filter(m => m.role !== 'admin');
+  const schoolMembersForTasks = useMemo(() => {
+    return (currentUserSchoolIdForTasks
+      ? members.filter(m => StorageService.getNormalizedSchoolId(m.schoolId, m.schoolName) === currentUserSchoolIdForTasks)
+      : members
+    ).filter(m => m.role !== 'admin');
+  }, [members, currentUserSchoolIdForTasks]);
+
   const totalSchoolMembersCount = schoolMembersForTasks.length > 0 ? schoolMembersForTasks.length : 1;
 
-  const pendingTasksCount = disableAssignments
-    ? 0
-    : tasks.filter(t => {
-        if (t.type === 'announcement') return false;
-        if (t.isManualCompleted) return false;
-        if (user?.role === 'member') {
-          const hasSubmitted =
-            (t.submissions || []).some(s => s.memberId === user.id || (user.fullName && s.memberName === user.fullName)) ||
-            t.submittedBy === user.id;
-          return !hasSubmitted;
-        }
-        const submittedCount = new Set(
-          (t.submissions || [])
-            .filter(s => s && (s.memberId || s.memberName))
-            .map(s => String(s.memberId || s.memberName).trim().toLowerCase())
-        ).size;
-        return submittedCount < totalSchoolMembersCount;
-      }).length;
+  const pendingTasksCount = useMemo(() => {
+    if (disableAssignments) return 0;
+    return tasks.filter(t => {
+      if (t.type === 'announcement') return false;
+      if (t.isManualCompleted) return false;
+      if (user?.role === 'member') {
+        const hasSubmitted =
+          (t.submissions || []).some(s => s.memberId === user.id || (user.fullName && s.memberName === user.fullName)) ||
+          t.submittedBy === user.id;
+        return !hasSubmitted;
+      }
+      const submittedCount = new Set(
+        (t.submissions || [])
+          .filter(s => s && (s.memberId || s.memberName))
+          .map(s => String(s.memberId || s.memberName).trim().toLowerCase())
+      ).size;
+      return submittedCount < totalSchoolMembersCount;
+    }).length;
+  }, [tasks, disableAssignments, user?.role, user?.id, user?.fullName, totalSchoolMembersCount]);
 
   // Header quick statistics
-  const todayStr = new Date().toISOString().split('T')[0];
-  const todayAttendance = attendance.filter(a => a.date === todayStr);
-  const presentCount = todayAttendance.filter(a => a.status === 'present').length;
-  const attendanceRate = todayAttendance.length > 0 
-    ? Math.round((presentCount / todayAttendance.length) * 100) 
-    : 100;
+  const attendanceRate = useMemo(() => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    const todayAttendance = attendance.filter(a => a.date === todayStr);
+    const presentCount = todayAttendance.filter(a => a.status === 'present').length;
+    return todayAttendance.length > 0
+      ? Math.round((presentCount / todayAttendance.length) * 100)
+      : 100;
+  }, [attendance]);
 
   const handleSelectTab = (tab: NavTab) => {
     if (tab === 'assignments' && disableAssignments) {
@@ -698,12 +719,14 @@ export default function App() {
 
   // Multi-Tenant Isolation: Filter members strictly belonging to the logged-in Admin/Member's school
   const currentUserSchoolId = StorageService.getNormalizedSchoolId(user.schoolId, user.schoolName);
-  const tenantMembers = currentUserSchoolId
-    ? members.filter(m => {
-        const memberSchoolId = StorageService.getNormalizedSchoolId(m.schoolId, m.schoolName);
-        return memberSchoolId === currentUserSchoolId;
-      })
-    : members;
+  const tenantMembers = useMemo(() => {
+    return currentUserSchoolId
+      ? members.filter(m => {
+          const memberSchoolId = StorageService.getNormalizedSchoolId(m.schoolId, m.schoolName);
+          return memberSchoolId === currentUserSchoolId;
+        })
+      : members;
+  }, [members, currentUserSchoolId]);
 
   return (
     <div className="min-h-screen bg-slate-50/60 flex flex-col text-slate-800">
