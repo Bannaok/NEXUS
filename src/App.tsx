@@ -675,6 +675,17 @@ export default function App() {
 
   const effectiveTab = activeTab === 'settings' ? previousTab : activeTab;
 
+  // Multi-Tenant Isolation: Filter members strictly belonging to the logged-in Admin/Member's school
+  const currentUserSchoolId = user ? StorageService.getNormalizedSchoolId(user.schoolId, user.schoolName) : '';
+  const tenantMembers = useMemo(() => {
+    return currentUserSchoolId
+      ? members.filter(m => {
+          const memberSchoolId = StorageService.getNormalizedSchoolId(m.schoolId, m.schoolName);
+          return memberSchoolId === currentUserSchoolId;
+        })
+      : members;
+  }, [members, currentUserSchoolId]);
+
   // Production Login Screen (Strictly Pure White Background)
   if (!user) {
     return (
@@ -716,17 +727,6 @@ export default function App() {
       </div>
     );
   }
-
-  // Multi-Tenant Isolation: Filter members strictly belonging to the logged-in Admin/Member's school
-  const currentUserSchoolId = StorageService.getNormalizedSchoolId(user.schoolId, user.schoolName);
-  const tenantMembers = useMemo(() => {
-    return currentUserSchoolId
-      ? members.filter(m => {
-          const memberSchoolId = StorageService.getNormalizedSchoolId(m.schoolId, m.schoolName);
-          return memberSchoolId === currentUserSchoolId;
-        })
-      : members;
-  }, [members, currentUserSchoolId]);
 
   return (
     <div className="min-h-screen bg-slate-50/60 flex flex-col text-slate-800">
