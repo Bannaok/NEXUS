@@ -345,6 +345,11 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
     return (local && local.length > 0) ? local : (attendance || []);
   }, [attendance, studentAttendanceSyncTick]);
 
+  const effectivePersonnel = useMemo(() => {
+    const local = StorageService.getPersonnel();
+    return (local && local.length > 0) ? local : (personnel || []);
+  }, [personnel, studentAttendanceSyncTick]);
+
   const [activeSubTab, setActiveSubTab] = useState<'students' | 'personnel' | 'school' | 'leave' | 'duty'>('students');
 
   const defaultLeaveRequests: LeaveRequest[] = [
@@ -459,7 +464,7 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
       if (changedKeys.some(k => k.startsWith('ams_daily_duty_logs_v1') || k === 'ams_deleted_duty_log_ids')) {
         setDutyLogs(StorageService.getDailyDutyLogs(defaultDutyLogs));
       }
-      if (changedKeys.some(k => k.startsWith('ams_students') || k.startsWith('ams_attendance'))) {
+      if (changedKeys.some(k => k.startsWith('ams_students') || k.startsWith('ams_attendance') || k.startsWith('ams_personnel') || k.startsWith('ams_school_info'))) {
         setStudentAttendanceSyncTick(t => t + 1);
       }
     });
@@ -874,8 +879,8 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
     if (lastLeave) {
       const lStart = parseThaiDateParts(lastLeave.startDate);
       const lEnd = parseThaiDateParts(lastLeave.endDate);
-      lastLeaveStartStr = `${lStart.day} ${lStart.month} พ.ศ. ${lStart.year}`;
-      lastLeaveEndStr = `${lEnd.day} ${lEnd.month} พ.ศ. ${lEnd.year}`;
+      lastLeaveStartStr = `${lStart.day} ${lStart.month} ${lStart.year}`;
+      lastLeaveEndStr = `${lEnd.day} ${lEnd.month} ${lEnd.year}`;
       lastLeaveDaysStr = calculateLeaveDaysCount(lastLeave.startDate, lastLeave.endDate).toString();
     }
 
@@ -930,7 +935,7 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
 
     const officerName = formatThaiPersonName(targetLeave.personnelOfficer || 'เจ้าหน้าที่งานบุคลากร');
 
-    const rawSchoolName = (schoolInfo.schoolName || 'บ้านนาออก').trim();
+    const rawSchoolName = (schoolInfo.schoolName || 'บ้านไสโป๊ะ').trim().replace(/บ้านนาออก/g, 'บ้านไสโป๊ะ');
     const formattedSchoolName = rawSchoolName.startsWith('โรงเรียน')
       ? rawSchoolName
       : `โรงเรียน${rawSchoolName}`;
@@ -943,6 +948,12 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
               cleanTeacherName(targetLeave.directorName)
           )
         : undefined) ||
+      personnel.find(
+        (p) =>
+          p.personnelType === 'ผู้อำนวยการ' ||
+          ((p.position || '').trim().includes('ผู้อำนวยการ') &&
+            !(p.position || '').trim().includes('รองผู้อำนวยการ'))
+      ) ||
       personnel.find(
         (p) => (p.position || '').trim().includes('ผู้อำนวยการ') || p.personnelType === 'ผู้อำนวยการ'
       );
@@ -959,14 +970,18 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
       directorPositionTitle = `ผู้อำนวยการ${formattedSchoolName}`;
     } else if (
       directorPositionTitle === 'ผู้อำนวยการ' ||
-      directorPositionTitle === 'ผู้อำนวยการโรงเรียน'
+      directorPositionTitle === 'ผู้อำนวยการโรงเรียน' ||
+      directorPositionTitle === 'ผู้อำนวยการสถานศึกษา'
     ) {
       directorPositionTitle = `ผู้อำนวยการ${formattedSchoolName}`;
     }
+    if (directorPositionTitle.includes('บ้านนาออก')) {
+      directorPositionTitle = directorPositionTitle.replace(/บ้านนาออก/g, 'บ้านไสโป๊ะ');
+    }
 
-    const startDateThai = `${startDateParts.day} ${startDateParts.month} พ.ศ. ${startDateParts.year}`;
-    const endDateThai = `${endDateParts.day} ${endDateParts.month} พ.ศ. ${endDateParts.year}`;
-    const createdDateThai = `${createdDate.day} ${createdDate.month} พ.ศ. ${createdDate.year}`;
+    const startDateThai = `${startDateParts.day} ${startDateParts.month} ${startDateParts.year}`;
+    const endDateThai = `${endDateParts.day} ${endDateParts.month} ${endDateParts.year}`;
+    const createdDateThai = `${createdDate.day} ${createdDate.month} ${createdDate.year}`;
     const isApproved = targetLeave.status !== 'ไม่อนุมัติ';
 
     return {
@@ -1006,11 +1021,46 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
     };
   };
 
+  const [leavePdfSignatures, setLeavePdfSignatures] = useState({
+    applicantName: '',
+    applicantPosition: '',
+    officerName: '',
+    officerPosition: 'เจ้าหน้าที่งานบุคลากร',
+    officerDate: '',
+    supervisorName: '',
+    supervisorPosition: '',
+    supervisorDate: '',
+    directorName: '',
+    directorPosition: '',
+    directorDate: '',
+  });
+
+  useEffect(() => {
+    if (!previewLeave) return;
+    const d = computeLeaveDocumentData(previewLeave);
+    setLeavePdfSignatures({
+      applicantName: formatDutySignatureName(d.applicantFullName),
+      applicantPosition: '',
+      officerName: formatDutySignatureName(d.officerName),
+      officerPosition: 'เจ้าหน้าที่งานบุคลากร',
+      officerDate: d.createdDateThai,
+      supervisorName: formatDutySignatureName(d.deputyName),
+      supervisorPosition: d.deputyPosition,
+      supervisorDate: d.createdDateThai,
+      directorName: formatDutySignatureName(d.directorFullName),
+      directorPosition: d.directorPositionTitle,
+      directorDate: d.createdDateThai,
+    });
+  }, [previewLeave?.id]);
+
   /**
    * Renders the Official A4 Leave Request Form directly onto a 406.4-DPI HTML5 Canvas (3360 x 4752 px)
    * so that the downloaded PDF matches the preview 100% with crystal-clear text, dotted lines, and zero shifting.
    */
-  const renderLeaveOfficialA4Canvas = async (targetLeave: LeaveRequest): Promise<HTMLCanvasElement> => {
+  const renderLeaveOfficialA4Canvas = async (
+    targetLeave: LeaveRequest,
+    customSigs?: typeof leavePdfSignatures
+  ): Promise<HTMLCanvasElement> => {
     if (document.fonts) {
       await document.fonts.ready;
     }
@@ -1275,13 +1325,25 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
     drawDottedLine(sigCenterX - appSigHalfW, sigCenterX + appSigHalfW, appSigLineY + mm(1));
 
     const appNameY = appSigLineY + mm(7.2);
-    drawText(`(${d.applicantFullName.replace(/^ครู\s*/, '')})`, sigCenterX, appNameY, {
+    const resolvedAppName = (
+      customSigs !== undefined ? customSigs.applicantName : d.applicantFullName.replace(/^ครู\s*/, '')
+    ).trim();
+    drawText(`(${resolvedAppName || '........................................'})`, sigCenterX, appNameY, {
       align: 'center',
       maxWidth: mm(74),
     });
 
+    const resolvedAppPosition = (customSigs?.applicantPosition || '').trim();
+    if (resolvedAppPosition) {
+      drawText(resolvedAppPosition, sigCenterX, appNameY + mm(5.6), {
+        sizeMm: smallFontMm,
+        align: 'center',
+        maxWidth: mm(74),
+      });
+    }
+
     // 10. Bottom 2-Column Section (Left: Leave Statistics Table & Auditor | Right: Supervisor & Director)
-    const bottomStartY = appNameY + mm(8);
+    const bottomStartY = appNameY + (resolvedAppPosition ? mm(11.5) : mm(8));
     const leftColX = leftMargin;
     const leftColW = mm(86);
     const leftColCenter = leftColX + leftColW / 2;
@@ -1374,7 +1436,10 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
     });
 
     const audNameY = audSigY + mm(6.8);
-    drawText(`(${d.officerName})`, audCenterX, audNameY, {
+    const resolvedOfficerName = (
+      customSigs !== undefined ? customSigs.officerName : formatDutySignatureName(d.officerName)
+    ).trim();
+    drawText(`(${resolvedOfficerName || '........................................'})`, audCenterX, audNameY, {
       sizeMm: smallFontMm,
       align: 'center',
       maxWidth: leftColW - mm(8),
@@ -1386,11 +1451,13 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
       sizeMm: smallFontMm,
       align: 'right',
     });
+    const resolvedOfficerPosition =
+      customSigs !== undefined ? customSigs.officerPosition : 'เจ้าหน้าที่งานบุคลากร';
     drawDottedField(
       audCenterX - audFieldHalfW,
       audCenterX + audFieldHalfW,
       audPosY,
-      'เจ้าหน้าที่งานบุคลากร',
+      resolvedOfficerPosition,
       'center',
       smallFontMm
     );
@@ -1400,11 +1467,13 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
       sizeMm: smallFontMm,
       align: 'right',
     });
+    const resolvedOfficerDate =
+      customSigs !== undefined ? customSigs.officerDate : d.createdDateThai;
     drawDottedField(
       audCenterX - audFieldHalfW,
       audCenterX + audFieldHalfW,
       audDateY,
-      d.createdDateThai,
+      resolvedOfficerDate,
       'center',
       smallFontMm
     );
@@ -1430,7 +1499,10 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
     drawDottedLine(rightSigCenterX - supSigHalfW, rightSigCenterX + supSigHalfW, supSigY + mm(1));
 
     const supNameY = supSigY + mm(6.8);
-    drawText(`(${d.deputyName})`, rightSigCenterX, supNameY, {
+    const resolvedSupervisorName = (
+      customSigs !== undefined ? customSigs.supervisorName : formatDutySignatureName(d.deputyName)
+    ).trim();
+    drawText(`(${resolvedSupervisorName || '........................................'})`, rightSigCenterX, supNameY, {
       sizeMm: smallFontMm,
       align: 'center',
       maxWidth: rightColW - mm(8),
@@ -1442,11 +1514,13 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
       sizeMm: smallFontMm,
       align: 'right',
     });
+    const resolvedSupervisorPosition =
+      customSigs !== undefined ? customSigs.supervisorPosition : d.deputyPosition;
     drawDottedField(
       rightSigCenterX - supPosHalfW,
       rightSigCenterX + supPosHalfW,
       supPosY,
-      d.deputyPosition,
+      resolvedSupervisorPosition,
       'center',
       smallFontMm
     );
@@ -1456,11 +1530,13 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
       sizeMm: smallFontMm,
       align: 'right',
     });
+    const resolvedSupervisorDate =
+      customSigs !== undefined ? customSigs.supervisorDate : d.createdDateThai;
     drawDottedField(
       rightSigCenterX - supSigHalfW,
       rightSigCenterX + supSigHalfW,
       supDateY,
-      d.createdDateThai,
+      resolvedSupervisorDate,
       'center',
       smallFontMm
     );
@@ -1495,7 +1571,12 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
     drawDottedLine(rightSigCenterX - dirSigHalfW, rightSigCenterX + dirSigHalfW, dirSigY + mm(1));
 
     const dirNameY = dirSigY + mm(6.8);
-    drawText(`(${d.directorFullName.replace(/^ครู\s*/, '')})`, rightSigCenterX, dirNameY, {
+    const resolvedDirectorName = (
+      customSigs !== undefined
+        ? customSigs.directorName
+        : formatDutySignatureName(d.directorFullName)
+    ).trim();
+    drawText(`(${resolvedDirectorName || '........................................'})`, rightSigCenterX, dirNameY, {
       sizeMm: smallFontMm,
       align: 'center',
       maxWidth: rightColW - mm(8),
@@ -1507,11 +1588,13 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
       sizeMm: smallFontMm,
       align: 'right',
     });
+    const resolvedDirectorPosition =
+      customSigs !== undefined ? customSigs.directorPosition : d.directorPositionTitle;
     drawDottedField(
       rightSigCenterX - dirPosHalfW,
       rightSigCenterX + dirPosHalfW,
       dirPosY,
-      d.directorPositionTitle,
+      resolvedDirectorPosition,
       'center',
       smallFontMm
     );
@@ -1521,11 +1604,13 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
       sizeMm: smallFontMm,
       align: 'right',
     });
+    const resolvedDirectorDate =
+      customSigs !== undefined ? customSigs.directorDate : d.createdDateThai;
     drawDottedField(
       rightSigCenterX - dirSigHalfW,
       rightSigCenterX + dirSigHalfW,
       dirDateY,
-      d.createdDateThai,
+      resolvedDirectorDate,
       'center',
       smallFontMm
     );
@@ -1534,30 +1619,14 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
   };
 
   useEffect(() => {
-    let cancelled = false;
-    if (!previewLeave) {
-      setLeavePreviewDataUrl('');
-      return;
-    }
-    renderLeaveOfficialA4Canvas(previewLeave)
-      .then((canvas) => {
-        if (!cancelled) {
-          setLeavePreviewDataUrl(canvas.toDataURL('image/png'));
-        }
-      })
-      .catch((err) => {
-        console.error('Failed to render leave preview canvas:', err);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [previewLeave, schoolInfo, personnel, leaveRequests, user]);
+    setLeavePreviewDataUrl('');
+  }, [previewLeave]);
 
   const handleDownloadLeavePdf = async () => {
     if (!previewLeave || isDownloadingLeavePdf) return;
     setIsDownloadingLeavePdf(true);
     try {
-      const canvas = await renderLeaveOfficialA4Canvas(previewLeave);
+      const canvas = await renderLeaveOfficialA4Canvas(previewLeave, leavePdfSignatures);
       const imgData = canvas.toDataURL('image/jpeg', 0.99);
       const pdf = new jsPDF({
         orientation: 'portrait',
@@ -2398,6 +2467,84 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
 
   // State & handler for downloading official government student profile PDF
   const [downloadingStudentId, setDownloadingStudentId] = useState<string | null>(null);
+
+  // ดึงข้อมูลชื่อและตำแหน่งผู้อำนวยการจากหน้าข้อมูลบุคลากร (Personnel) ตรงช่อง "ตำแหน่ง"
+  const directorFromPersonnel = useMemo(() => {
+    const dir =
+      effectivePersonnel.find(
+        p =>
+          p.personnelType === 'ผู้อำนวยการ' ||
+          ((p.position || '').trim().includes('ผู้อำนวยการ') &&
+            !(p.position || '').trim().includes('รองผู้อำนวยการ'))
+      ) ||
+      effectivePersonnel.find(p => (p.position || '').trim().includes('ผู้อำนวยการ'));
+
+    const fullName = dir
+      ? `${dir.prefix || ''}${dir.firstName || ''} ${dir.lastName || ''}`.trim()
+      : (schoolInfo.directorName || '').trim();
+
+    let positionTitle = (dir?.position || '').trim();
+    if (
+      !positionTitle ||
+      positionTitle === 'ผู้อำนวยการ' ||
+      positionTitle === 'ผู้อำนวยการโรงเรียน' ||
+      positionTitle === 'ผู้อำนวยการสถานศึกษา'
+    ) {
+      const rawSchool = (schoolInfo.schoolName || 'บ้านไสโป๊ะ').trim();
+      const cleanSchool = rawSchool.replace(/^โรงเรียน/, '').trim();
+      const targetSchoolName =
+        !cleanSchool || cleanSchool === 'บ้านนาออก'
+          ? 'โรงเรียนบ้านไสโป๊ะ'
+          : `โรงเรียน${cleanSchool}`;
+      positionTitle = `ผู้อำนวยการ${targetSchoolName}`;
+    }
+    if (positionTitle.includes('บ้านนาออก')) {
+      positionTitle = positionTitle.replace(/บ้านนาออก/g, 'บ้านไสโป๊ะ');
+    }
+
+    return {
+      fullName,
+      positionTitle
+    };
+  }, [effectivePersonnel, schoolInfo.directorName, schoolInfo.schoolName]);
+
+  const [studentPdfSignatures, setStudentPdfSignatures] = useState({
+    sig1Name: '',
+    sig1Role: 'ผู้ปกครอง / ผู้ให้ข้อมูล',
+    sig1Date: 'วันที่ ...... เดือน .................... พ.ศ. ........',
+    sig2Name: '',
+    sig2Role: 'ครูประจำชั้น / ผู้บันทึกข้อมูล',
+    sig2Date: 'วันที่ ...... เดือน .................... พ.ศ. ........',
+    sig3Name: '',
+    sig3Role: 'ผู้อำนวยการโรงเรียนบ้านไสโป๊ะ',
+    sig3Date: 'วันที่ ...... เดือน .................... พ.ศ. ........'
+  });
+
+  useEffect(() => {
+    if (viewingStudent) {
+      setStudentPdfSignatures({
+        sig1Name: '',
+        sig1Role: 'ผู้ปกครอง / ผู้ให้ข้อมูล',
+        sig1Date: 'วันที่ ...... เดือน .................... พ.ศ. ........',
+        sig2Name: '',
+        sig2Role: 'ครูประจำชั้น / ผู้บันทึกข้อมูล',
+        sig2Date: 'วันที่ ...... เดือน .................... พ.ศ. ........',
+        sig3Name: directorFromPersonnel.fullName,
+        sig3Role: directorFromPersonnel.positionTitle,
+        sig3Date: 'วันที่ ...... เดือน .................... พ.ศ. ........'
+      });
+    }
+  }, [viewingStudent?.id, directorFromPersonnel.fullName, directorFromPersonnel.positionTitle]);
+
+  const getParenInputWidthStyle = (text: string): React.CSSProperties => {
+    const trimmed = (text || '').trim();
+    if (!trimmed) {
+      return { width: '11.2em' };
+    }
+    const visualLen = trimmed.replace(/[\u0E31\u0E34-\u0E3A\u0E47-\u0E4E]/g, '').length;
+    const emWidth = Math.min(Math.max(visualLen * 0.56 + 1.1, 4.5), 14.5);
+    return { width: `${emWidth}em` };
+  };
 
   // Helper for rendering Thai Citizen ID boxes in official format (13 digits: X - XXXX - XXXXX - XX - X)
   const renderOfficialDigitBoxes = (digitsStr?: string, defaultLength = 13) => {
@@ -4393,39 +4540,109 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                   </div>
                 </div>
 
-                {/* 6. Section 4: Official Signatures */}
+                {/* 6. Section 4: Official Signatures (คลิกพิมพ์ในวงเล็บชื่อและด้านล่างของวงเล็บชื่อได้โดยตรง) */}
                 <div className="mt-4 pt-2 pb-[2.1cm]">
                   <div className="grid grid-cols-3 gap-3 text-center text-xs sm:text-[13px] text-black leading-normal">
                     {/* Signature 1: Parent / Informant */}
                     <div className="pt-2 space-y-1">
                       <p className="whitespace-nowrap overflow-hidden">ลงชื่อ ..................................................</p>
-                      <p className="font-medium whitespace-nowrap overflow-hidden">
-                        ( .................................................. )
+                      <p className="font-medium text-black whitespace-nowrap overflow-hidden flex items-center justify-center">
+                        <span>( </span>
+                        <input
+                          type="text"
+                          value={studentPdfSignatures.sig1Name}
+                          onChange={(e) => setStudentPdfSignatures(prev => ({ ...prev, sig1Name: e.target.value }))}
+                          placeholder=".................................................."
+                          style={getParenInputWidthStyle(studentPdfSignatures.sig1Name)}
+                          className="text-center font-medium text-black placeholder:text-black focus:placeholder-transparent bg-transparent border-b border-transparent hover:border-slate-400 focus:border-black focus:outline-none px-0.5 leading-normal"
+                          title="คลิกเพื่อพิมพ์ชื่อในวงเล็บ"
+                        />
+                        <span> )</span>
                       </p>
-                      <p className="text-black text-xs">ผู้ปกครอง / ผู้ให้ข้อมูล</p>
-                      <p className="text-xs text-black">วันที่ ...... เดือน .................... พ.ศ. ........</p>
+                      <input
+                        type="text"
+                        value={studentPdfSignatures.sig1Role}
+                        onChange={(e) => setStudentPdfSignatures(prev => ({ ...prev, sig1Role: e.target.value }))}
+                        placeholder="ผู้ปกครอง / ผู้ให้ข้อมูล"
+                        className="w-full block text-center text-black text-xs placeholder:text-black focus:placeholder-transparent bg-transparent border-b border-transparent hover:border-slate-400 focus:border-black focus:outline-none px-1 leading-normal"
+                        title="คลิกเพื่อพิมพ์ข้อความด้านล่างวงเล็บชื่อ"
+                      />
+                      <input
+                        type="text"
+                        value={studentPdfSignatures.sig1Date}
+                        onChange={(e) => setStudentPdfSignatures(prev => ({ ...prev, sig1Date: e.target.value }))}
+                        placeholder="วันที่ ...... เดือน .................... พ.ศ. ........"
+                        className="w-full block text-center text-black text-xs placeholder:text-black focus:placeholder-transparent bg-transparent border-b border-transparent hover:border-slate-400 focus:border-black focus:outline-none px-1 leading-normal"
+                        title="คลิกเพื่อพิมพ์วันที่ด้านล่าง"
+                      />
                     </div>
 
                     {/* Signature 2: Homeroom Teacher / Inspector */}
                     <div className="pt-2 space-y-1">
                       <p className="whitespace-nowrap overflow-hidden">ลงชื่อ ..................................................</p>
-                      <p className="font-medium whitespace-nowrap overflow-hidden">
-                        ( .................................................. )
+                      <p className="font-medium text-black whitespace-nowrap overflow-hidden flex items-center justify-center">
+                        <span>( </span>
+                        <input
+                          type="text"
+                          value={studentPdfSignatures.sig2Name}
+                          onChange={(e) => setStudentPdfSignatures(prev => ({ ...prev, sig2Name: e.target.value }))}
+                          placeholder=".................................................."
+                          style={getParenInputWidthStyle(studentPdfSignatures.sig2Name)}
+                          className="text-center font-medium text-black placeholder:text-black focus:placeholder-transparent bg-transparent border-b border-transparent hover:border-slate-400 focus:border-black focus:outline-none px-0.5 leading-normal"
+                          title="คลิกเพื่อพิมพ์ชื่อในวงเล็บ"
+                        />
+                        <span> )</span>
                       </p>
-                      <p className="text-black text-xs">ครูประจำชั้น / ผู้บันทึกข้อมูล</p>
-                      <p className="text-xs text-black">วันที่ ...... เดือน .................... พ.ศ. ........</p>
+                      <input
+                        type="text"
+                        value={studentPdfSignatures.sig2Role}
+                        onChange={(e) => setStudentPdfSignatures(prev => ({ ...prev, sig2Role: e.target.value }))}
+                        placeholder="ครูประจำชั้น / ผู้บันทึกข้อมูล"
+                        className="w-full block text-center text-black text-xs placeholder:text-black focus:placeholder-transparent bg-transparent border-b border-transparent hover:border-slate-400 focus:border-black focus:outline-none px-1 leading-normal"
+                        title="คลิกเพื่อพิมพ์ข้อความด้านล่างวงเล็บชื่อ"
+                      />
+                      <input
+                        type="text"
+                        value={studentPdfSignatures.sig2Date}
+                        onChange={(e) => setStudentPdfSignatures(prev => ({ ...prev, sig2Date: e.target.value }))}
+                        placeholder="วันที่ ...... เดือน .................... พ.ศ. ........"
+                        className="w-full block text-center text-black text-xs placeholder:text-black focus:placeholder-transparent bg-transparent border-b border-transparent hover:border-slate-400 focus:border-black focus:outline-none px-1 leading-normal"
+                        title="คลิกเพื่อพิมพ์วันที่ด้านล่าง"
+                      />
                     </div>
 
                     {/* Signature 3: School Director */}
                     <div className="pt-2 space-y-1">
                       <p className="whitespace-nowrap overflow-hidden">ลงชื่อ ..................................................</p>
-                      <p className="font-bold text-black whitespace-nowrap overflow-hidden">
-                        ( {schoolInfo.directorName || '..................................................'} )
+                      <p className="font-bold text-black whitespace-nowrap overflow-hidden flex items-center justify-center">
+                        <span>( </span>
+                        <input
+                          type="text"
+                          value={studentPdfSignatures.sig3Name}
+                          onChange={(e) => setStudentPdfSignatures(prev => ({ ...prev, sig3Name: e.target.value }))}
+                          placeholder=".................................................."
+                          style={getParenInputWidthStyle(studentPdfSignatures.sig3Name)}
+                          className="text-center font-bold text-black placeholder:text-black focus:placeholder-transparent bg-transparent border-b border-transparent hover:border-slate-400 focus:border-black focus:outline-none px-0.5 leading-normal"
+                          title="คลิกเพื่อพิมพ์ชื่อในวงเล็บ"
+                        />
+                        <span> )</span>
                       </p>
-                      <p className="text-black text-xs">
-                        ผู้อำนวยการ{schoolInfo.schoolName.startsWith('โรงเรียน') ? schoolInfo.schoolName : `โรงเรียน${schoolInfo.schoolName}`}
-                      </p>
-                      <p className="text-xs text-black">วันที่ ...... เดือน .................... พ.ศ. ........</p>
+                      <input
+                        type="text"
+                        value={studentPdfSignatures.sig3Role}
+                        onChange={(e) => setStudentPdfSignatures(prev => ({ ...prev, sig3Role: e.target.value }))}
+                        placeholder={directorFromPersonnel.positionTitle}
+                        className="w-full block text-center text-black text-xs placeholder:text-black focus:placeholder-transparent bg-transparent border-b border-transparent hover:border-slate-400 focus:border-black focus:outline-none px-1 leading-normal"
+                        title="คลิกเพื่อพิมพ์ตำแหน่งด้านล่างวงเล็บชื่อ"
+                      />
+                      <input
+                        type="text"
+                        value={studentPdfSignatures.sig3Date}
+                        onChange={(e) => setStudentPdfSignatures(prev => ({ ...prev, sig3Date: e.target.value }))}
+                        placeholder="วันที่ ...... เดือน .................... พ.ศ. ........"
+                        className="w-full block text-center text-black text-xs placeholder:text-black focus:placeholder-transparent bg-transparent border-b border-transparent hover:border-slate-400 focus:border-black focus:outline-none px-1 leading-normal"
+                        title="คลิกเพื่อพิมพ์วันที่ด้านล่าง"
+                      />
                     </div>
                   </div>
                 </div>
@@ -7984,8 +8201,16 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
               }
 
               #leave-official-a4-print, #leave-official-a4-print * {
-                font-family: 'TH Sarabun New', 'TH Sarabun PSK', 'Sarabun', sans-serif !important;
+                font-family: 'Sarabun', sans-serif !important;
                 box-sizing: border-box !important;
+              }
+
+              #leave-official-a4-print input[type="text"] {
+                height: 1.3em !important;
+                line-height: 1.2 !important;
+                padding-top: 0 !important;
+                padding-bottom: 0 !important;
+                margin: 0 !important;
               }
 
               @media print {
@@ -8018,7 +8243,7 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                   min-height: 297mm !important;
                   max-height: 297mm !important;
                   margin: 0 !important;
-                  padding: 25mm 15mm 7mm 15mm !important;
+                  padding: 18mm 15mm 8mm 15mm !important;
                   border: none !important;
                   box-shadow: none !important;
                   background: white !important;
@@ -8034,7 +8259,7 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                 }
 
                 #leave-official-a4-print h1 {
-                  font-size: 19.5pt !important;
+                  font-size: 15.5pt !important;
                   font-weight: 700 !important;
                 }
 
@@ -8098,15 +8323,16 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
               <div className="p-4 sm:p-8 overflow-auto bg-slate-300/80 flex justify-center flex-1">
                 <div
                   id="leave-official-a4-print"
-                  className="bg-white shadow-2xl border border-slate-300 text-black flex flex-col shrink-0 mx-auto box-border"
+                  className="bg-white shadow-2xl border border-slate-300 text-black flex flex-col shrink-0 mx-auto box-border overflow-hidden"
                   style={{
-                    fontFamily: "'TH Sarabun New', 'TH Sarabun PSK', 'Sarabun', sans-serif",
+                    fontFamily: "'Sarabun', sans-serif",
                     width: '210mm',
                     minHeight: '297mm',
                     height: '297mm',
-                    padding: leavePreviewDataUrl ? '0' : '25mm 15mm 7mm 15mm',
-                    fontSize: '15.5pt',
-                    lineHeight: '1.4',
+                    maxHeight: '297mm',
+                    padding: leavePreviewDataUrl ? '0' : '18mm 15mm 8mm 15mm',
+                    fontSize: '11.5pt',
+                    lineHeight: '1.35',
                     boxSizing: 'border-box'
                   }}
                 >
@@ -8121,19 +8347,19 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                       {/* Top Portion: Official Leave Letter Body */}
                       <div>
                         {/* Form Title */}
-                        <h1 className="text-center font-bold text-[19.5pt] text-black tracking-normal" style={{ marginBottom: '0.5cm' }}>
+                        <h1 className="text-center font-bold text-[15.5pt] text-black tracking-normal" style={{ marginBottom: '3.5mm' }}>
                           แบบใบลาป่วย ลาคลอดบุตร ลากิจส่วนตัว
                         </h1>
 
                         {/* Date & Location (Right indented) */}
-                        <div className="flex flex-col items-end pr-2 font-normal text-[15.5pt]" style={{ marginBottom: '1cm' }}>
-                          <div className="flex items-baseline gap-1 w-[320px]">
+                        <div className="flex flex-col items-end pr-2 font-normal text-[11.5pt]" style={{ marginBottom: '4mm' }}>
+                          <div className="flex items-baseline gap-1 w-[310px]">
                             <span className="shrink-0">เขียนที่</span>
                             <span className="inline-block border-b-[1.5px] border-dotted border-black flex-1 text-center font-normal px-2 pb-0 leading-none">
                               {formattedSchoolName}
                             </span>
                           </div>
-                          <div className="flex items-baseline gap-1 w-[390px] mt-1 font-normal">
+                          <div className="flex items-baseline gap-1 w-[380px] mt-1 font-normal">
                             <span className="shrink-0">วันที่</span>
                             <span className="inline-block border-b-[1.5px] border-dotted border-black min-w-[38px] text-center font-normal px-1 pb-0 leading-none ml-1">
                               {createdDate.day || '\u00A0'}
@@ -8150,15 +8376,15 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                         </div>
 
                         {/* Subject & Recipient */}
-                        <div className="space-y-1.5 mb-3 font-normal text-[15.5pt]">
+                        <div className="space-y-1 mb-2 font-normal text-[11.5pt]">
                           <div className="flex items-baseline">
-                            <span className="font-bold w-14 shrink-0">เรื่อง</span>
+                            <span className="font-bold w-13 shrink-0">เรื่อง</span>
                             <span className="inline-block border-b-[1.5px] border-dotted border-black px-2 flex-1 font-normal ml-1 pb-0 leading-none">
                               {isPersonal ? 'ขอลากิจส่วนตัว' : isSick ? 'ขอลาป่วย' : isMaternity ? 'ขอลาคลอดบุตร' : `ขอ${previewLeave.leaveType}`}
                             </span>
                           </div>
                           <div className="flex items-baseline">
-                            <span className="font-bold w-14 shrink-0">เรียน</span>
+                            <span className="font-bold w-13 shrink-0">เรียน</span>
                             <span className="inline-block border-b-[1.5px] border-dotted border-black px-2 flex-1 font-normal ml-1 pb-0 leading-none">
                               {directorPositionTitle}
                             </span>
@@ -8166,15 +8392,15 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                         </div>
 
                         {/* Applicant Information */}
-                        <div className="space-y-1.5 mb-3 font-normal text-[15.5pt]">
+                        <div className="space-y-1 mb-2 font-normal text-[11.5pt]">
                           <div className="flex items-baseline">
-                            <span className="inline-block w-12 shrink-0"></span>
+                            <span className="inline-block w-11 shrink-0"></span>
                             <span className="shrink-0">ข้าพเจ้า</span>
                             <span className="inline-block border-b-[1.5px] border-dotted border-black px-2 flex-1 text-center font-normal ml-2 pb-0 leading-none">
                               {applicantFullName}
                             </span>
                             <span className="shrink-0 ml-3">ตำแหน่ง</span>
-                            <span className="inline-block border-b-[1.5px] border-dotted border-black px-2 min-w-[190px] text-center font-normal ml-2 pb-0 leading-none">
+                            <span className="inline-block border-b-[1.5px] border-dotted border-black px-2 min-w-[180px] text-center font-normal ml-2 pb-0 leading-none">
                               {teacherPosition}
                             </span>
                           </div>
@@ -8187,24 +8413,24 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                         </div>
 
                         {/* Checkboxes with reasons */}
-                        <div className="space-y-1.5 mb-3 font-normal text-[15.5pt]">
+                        <div className="space-y-1 mb-2 font-normal text-[11.5pt]">
                           <div className="flex items-baseline">
                             <span className="shrink-0">ขอลา</span>
-                            <span className="font-mono text-[16pt] ml-2 shrink-0 font-normal">({isSick ? ' ✓ ' : '   '})</span>
+                            <span className="font-mono text-[12pt] ml-2 shrink-0 font-normal">({isSick ? ' ✓ ' : '   '})</span>
                             <span className="ml-1.5 shrink-0">ป่วย เนื่องจาก</span>
                             <span className="inline-block border-b-[1.5px] border-dotted border-black px-2 flex-1 font-normal ml-2 pb-0 leading-none min-h-[1.2em]">
                               {isSick ? previewLeave.reason : '\u00A0'}
                             </span>
                           </div>
                           <div className="flex items-baseline pl-8">
-                            <span className="font-mono text-[16pt] shrink-0 font-normal">({isPersonal ? ' ✓ ' : '   '})</span>
+                            <span className="font-mono text-[12pt] shrink-0 font-normal">({isPersonal ? ' ✓ ' : '   '})</span>
                             <span className="ml-1.5 shrink-0">กิจส่วนตัว เนื่องจาก</span>
                             <span className="inline-block border-b-[1.5px] border-dotted border-black px-2 flex-1 font-normal ml-2 pb-0 leading-none min-h-[1.2em]">
                               {isPersonal ? previewLeave.reason : '\u00A0'}
                             </span>
                           </div>
                           <div className="flex items-baseline pl-8">
-                            <span className="font-mono text-[16pt] shrink-0 font-normal">({isMaternity ? ' ✓ ' : '   '})</span>
+                            <span className="font-mono text-[12pt] shrink-0 font-normal">({isMaternity ? ' ✓ ' : '   '})</span>
                             <span className="ml-1.5 shrink-0">คลอดบุตร</span>
                             {isMaternity && previewLeave.reason ? (
                               <>
@@ -8219,7 +8445,7 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                           </div>
                           {isOther && (
                             <div className="flex items-baseline pl-8">
-                              <span className="font-mono text-[16pt] shrink-0 font-normal">( ✓ )</span>
+                              <span className="font-mono text-[12pt] shrink-0 font-normal">( ✓ )</span>
                               <span className="ml-1.5 shrink-0">{previewLeave.leaveType} เนื่องจาก</span>
                               <span className="inline-block border-b-[1.5px] border-dotted border-black px-2 flex-1 font-normal ml-2 pb-0 leading-none min-h-[1.2em]">
                                 {previewLeave.reason}
@@ -8229,13 +8455,13 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                         </div>
 
                         {/* Leave Dates & Duration */}
-                        <div className="mb-3 flex items-baseline font-normal text-[15.5pt]">
+                        <div className="mb-2 flex items-baseline font-normal text-[11.5pt]">
                           <span className="shrink-0">ตั้งแต่วันที่</span>
-                          <span className="inline-block border-b-[1.5px] border-dotted border-black px-2 min-w-[155px] text-center font-normal ml-1 pb-0 leading-none">
+                          <span className="inline-block border-b-[1.5px] border-dotted border-black px-2 min-w-[150px] text-center font-normal ml-1 pb-0 leading-none">
                             {startDateThai}
                           </span>
                           <span className="shrink-0 ml-2">ถึงวันที่</span>
-                          <span className="inline-block border-b-[1.5px] border-dotted border-black px-2 min-w-[155px] text-center font-normal ml-1 pb-0 leading-none">
+                          <span className="inline-block border-b-[1.5px] border-dotted border-black px-2 min-w-[150px] text-center font-normal ml-1 pb-0 leading-none">
                             {endDateThai}
                           </span>
                           <span className="shrink-0 ml-2">มีกำหนด</span>
@@ -8246,12 +8472,12 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                         </div>
 
                         {/* Previous Leave History */}
-                        <div className="space-y-1.5 mb-3 font-normal text-[15.5pt]">
+                        <div className="space-y-1 mb-2 font-normal text-[11.5pt]">
                           <div className="flex items-baseline gap-2 font-normal flex-wrap">
                             <span>ข้าพเจ้าได้ลา</span>
-                            <span className="font-mono text-[16pt] font-normal">({lastLeaveSick ? ' ✓ ' : '   '}) ป่วย</span>
-                            <span className="font-mono text-[16pt] font-normal">({lastLeavePersonal ? ' ✓ ' : '   '}) กิจส่วนตัว</span>
-                            <span className="font-mono text-[16pt] font-normal">({lastLeaveMaternity ? ' ✓ ' : '   '}) คลอดบุตร</span>
+                            <span className="font-mono text-[12pt] font-normal">({lastLeaveSick ? ' ✓ ' : '   '}) ป่วย</span>
+                            <span className="font-mono text-[12pt] font-normal">({lastLeavePersonal ? ' ✓ ' : '   '}) กิจส่วนตัว</span>
+                            <span className="font-mono text-[12pt] font-normal">({lastLeaveMaternity ? ' ✓ ' : '   '}) คลอดบุตร</span>
                             <span>ครั้งสุดท้ายตั้งแต่วันที่</span>
                           </div>
                           <div className="flex items-baseline font-normal">
@@ -8271,7 +8497,7 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                         </div>
 
                         {/* Contact Phone */}
-                        <div className="mb-3 flex items-baseline font-normal text-[15.5pt]">
+                        <div className="mb-2 flex items-baseline font-normal text-[11.5pt]">
                           <span className="shrink-0">ในระหว่างลาจะติดต่อข้าพเจ้าได้ที่โทรศัพท์</span>
                           <span className="inline-block border-b-[1.5px] border-dotted border-black px-2 flex-1 text-center font-normal ml-2 pb-0 leading-none">
                             {teacherPhone}
@@ -8279,27 +8505,59 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                         </div>
 
                         {/* Signature of Applicant */}
-                        <div className="flex justify-end pr-6 mb-3 font-normal text-[15.5pt]">
-                          <div className="w-72 text-center space-y-1 font-normal">
+                        <div className="flex justify-end pr-6 mb-2 font-normal text-[11.5pt]">
+                          <div className="w-72 text-center space-y-0.5 font-normal">
                             <p>ขอแสดงความนับถือ</p>
-                            <div className="relative flex items-baseline justify-center pt-1.5">
+                            <div className="relative flex items-baseline justify-center pt-1">
                               <span className="inline-block border-b-[1.5px] border-dotted border-black w-44 pb-0 leading-none relative">
                                 <span className="absolute right-full mr-1.5 bottom-0 whitespace-nowrap">(ลงชื่อ)</span>
                                 {'\u00A0'}
                               </span>
                             </div>
-                            <p className="pt-0.5">({formatDutySignatureName(applicantFullName)})</p>
+                            <div className="pt-0.5 flex items-center justify-center whitespace-nowrap">
+                              <span>(</span>
+                              <input
+                                type="text"
+                                value={leavePdfSignatures.applicantName}
+                                onChange={(e) =>
+                                  setLeavePdfSignatures((prev) => ({
+                                    ...prev,
+                                    applicantName: e.target.value,
+                                  }))
+                                }
+                                placeholder="........................................"
+                                style={getParenInputWidthStyle(leavePdfSignatures.applicantName)}
+                                className="text-center font-normal text-black bg-transparent border-b border-transparent hover:border-slate-400 focus:border-black focus:bg-slate-50/70 focus:outline-none px-0.5 py-0 leading-tight placeholder:text-black transition-colors"
+                                title="คลิกเพื่อพิมพ์ชื่อในวงเล็บ"
+                              />
+                              <span>)</span>
+                            </div>
+                            <div className="flex items-baseline justify-center font-normal">
+                              <input
+                                type="text"
+                                value={leavePdfSignatures.applicantPosition}
+                                onChange={(e) =>
+                                  setLeavePdfSignatures((prev) => ({
+                                    ...prev,
+                                    applicantPosition: e.target.value,
+                                  }))
+                                }
+                                placeholder="คลิกเพื่อพิมพ์ตำแหน่ง (ถ้ามี)..."
+                                className="w-56 text-center font-normal text-black bg-transparent border-b border-transparent hover:border-slate-300 focus:border-black focus:bg-slate-50/70 focus:outline-none px-1 py-0 leading-tight placeholder:text-transparent hover:placeholder:text-slate-400 focus:placeholder:text-slate-400 transition-colors text-[10.5pt]"
+                                title="คลิกเพื่อพิมพ์ด้านล่างของวงเล็บชื่อ (ตำแหน่ง)"
+                              />
+                            </div>
                           </div>
                         </div>
                       </div>
 
                       {/* Bottom Section (2 Columns: Fiscal Year Stats & Approvals) */}
-                      <div className="grid grid-cols-2 gap-5 mt-2.5 pt-1 font-normal text-[14pt]">
+                      <div className="grid grid-cols-2 gap-5 mt-0.5 pt-0.5 font-normal text-[10.5pt]">
                         {/* Left Column: Fiscal Year Stats & Auditor */}
                         <div className="space-y-1 font-normal">
                           <div>
-                            <h4 className="font-bold text-[14.5pt] mb-1 font-normal">สถิติการลาในปีงบประมาณนี้</h4>
-                            <table className="w-full text-center border-collapse border border-black text-[13pt] font-normal">
+                            <h4 className="font-bold text-[11pt] mb-1">สถิติการลาในปีงบประมาณนี้</h4>
+                            <table className="w-full text-center border-collapse border border-black text-[9.8pt] font-normal">
                               <thead>
                                 <tr className="border-b border-black">
                                   <th className="border-r border-black py-1 px-0.5 font-normal w-[24%]">ประเภทลา</th>
@@ -8332,7 +8590,7 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                           </div>
 
                           {/* Auditor Signature - Position centered directly under (officerName) */}
-                          <div className="space-y-0.5 text-center font-normal pt-1.5 pl-3">
+                          <div className="space-y-1 text-center font-normal pt-2 pl-3">
                             <div className="flex items-baseline justify-center">
                               <span className="inline-block border-b-[1.5px] border-dotted border-black w-36 pb-0 leading-none relative">
                                 <span className="absolute right-full mr-1.5 bottom-0 whitespace-nowrap">(ลงชื่อ)</span>
@@ -8340,78 +8598,201 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                                 <span className="absolute left-full ml-1.5 bottom-0 whitespace-nowrap">ผู้ตรวจสอบ</span>
                               </span>
                             </div>
-                            <p className="pt-0.5 text-center">( {formatDutySignatureName(officerName)} )</p>
+                            <div className="flex items-center justify-center whitespace-nowrap">
+                              <span>(</span>
+                              <input
+                                type="text"
+                                value={leavePdfSignatures.officerName}
+                                onChange={(e) =>
+                                  setLeavePdfSignatures((prev) => ({
+                                    ...prev,
+                                    officerName: e.target.value,
+                                  }))
+                                }
+                                placeholder="........................................"
+                                style={getParenInputWidthStyle(leavePdfSignatures.officerName)}
+                                className="text-center font-normal text-black bg-transparent border-b border-transparent hover:border-slate-400 focus:border-black focus:bg-slate-50/70 focus:outline-none px-0.5 py-0 leading-tight placeholder:text-black transition-colors"
+                                title="คลิกเพื่อพิมพ์ชื่อในวงเล็บ"
+                              />
+                              <span>)</span>
+                            </div>
                             <div className="flex items-baseline justify-center font-normal">
-                              <span className="inline-block border-b-[1.5px] border-dotted border-black px-2 min-w-[165px] text-center pb-0 leading-none relative">
+                              <span className="inline-block border-b-[1.5px] border-dotted border-black px-1 w-[175px] text-center pb-0 leading-none relative">
                                 <span className="absolute right-full mr-1.5 bottom-0 whitespace-nowrap">ตำแหน่ง</span>
-                                เจ้าหน้าที่งานบุคลากร
+                                <input
+                                  type="text"
+                                  value={leavePdfSignatures.officerPosition}
+                                  onChange={(e) =>
+                                    setLeavePdfSignatures((prev) => ({
+                                      ...prev,
+                                      officerPosition: e.target.value,
+                                    }))
+                                  }
+                                  placeholder="ระบุตำแหน่ง..."
+                                  className="w-full text-center font-normal text-black bg-transparent hover:bg-slate-50/70 focus:bg-slate-50/90 focus:outline-none px-0.5 py-0 leading-none placeholder:text-slate-400"
+                                  title="คลิกเพื่อพิมพ์ตำแหน่งด้านล่างวงเล็บชื่อ"
+                                />
                               </span>
                             </div>
                             <div className="flex items-baseline justify-center font-normal">
-                              <span className="inline-block border-b-[1.5px] border-dotted border-black px-2 min-w-[165px] text-center pb-0 leading-none relative">
+                              <span className="inline-block border-b-[1.5px] border-dotted border-black px-1 w-[175px] text-center pb-0 leading-none relative">
                                 <span className="absolute right-full mr-1.5 bottom-0 whitespace-nowrap">วันที่</span>
-                                {createdDateThai}
+                                <input
+                                  type="text"
+                                  value={leavePdfSignatures.officerDate}
+                                  onChange={(e) =>
+                                    setLeavePdfSignatures((prev) => ({
+                                      ...prev,
+                                      officerDate: e.target.value,
+                                    }))
+                                  }
+                                  placeholder="ระบุวันที่..."
+                                  className="w-full text-center font-normal text-black bg-transparent hover:bg-slate-50/70 focus:bg-slate-50/90 focus:outline-none px-0.5 py-0 leading-none placeholder:text-slate-400"
+                                  title="คลิกเพื่อปรับวันด้านล่างของตำแหน่ง"
+                                />
                               </span>
                             </div>
                           </div>
                         </div>
 
                         {/* Right Column: Supervisor Comment & Director Order */}
-                        <div className="space-y-1 pl-2 font-normal">
+                        <div className="space-y-1.5 pl-2 font-normal">
                           {/* Supervisor Comment - Position centered directly under (deputyName) */}
                           <div className="space-y-0.5 text-center font-normal">
-                            <h4 className="font-bold text-[14.5pt] text-left mb-0.5">ความเห็นผู้บังคับบัญชา</h4>
+                            <h4 className="font-bold text-[11pt] text-left mb-0.5">ความเห็นผู้บังคับบัญชา</h4>
                             <div className="text-left pl-2 font-normal flex items-baseline">
                               <span className="inline-block border-b-[1.5px] border-dotted border-black pr-6 pb-0 leading-none">เห็นควรอนุญาต</span>
                             </div>
-                            <div className="pl-6 space-y-0.5">
+                            <div className="pl-6 space-y-1">
                               <div className="flex items-baseline justify-center pt-1">
                                 <span className="inline-block border-b-[1.5px] border-dotted border-black w-44 pb-0 leading-none relative">
                                   <span className="absolute right-full mr-1.5 bottom-0 whitespace-nowrap">(ลงชื่อ)</span>
                                   {'\u00A0'}
                                 </span>
                               </div>
-                              <p className="font-normal pt-0.5 text-center">( {formatDutySignatureName(deputyName)} )</p>
+                              <div className="flex items-center justify-center whitespace-nowrap">
+                                <span>(</span>
+                                <input
+                                  type="text"
+                                  value={leavePdfSignatures.supervisorName}
+                                  onChange={(e) =>
+                                    setLeavePdfSignatures((prev) => ({
+                                      ...prev,
+                                      supervisorName: e.target.value,
+                                    }))
+                                  }
+                                  placeholder="........................................"
+                                  style={getParenInputWidthStyle(leavePdfSignatures.supervisorName)}
+                                  className="text-center font-normal text-black bg-transparent border-b border-transparent hover:border-slate-400 focus:border-black focus:bg-slate-50/70 focus:outline-none px-0.5 py-0 leading-tight placeholder:text-black transition-colors"
+                                  title="คลิกเพื่อพิมพ์ชื่อในวงเล็บ"
+                                />
+                                <span>)</span>
+                              </div>
                               <div className="flex items-baseline justify-center font-normal">
-                                <span className="inline-block border-b-[1.5px] border-dotted border-black px-2 min-w-[175px] text-center font-normal pb-0 leading-none relative">
+                                <span className="inline-block border-b-[1.5px] border-dotted border-black px-1 w-[185px] text-center font-normal pb-0 leading-none relative">
                                   <span className="absolute right-full mr-1.5 bottom-0 whitespace-nowrap">ตำแหน่ง</span>
-                                  {deputyPosition}
+                                  <input
+                                    type="text"
+                                    value={leavePdfSignatures.supervisorPosition}
+                                    onChange={(e) =>
+                                      setLeavePdfSignatures((prev) => ({
+                                        ...prev,
+                                        supervisorPosition: e.target.value,
+                                      }))
+                                    }
+                                    placeholder="ระบุตำแหน่ง..."
+                                    className="w-full text-center font-normal text-black bg-transparent hover:bg-slate-50/70 focus:bg-slate-50/90 focus:outline-none px-0.5 py-0 leading-none placeholder:text-slate-400"
+                                    title="คลิกเพื่อพิมพ์ตำแหน่งด้านล่างวงเล็บชื่อ"
+                                  />
                                 </span>
                               </div>
                               <div className="flex items-baseline justify-center font-normal">
-                                <span className="inline-block border-b-[1.5px] border-dotted border-black px-2 min-w-[175px] text-center font-normal pb-0 leading-none relative">
+                                <span className="inline-block border-b-[1.5px] border-dotted border-black px-1 w-[185px] text-center font-normal pb-0 leading-none relative">
                                   <span className="absolute right-full mr-1.5 bottom-0 whitespace-nowrap">วันที่</span>
-                                  {createdDateThai}
+                                  <input
+                                    type="text"
+                                    value={leavePdfSignatures.supervisorDate}
+                                    onChange={(e) =>
+                                      setLeavePdfSignatures((prev) => ({
+                                        ...prev,
+                                        supervisorDate: e.target.value,
+                                      }))
+                                    }
+                                    placeholder="ระบุวันที่..."
+                                    className="w-full text-center font-normal text-black bg-transparent hover:bg-slate-50/70 focus:bg-slate-50/90 focus:outline-none px-0.5 py-0 leading-none placeholder:text-slate-400"
+                                    title="คลิกเพื่อปรับวันด้านล่างของตำแหน่ง"
+                                  />
                                 </span>
                               </div>
                             </div>
                           </div>
 
                           {/* Director Order - Position centered directly under (directorFullName) */}
-                          <div className="space-y-0.5 text-center font-normal pt-1 border-t border-slate-300">
-                            <h4 className="font-bold text-[14.5pt] text-left mb-0.5">คำสั่ง</h4>
+                          <div className="space-y-0.5 text-center font-normal pt-1.5 border-t border-slate-300">
+                            <h4 className="font-bold text-[11pt] text-left mb-0.5">คำสั่ง</h4>
                             <div className="flex items-center justify-start gap-6 pl-2 mb-0.5 font-normal">
                               <span className="font-mono font-normal">({isApproved ? ' ✓ ' : '   '}) อนุญาต</span>
                               <span className="font-mono font-normal">({!isApproved ? ' ✓ ' : '   '}) ไม่อนุญาต</span>
                             </div>
-                            <div className="pl-6 space-y-0.5">
+                            <div className="pl-6 space-y-1">
                               <div className="flex items-baseline justify-center pt-1">
                                 <span className="inline-block border-b-[1.5px] border-dotted border-black w-44 pb-0 leading-none relative">
                                   <span className="absolute right-full mr-1.5 bottom-0 whitespace-nowrap">(ลงชื่อ)</span>
                                   {'\u00A0'}
                                 </span>
                               </div>
-                              <p className="font-normal pt-0.5 text-center">( {formatDutySignatureName(directorFullName)} )</p>
+                              <div className="flex items-center justify-center whitespace-nowrap">
+                                <span>(</span>
+                                <input
+                                  type="text"
+                                  value={leavePdfSignatures.directorName}
+                                  onChange={(e) =>
+                                    setLeavePdfSignatures((prev) => ({
+                                      ...prev,
+                                      directorName: e.target.value,
+                                    }))
+                                  }
+                                  placeholder="........................................"
+                                  style={getParenInputWidthStyle(leavePdfSignatures.directorName)}
+                                  className="text-center font-normal text-black bg-transparent border-b border-transparent hover:border-slate-400 focus:border-black focus:bg-slate-50/70 focus:outline-none px-0.5 py-0 leading-tight placeholder:text-black transition-colors"
+                                  title="คลิกเพื่อพิมพ์ชื่อในวงเล็บ"
+                                />
+                                <span>)</span>
+                              </div>
                               <div className="flex items-baseline justify-center font-normal">
-                                <span className="inline-block border-b-[1.5px] border-dotted border-black px-2 min-w-[185px] text-center font-normal pb-0 leading-none relative">
+                                <span className="inline-block border-b-[1.5px] border-dotted border-black px-1 w-[195px] text-center font-normal pb-0 leading-none relative">
                                   <span className="absolute right-full mr-1.5 bottom-0 whitespace-nowrap">ตำแหน่ง</span>
-                                  {directorPositionTitle}
+                                  <input
+                                    type="text"
+                                    value={leavePdfSignatures.directorPosition}
+                                    onChange={(e) =>
+                                      setLeavePdfSignatures((prev) => ({
+                                        ...prev,
+                                        directorPosition: e.target.value,
+                                      }))
+                                    }
+                                    placeholder="ระบุตำแหน่ง..."
+                                    className="w-full text-center font-normal text-black bg-transparent hover:bg-slate-50/70 focus:bg-slate-50/90 focus:outline-none px-0.5 py-0 leading-none placeholder:text-slate-400"
+                                    title="คลิกเพื่อพิมพ์ตำแหน่งด้านล่างวงเล็บชื่อ"
+                                  />
                                 </span>
                               </div>
                               <div className="flex items-baseline justify-center font-normal">
-                                <span className="inline-block border-b-[1.5px] border-dotted border-black px-2 min-w-[175px] text-center font-normal pb-0 leading-none relative">
+                                <span className="inline-block border-b-[1.5px] border-dotted border-black px-1 w-[185px] text-center font-normal pb-0 leading-none relative">
                                   <span className="absolute right-full mr-1.5 bottom-0 whitespace-nowrap">วันที่</span>
-                                  {createdDateThai}
+                                  <input
+                                    type="text"
+                                    value={leavePdfSignatures.directorDate}
+                                    onChange={(e) =>
+                                      setLeavePdfSignatures((prev) => ({
+                                        ...prev,
+                                        directorDate: e.target.value,
+                                      }))
+                                    }
+                                    placeholder="ระบุวันที่..."
+                                    className="w-full text-center font-normal text-black bg-transparent hover:bg-slate-50/70 focus:bg-slate-50/90 focus:outline-none px-0.5 py-0 leading-none placeholder:text-slate-400"
+                                    title="คลิกเพื่อปรับวันด้านล่างของตำแหน่ง"
+                                  />
                                 </span>
                               </div>
                             </div>

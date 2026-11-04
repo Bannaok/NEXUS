@@ -414,13 +414,19 @@ export const exportSheetsToPdf = async ({
       pdf.addPage('a4', isLandscape ? 'landscape' : 'portrait');
     }
 
-    // Read live dimensions and textarea values WITHOUT mutating the live DOM
+    // Read live dimensions, textarea values, and text input values WITHOUT mutating the live DOM
     const liveTextareaValues = Array.from(origSheet.querySelectorAll('textarea')).map(
       (ta) => ({
         value: ta.value,
         placeholder: ta.getAttribute('placeholder') || '',
       })
     );
+    const liveInputValues = Array.from(
+      origSheet.querySelectorAll<HTMLInputElement>('input[type="text"], input:not([type])')
+    ).map((inp) => ({
+      value: inp.value,
+      placeholder: inp.getAttribute('placeholder') || '',
+    }));
 
     // Build O(1) ancestor set so html2canvas skips all sibling pages and background UI
     const ancestors = new Set<Element>();
@@ -693,6 +699,31 @@ export const exportSheetsToPdf = async ({
             div.textContent = '';
           }
           ta.replaceWith(div);
+        }
+
+        // 6b. Replace <input type="text"> elements in clonedSheet with clean text spans for razor-sharp PDF rendering
+        const clonedInputs = Array.from(
+          clonedSheet.querySelectorAll<HTMLInputElement>('input[type="text"], input:not([type])')
+        );
+        for (let iIdx = 0; iIdx < clonedInputs.length; iIdx++) {
+          const inp = clonedInputs[iIdx];
+          const info = liveInputValues[iIdx];
+          const isBlockInput = inp.classList.contains('w-full') || inp.classList.contains('block');
+          const span = clonedDoc.createElement('span');
+          span.className = inp.className
+            .replace(/\bw-full\b/g, '')
+            .replace(/\bblock\b/g, '');
+          span.style.display = isBlockInput ? 'block' : 'inline';
+          span.style.textAlign = 'center';
+          span.style.color = '#000000';
+          span.style.backgroundColor = 'transparent';
+          span.style.border = 'none';
+          span.style.outline = 'none';
+          span.style.padding = '0';
+          span.style.margin = '0';
+          span.style.whiteSpace = 'nowrap';
+          span.textContent = info && info.value.trim() ? info.value.trim() : (info?.placeholder || '');
+          inp.replaceWith(span);
         }
 
         // 7. Swap <img> src with pre-cached data URLs for 0ms instant rendering
