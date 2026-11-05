@@ -368,7 +368,25 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
   const allMembers = useMemo(() => members || StorageService.getMembers(), [members]);
 
   const homeroomMembers = useMemo(() => {
-    return allMembers.filter(m => m.role === 'member' && m.gradeLevel);
+    const expanded: MemberAccount[] = [];
+    allMembers
+      .filter(m => m.role === 'member' && (m.gradeLevel || (m.assignedClasses && m.assignedClasses.length > 0)))
+      .forEach(m => {
+        if (m.assignedClasses && m.assignedClasses.length > 0) {
+          m.assignedClasses.forEach(c => {
+            if (c.gradeLevel && c.gradeLevel !== 'ไม่ได้เป็นครูประจำชั้น') {
+              expanded.push({
+                ...m,
+                gradeLevel: c.gradeLevel as GradeLevel,
+                room: c.room || '1'
+              });
+            }
+          });
+        } else if (m.gradeLevel) {
+          expanded.push(m);
+        }
+      });
+    return expanded;
   }, [allMembers]);
 
   const registeredHomeroomGrades = useMemo(() => {
@@ -386,6 +404,19 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
 
   const normalizeRoom = (r?: string) => (r || '1').toString().trim().replace(/^ห้อง\s*/, '') || '1';
 
+  const memberAssignedClasses = useMemo(() => {
+    if (user.assignedClasses && user.assignedClasses.length > 0) {
+      return user.assignedClasses.map(c => ({
+        gradeLevel: (c.gradeLevel as GradeLevel) || 'ป.1',
+        room: normalizeRoom(c.room)
+      }));
+    }
+    if (user.assignedGrade) {
+      return [{ gradeLevel: user.assignedGrade as GradeLevel, room: normalizeRoom(user.assignedRoom) }];
+    }
+    return [];
+  }, [user.assignedClasses, user.assignedGrade, user.assignedRoom]);
+
   // Selected date, grade level & room (synced from settings/user profile or homeroom teacher list)
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const initialGrade = useMemo(() => {
@@ -393,13 +424,13 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
       if (registeredHomeroomGrades.length > 0) return registeredHomeroomGrades[0];
       return 'ป.1' as GradeLevel;
     }
-    return (user.assignedGrade as GradeLevel) || 'ป.1';
-  }, [user.role, user.assignedGrade, registeredHomeroomGrades]);
+    return memberAssignedClasses[0]?.gradeLevel || (user.assignedGrade as GradeLevel) || 'ป.1';
+  }, [user.role, user.assignedGrade, memberAssignedClasses, registeredHomeroomGrades]);
 
   const [selectedGrade, setSelectedGrade] = useState<GradeLevel>(initialGrade);
   const [selectedRoom, setSelectedRoom] = useState<string>(() => {
     if (user.role === 'member') {
-      return normalizeRoom(user.assignedRoom);
+      return memberAssignedClasses[0]?.room || normalizeRoom(user.assignedRoom);
     }
     return '1';
   });
@@ -424,12 +455,20 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
         setSelectedRoom(availableRoomsForGrade[0] || '1');
       }
     } else {
-      if (user.assignedGrade) {
+      if (memberAssignedClasses.length > 0) {
+        const isCurrentValid = memberAssignedClasses.some(
+          c => c.gradeLevel === selectedGrade && c.room === normalizeRoom(selectedRoom)
+        );
+        if (!isCurrentValid) {
+          setSelectedGrade(memberAssignedClasses[0].gradeLevel);
+          setSelectedRoom(memberAssignedClasses[0].room);
+        }
+      } else if (user.assignedGrade) {
         setSelectedGrade(user.assignedGrade as GradeLevel);
+        setSelectedRoom(normalizeRoom(user.assignedRoom));
       }
-      setSelectedRoom(normalizeRoom(user.assignedRoom));
     }
-  }, [user.role, user.assignedGrade, user.assignedRoom, registeredHomeroomGrades, availableRoomsForGrade]);
+  }, [user.role, user.assignedGrade, user.assignedRoom, memberAssignedClasses, registeredHomeroomGrades, availableRoomsForGrade]);
 
   // Attendance states for each student
   const [attendanceStates, setAttendanceStates] = useState<Record<string, { status: AttendanceStatus | ''; note: string }>>({});
@@ -2123,8 +2162,34 @@ export const Module3AttendanceSavings: React.FC<Module3Props> = ({
               )}
             </>
           ) : (
-            <div className="hidden sm:block px-3 py-2 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold whitespace-nowrap">
-              ภาคเรียนที่ {activeSemester} • ปีการศึกษา {activeAcademicYear}
+            <div className="flex items-center gap-2 flex-wrap">
+              {memberAssignedClasses.length > 1 && (
+                <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-emerald-200 shadow-2xs">
+                  {memberAssignedClasses.map((cls, idx) => {
+                    const isActive = selectedGrade === cls.gradeLevel && normalizeRoom(selectedRoom) === cls.room;
+                    return (
+                      <button
+                        key={`${cls.gradeLevel}_${cls.room}_${idx}`}
+                        type="button"
+                        onClick={() => {
+                          setSelectedGrade(cls.gradeLevel);
+                          setSelectedRoom(cls.room);
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer border ${
+                          isActive
+                            ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                            : 'bg-white text-slate-600 border-slate-200 hover:bg-emerald-50'
+                        }`}
+                      >
+                        {cls.gradeLevel}{cls.room !== '1' ? `/${cls.room}` : ''}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="hidden sm:block px-3 py-2 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold whitespace-nowrap">
+                ภาคเรียนที่ {activeSemester} • ปีการศึกษา {activeAcademicYear}
+              </div>
             </div>
           )}
         </div>

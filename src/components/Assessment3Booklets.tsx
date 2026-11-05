@@ -363,36 +363,73 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
   // ==========================================
   const normalizeRoom = (r?: string) => (r || '').replace(/^ห้อง\s*/i, '').trim() || '1';
 
-  const memberHomeroomGrade = useMemo<GradeLevel | undefined>(() => {
-    if (user.role !== 'member') return undefined;
+  // รายการชั้นที่สมาชิกได้รับมอบหมายเป็นครูประจำชั้น (รองรับ 1 ชั้น หรือ 2-3 ชั้น)
+  const memberAssignedClasses = useMemo<Array<{ gradeLevel: GradeLevel; room: string }>>(() => {
+    if (user.role !== 'member') return [];
     const members = StorageService.getMembers();
     const matched = members.find(
-      m => m.id === user.id || m.username?.toLowerCase() === user.username?.toLowerCase()
+      m => m.id === user.id || (m.username && user.username && m.username.toLowerCase() === user.username.toLowerCase())
     );
-    return (matched?.gradeLevel || (user.assignedGrade as GradeLevel)) as GradeLevel | undefined;
+
+    const rawClasses =
+      (user.assignedClasses && user.assignedClasses.length > 0 ? user.assignedClasses : undefined) ||
+      (matched?.assignedClasses && matched.assignedClasses.length > 0 ? matched.assignedClasses : undefined);
+
+    const result: Array<{ gradeLevel: GradeLevel; room: string }> = [];
+
+    if (rawClasses && rawClasses.length > 0) {
+      rawClasses.forEach(c => {
+        if (c.gradeLevel && c.gradeLevel !== 'ไม่ได้เป็นครูประจำชั้น') {
+          const g = (c.gradeLevel as GradeLevel) || 'ป.1';
+          const r = normalizeRoom(c.room);
+          if (!result.some(item => item.gradeLevel === g && item.room === r)) {
+            result.push({ gradeLevel: g, room: r });
+          }
+        }
+      });
+    }
+
+    const rawGrade = (user.assignedGrade as string) || (matched?.gradeLevel as string) || '';
+    const rawRoom = normalizeRoom(user.assignedRoom || matched?.room);
+    if (rawGrade && rawGrade !== 'ไม่ได้เป็นครูประจำชั้น') {
+      if (rawGrade.includes(',')) {
+        rawGrade.split(',').forEach(part => {
+          const g = part.trim() as GradeLevel;
+          if (g && !result.some(item => item.gradeLevel === g && item.room === rawRoom)) {
+            result.push({ gradeLevel: g, room: rawRoom });
+          }
+        });
+      } else if (result.length === 0) {
+        result.push({ gradeLevel: rawGrade as GradeLevel, room: rawRoom });
+      }
+    }
+
+    return result;
   }, [user]);
+
+  const memberHomeroomGrade = useMemo<GradeLevel | undefined>(() => {
+    if (user.role !== 'member') return undefined;
+    return memberAssignedClasses[0]?.gradeLevel || (user.assignedGrade as GradeLevel);
+  }, [user, memberAssignedClasses]);
 
   const memberHomeroomRoom = useMemo<string | undefined>(() => {
     if (user.role !== 'member') return undefined;
-    const members = StorageService.getMembers();
-    const matched = members.find(
-      m => m.id === user.id || m.username?.toLowerCase() === user.username?.toLowerCase()
-    );
-    return normalizeRoom(matched?.room || user.assignedRoom);
-  }, [user]);
+    return memberAssignedClasses[0]?.room || normalizeRoom(user.assignedRoom);
+  }, [user, memberAssignedClasses]);
 
   const availableGrades: GradeLevel[] = useMemo(() => {
     const list: GradeLevel[] = ['อ.1', 'อ.2', 'อ.3', 'ป.1', 'ป.2', 'ป.3', 'ป.4', 'ป.5', 'ป.6', 'ม.1', 'ม.2', 'ม.3'];
     const presentGrades = Array.from(new Set(students.map(s => s.gradeLevel)));
-    return list.filter(g => presentGrades.includes(g) || g === currentGradeLevel || g === memberHomeroomGrade);
-  }, [students, currentGradeLevel, memberHomeroomGrade]);
+    const assignedGrades = memberAssignedClasses.map(c => c.gradeLevel);
+    return list.filter(g => presentGrades.includes(g) || g === currentGradeLevel || assignedGrades.includes(g) || (memberHomeroomGrade && g === memberHomeroomGrade));
+  }, [students, currentGradeLevel, memberAssignedClasses, memberHomeroomGrade]);
 
   const [selectedGrade, setSelectedGrade] = useState<GradeLevel>(() => {
-    return memberHomeroomGrade || currentGradeLevel;
+    return memberAssignedClasses[0]?.gradeLevel || memberHomeroomGrade || currentGradeLevel;
   });
 
   const [selectedRoom, setSelectedRoom] = useState<string>(() => {
-    return memberHomeroomRoom || '1';
+    return memberAssignedClasses[0]?.room || memberHomeroomRoom || '1';
   });
 
   const availableRoomsForGrade = useMemo<string[]>(() => {
@@ -400,18 +437,12 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
     students
       .filter(s => s.gradeLevel === selectedGrade)
       .forEach(s => roomSet.add(normalizeRoom(s.room)));
+    memberAssignedClasses
+      .filter(c => c.gradeLevel === selectedGrade)
+      .forEach(c => roomSet.add(normalizeRoom(c.room)));
     if (memberHomeroomRoom) roomSet.add(normalizeRoom(memberHomeroomRoom));
     return Array.from(roomSet).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  }, [students, selectedGrade, memberHomeroomRoom]);
-
-  useEffect(() => {
-    if (memberHomeroomGrade && availableGrades.includes(memberHomeroomGrade)) {
-      setSelectedGrade(memberHomeroomGrade);
-      if (memberHomeroomRoom) setSelectedRoom(memberHomeroomRoom);
-    } else if (currentGradeLevel && availableGrades.includes(currentGradeLevel)) {
-      setSelectedGrade(currentGradeLevel);
-    }
-  }, [currentGradeLevel, memberHomeroomGrade, memberHomeroomRoom]);
+  }, [students, selectedGrade, memberAssignedClasses, memberHomeroomRoom]);
 
   useEffect(() => {
     if (!availableRoomsForGrade.includes(selectedRoom)) {
@@ -419,24 +450,36 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
     }
   }, [availableRoomsForGrade, selectedRoom]);
 
-  // ตรวจสอบครูประจำชั้นของระดับชั้นและห้องที่เลือก
+  // ตรวจสอบครูประจำชั้นของระดับชั้นและห้องที่เลือก (รองรับทั้ง assignedClasses และเดี่ยว)
   const homeroomTeachersOfSelected = useMemo(() => {
     const members = StorageService.getMembers();
-    return members.filter(
-      m =>
+    return members.filter(m => {
+      if (m.assignedClasses && m.assignedClasses.length > 0) {
+        return m.assignedClasses.some(
+          c => c.gradeLevel === selectedGrade && normalizeRoom(c.room) === normalizeRoom(selectedRoom)
+        );
+      }
+      return (
         m.gradeLevel === selectedGrade &&
         normalizeRoom(m.room) === normalizeRoom(selectedRoom)
-    );
+      );
+    });
   }, [selectedGrade, selectedRoom]);
 
+  // ตรวจสอบว่าผู้ใช้งานปัจจุบันเป็นครูประจำชั้นของห้องที่กำลังเลือกอยู่หรือไม่
   const isHomeroomTeacherOfSelected = useMemo(() => {
     if (isAdmin) return false;
+    if (memberAssignedClasses.length > 0) {
+      return memberAssignedClasses.some(
+        c => c.gradeLevel === selectedGrade && normalizeRoom(c.room) === normalizeRoom(selectedRoom)
+      );
+    }
     return (
       Boolean(memberHomeroomGrade) &&
       memberHomeroomGrade === selectedGrade &&
       normalizeRoom(memberHomeroomRoom) === normalizeRoom(selectedRoom)
     );
-  }, [isAdmin, memberHomeroomGrade, memberHomeroomRoom, selectedGrade, selectedRoom]);
+  }, [isAdmin, memberAssignedClasses, memberHomeroomGrade, memberHomeroomRoom, selectedGrade, selectedRoom]);
 
   // เฉพาะครูประจำชั้น ป. และ ห้อง นั้นๆ เท่านั้นที่เป็นผู้กรอกได้
   const isReadOnlyForUser = isLocked || isAdmin || !isHomeroomTeacherOfSelected;
@@ -1408,8 +1451,8 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
     <div className="space-y-4">
       {/* 3 Main Navigation Buttons (ปุ่มกดทั้ง 3 หน้าตามที่ผู้ใช้กำหนด) */}
       <div className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-xs">
-        {/* Admin Bar: Top bar for Admin only (Members see their own class from main app bar) */}
-        {isAdmin && (
+        {/* Top Bar for Admin & Members */}
+        {isAdmin ? (
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
             <div>
               <div className="flex items-center gap-2 flex-wrap">
@@ -1478,6 +1521,60 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
               </button>
             </div>
           </div>
+        ) : (
+          /* Member Top Bar: แสดงปุ่มกดเลือกชั้นที่ต้องการประเมินกรณีเป็นครูประจำชั้นหลายชั้น */
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="p-1.5 bg-amber-100 text-amber-800 rounded-xl">
+                  <FileText className="w-4 h-4 text-amber-700" />
+                </span>
+                <h2 className="text-sm sm:text-base font-bold text-slate-800">
+                  ระบบประเมิน 3 เล่ม
+                </h2>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap justify-end">
+              {/* สมาชิกที่เป็นครูประจำชั้น 2 ชั้นขึ้นไป: ปุ่มกดเลือกชั้นที่ต้องการประเมิน */}
+              {memberAssignedClasses.length > 1 && (
+                <div className="flex items-center gap-1 bg-amber-50/90 p-1 rounded-xl border border-amber-300 shadow-2xs">
+                  {memberAssignedClasses.map((cls, idx) => {
+                    const isActive = selectedGrade === cls.gradeLevel && normalizeRoom(selectedRoom) === cls.room;
+                    return (
+                      <button
+                        key={`homeroom_btn_${cls.gradeLevel}_${cls.room}_${idx}`}
+                        type="button"
+                        onClick={() => {
+                          setSelectedGrade(cls.gradeLevel);
+                          setSelectedRoom(cls.room);
+                        }}
+                        className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer border ${
+                          isActive
+                            ? 'bg-amber-600 text-white border-amber-600 shadow-2xs'
+                            : 'bg-white text-slate-700 border-amber-200 hover:bg-amber-100 hover:text-amber-900'
+                        }`}
+                        title={`กดเพื่อสลับไปประเมินชั้น ${cls.gradeLevel} ห้อง ${cls.room}`}
+                      >
+                        {cls.gradeLevel}{cls.room !== '1' ? `/${cls.room}` : ''}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* ปุ่มบันทึกผลประเมิน */}
+              <button
+                type="button"
+                disabled={isReadOnlyForUser}
+                onClick={handleSaveAll}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-white shadow-xs transition-all flex items-center gap-1.5 active:scale-95 bg-amber-600 hover:bg-amber-700 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>บันทึกผลประเมิน</span>
+              </button>
+            </div>
+          </div>
         )}
 
         {!isAdmin && !isHomeroomTeacherOfSelected && (
@@ -1487,7 +1584,24 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
                 เฉพาะครูประจำชั้น <strong>{selectedGrade} ห้อง {normalizeRoom(selectedRoom)}</strong> เท่านั้นที่เป็นผู้กรอกผลประเมิน 3 เล่มของห้องนี้ (คุณกำลังเปิดดูในโหมดอ่านอย่างเดียว)
               </span>
             </div>
-            {memberHomeroomGrade && (
+            {memberAssignedClasses.length > 0 ? (
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] font-bold text-amber-800">สลับไปชั้นประจำชั้นของฉัน:</span>
+                {memberAssignedClasses.map((cls, idx) => (
+                  <button
+                    key={`switch_back_${cls.gradeLevel}_${cls.room}_${idx}`}
+                    type="button"
+                    onClick={() => {
+                      setSelectedGrade(cls.gradeLevel);
+                      setSelectedRoom(cls.room);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] transition-colors cursor-pointer shrink-0 shadow-2xs"
+                  >
+                    {cls.gradeLevel}{cls.room !== '1' ? `/${cls.room}` : ''}
+                  </button>
+                ))}
+              </div>
+            ) : memberHomeroomGrade && (
               <button
                 type="button"
                 onClick={() => {

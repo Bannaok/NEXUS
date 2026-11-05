@@ -420,8 +420,17 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
     ];
     const homeroomSet = new Set<string>();
     allMembers.forEach(m => {
-      if (m.role === 'member' && m.gradeLevel) {
-        homeroomSet.add(m.gradeLevel.trim());
+      if (m.role === 'member') {
+        if (m.gradeLevel) {
+          homeroomSet.add(m.gradeLevel.trim());
+        }
+        if (m.assignedClasses && m.assignedClasses.length > 0) {
+          m.assignedClasses.forEach(c => {
+            if (c.gradeLevel && c.gradeLevel !== 'ไม่ได้เป็นครูประจำชั้น') {
+              homeroomSet.add(String(c.gradeLevel).trim());
+            }
+          });
+        }
       }
     });
     return gradeOrder.filter(g => homeroomSet.has(g));
@@ -506,14 +515,30 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
   const [pdfPreviewGradeFilter, setPdfPreviewGradeFilter] = useState<string>('ALL');
   const [openManageMenuSessionId, setOpenManageMenuSessionId] = useState<string | null>(null);
 
+  const normalizeRoom = (r?: string) => (r || '').replace(/^ห้อง\s*/i, '').trim() || '1';
+
+  const memberAssignedClasses = useMemo(() => {
+    if (user.assignedClasses && user.assignedClasses.length > 0) {
+      return user.assignedClasses.map(c => ({
+        gradeLevel: String(c.gradeLevel || 'ป.1').trim(),
+        room: normalizeRoom(c.room)
+      }));
+    }
+    if (user.assignedGrade) {
+      return [{ gradeLevel: String(user.assignedGrade).trim(), room: normalizeRoom(user.assignedRoom) }];
+    }
+    return [];
+  }, [user.assignedClasses, user.assignedGrade, user.assignedRoom]);
+
   // Grade filter for table inside active session
   const [gradeFilter, setGradeFilter] = useState<string>(() => {
+    if (user.role === 'member' && memberAssignedClasses.length > 0) return memberAssignedClasses[0].gradeLevel;
     if (user.role === 'member' && user.assignedGrade) return user.assignedGrade;
     if (user.role === 'admin' && registeredHomeroomGrades.length > 0) return registeredHomeroomGrades[0];
     return 'ป.1';
   });
-  const normalizeRoom = (r?: string) => (r || '').replace(/^ห้อง\s*/i, '').trim() || '1';
   const [selectedRoom, setSelectedRoom] = useState<string>(() => {
+    if (user.role === 'member' && memberAssignedClasses.length > 0) return memberAssignedClasses[0].room;
     if (user.role === 'member' && user.assignedRoom) return normalizeRoom(user.assignedRoom);
     return '1';
   });
@@ -524,6 +549,7 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
     new Date().toISOString().split('T')[0]
   );
   const [milkTeethGradeFilter, setMilkTeethGradeFilter] = useState<string>(() => {
+    if (user.role === 'member' && memberAssignedClasses.length > 0) return memberAssignedClasses[0].gradeLevel;
     if (user.role === 'member' && user.assignedGrade) return user.assignedGrade;
     if (user.role === 'admin' && registeredHomeroomGrades.length > 0) return registeredHomeroomGrades[0];
     return 'ป.1';
@@ -576,10 +602,21 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
   };
 
   useEffect(() => {
-    if (user.role === 'member' && user.assignedGrade) {
-      setGradeFilter(user.assignedGrade);
-      setMilkTeethGradeFilter(user.assignedGrade);
-      setSelectedRoom(normalizeRoom(user.assignedRoom));
+    if (user.role === 'member') {
+      if (memberAssignedClasses.length > 0) {
+        const isCurrentValid = memberAssignedClasses.some(
+          c => c.gradeLevel === gradeFilter && c.room === normalizeRoom(selectedRoom)
+        );
+        if (!isCurrentValid) {
+          setGradeFilter(memberAssignedClasses[0].gradeLevel);
+          setMilkTeethGradeFilter(memberAssignedClasses[0].gradeLevel);
+          setSelectedRoom(memberAssignedClasses[0].room);
+        }
+      } else if (user.assignedGrade) {
+        setGradeFilter(user.assignedGrade);
+        setMilkTeethGradeFilter(user.assignedGrade);
+        setSelectedRoom(normalizeRoom(user.assignedRoom));
+      }
     } else if (user.role === 'admin' && registeredHomeroomGrades.length > 0) {
       if (!registeredHomeroomGrades.includes(gradeFilter as GradeLevel)) {
         setGradeFilter(registeredHomeroomGrades[0]);
@@ -588,7 +625,7 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
         setMilkTeethGradeFilter(registeredHomeroomGrades[0]);
       }
     }
-  }, [user.role, user.assignedGrade, user.assignedRoom, registeredHomeroomGrades]);
+  }, [user.role, user.assignedGrade, user.assignedRoom, memberAssignedClasses, registeredHomeroomGrades]);
 
   useEffect(() => {
     if (user.role === 'admin' && !availableRoomsForGrade.includes(selectedRoom)) {
@@ -1029,8 +1066,35 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
               )}
             </>
           ) : (
-            <div className="hidden sm:block px-3 py-2 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold whitespace-nowrap">
-              ภาคเรียนที่ {effectiveSemester} • ปีการศึกษา {effectiveAcademicYear}
+            <div className="flex items-center gap-2 flex-wrap">
+              {memberAssignedClasses.length > 1 && (
+                <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-blue-200 shadow-2xs">
+                  {memberAssignedClasses.map((cls, idx) => {
+                    const isActive = gradeFilter === cls.gradeLevel && normalizeRoom(selectedRoom) === cls.room;
+                    return (
+                      <button
+                        key={`${cls.gradeLevel}_${cls.room}_${idx}`}
+                        type="button"
+                        onClick={() => {
+                          setGradeFilter(cls.gradeLevel);
+                          setMilkTeethGradeFilter(cls.gradeLevel);
+                          setSelectedRoom(cls.room);
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer border ${
+                          isActive
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                            : 'bg-white text-slate-600 border-slate-200 hover:bg-blue-50'
+                        }`}
+                      >
+                        {cls.gradeLevel}{cls.room !== '1' ? `/${cls.room}` : ''}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="hidden sm:block px-3 py-2 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold whitespace-nowrap">
+                ภาคเรียนที่ {effectiveSemester} • ปีการศึกษา {effectiveAcademicYear}
+              </div>
             </div>
           )}
 
@@ -1079,7 +1143,7 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
                     <div className="flex items-center gap-2 shrink-0">
                       {/* Class Badge: Hidden on Mobile View */}
                       <div className="hidden sm:block px-3 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold shadow-2xs">
-                        ชั้น {user.assignedGrade || 'ป.1'} (ครูประจำชั้น)
+                        ชั้น {gradeFilter || user.assignedGrade || 'ป.1'} (ครูประจำชั้น)
                       </div>
 
                       {/* Action Button "+" for creating new weight recording session with Floating Popover Calendar */}
@@ -2454,8 +2518,8 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
         const activeMonthGroup = daysGroupedByMonth[previewMilkTeethMonthIndex] || daysGroupedByMonth[0];
         const monthDays = activeMonthGroup ? activeMonthGroup.days : [];
 
-        const effectiveMilkTeethGrade = user.role === 'member' && user.assignedGrade
-          ? user.assignedGrade
+        const effectiveMilkTeethGrade = user.role === 'member'
+          ? (milkTeethGradeFilter || user.assignedGrade || 'ป.1')
           : milkTeethGradeFilter;
         const modalMilkRooms = getRoomsForGrade(effectiveMilkTeethGrade);
 
@@ -2674,8 +2738,8 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
 
       {/* WEIGHT & HEIGHT PDF PREVIEW MODAL */}
       {pdfPreviewSession && (() => {
-        const effectivePreviewGrade = user.role === 'member' && user.assignedGrade
-          ? user.assignedGrade
+        const effectivePreviewGrade = user.role === 'member'
+          ? (gradeFilter || user.assignedGrade || 'ป.1')
           : pdfPreviewGradeFilter;
         const modalPreviewRooms = getRoomsForGrade(effectivePreviewGrade);
 

@@ -33,7 +33,8 @@ import {
   Phone,
   Home,
   Check,
-  Loader2
+  Loader2,
+  FileSpreadsheet
 } from 'lucide-react';
 import { calculateThaiNutritionalStatus, get100SchoolDaysForTerm, isMilkTeethRecorded } from './Module1ClassroomAdmin';
 import { exportSheetsToPdf } from '../utils/pdfExport';
@@ -173,6 +174,7 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
   const [isCombinedAcademic, setIsCombinedAcademic] = useState<boolean>(false);
   const [isCombinedAttendance, setIsCombinedAttendance] = useState<boolean>(false);
   const [isCombinedHealth, setIsCombinedHealth] = useState<boolean>(false);
+  const [isKindergartenSummaryOnly, setIsKindergartenSummaryOnly] = useState<boolean>(false);
 
   // หน้าข้อมูลโรงเรียน: Always pull directly from "ข้อมูลโรงเรียน" (StorageService.getSchoolInfo())
   const schoolInfo = useMemo(() => {
@@ -389,7 +391,7 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
   };
 
   // Standardized PP.6 Header rendered centered on top of every page
-  const renderPP6Header = (sectionTitle?: string, customTitle?: string, omitSemester?: boolean) => {
+  const renderPP6Header = (sectionTitle?: string, customTitle?: string, omitSemester?: boolean, isLargeFont?: boolean) => {
     const affiliationText = schoolInfo.affiliation
       ? (schoolInfo.affiliation.startsWith('สังกัด') ? schoolInfo.affiliation : `สังกัด${schoolInfo.affiliation}`)
       : 'สังกัดสำนักงานคณะกรรมการการศึกษาขั้นพื้นฐาน';
@@ -412,17 +414,17 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
         </div>
 
         {/* Line 2: Title */}
-        <h2 className="text-sm sm:text-base font-bold text-black tracking-wide" style={{ color: '#000000' }}>
+        <h2 className={`${isLargeFont ? 'text-base sm:text-lg' : 'text-sm sm:text-base'} font-bold text-black tracking-wide`} style={{ color: '#000000' }}>
           {customTitle || 'แบบบันทึกผลการพัฒนาคุณภาพผู้เรียนรายบุคคล'}
         </h2>
 
         {/* Line 3: โรงเรียน สังกัด */}
-        <p className="text-xs font-bold text-black" style={{ color: '#000000' }}>
+        <p className={`${isLargeFont ? 'text-sm' : 'text-xs'} font-bold text-black`} style={{ color: '#000000' }}>
           {fullSchoolName} {affiliationText}
         </p>
 
         {/* Line 4: ปีการศึกษา ภาค และชั้น */}
-        <p className="text-xs text-black font-semibold" style={{ color: '#000000' }}>
+        <p className={`${isLargeFont ? 'text-sm' : 'text-xs'} text-black font-semibold`} style={{ color: '#000000' }}>
           {omitSemester
             ? `ปีการศึกษา ${academicYear} ${getGradeCleanName(grade)}`
             : `ปีการศึกษา ${academicYear} ภาคเรียนที่ ${semester} ${getGradeCleanName(grade)}`}
@@ -430,7 +432,7 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
 
         {/* Optional Section Title */}
         {sectionTitle && (
-          <p className="text-xs font-bold text-black pt-1 mt-1" style={{ color: '#000000' }}>
+          <p className={`${isLargeFont ? 'text-sm' : 'text-xs'} font-bold text-black pt-1 mt-1`} style={{ color: '#000000' }}>
             {sectionTitle}
           </p>
         )}
@@ -440,6 +442,121 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
 
   const targetGrade = (student.gradeLevel || grade || '').trim();
   const isPrimaryGrade = ['ป.1', 'ป.2', 'ป.3', 'ป.4', 'ป.5', 'ป.6'].includes(targetGrade) || targetGrade.startsWith('ป.');
+  const isKindergartenGrade = ['อ.1', 'อ.2', 'อ.3'].includes(targetGrade) || targetGrade.startsWith('อ.');
+
+  const evaluateKindergartenSubject = (subj: Subject, rec?: GradeRecord) => {
+    const hasComp = subj.hasKindergartenCompetency !== false;
+    const comps = subj.kindergartenCompetencies || [];
+    const subtopics = subj.subtopics || [];
+    const items = subj.assignmentItems || [];
+    const maxRubric = subj.rubricMaxLevel || (subj.rubricLevels?.length) || 3;
+    const rubrics =
+      subj.rubricLevels && subj.rubricLevels.length > 0
+        ? subj.rubricLevels
+        : [
+            { level: 1, label: 'ควรเสริม' },
+            { level: 2, label: 'ได้บางครั้ง' },
+            { level: 3, label: 'ปฏิบัติได้' }
+          ];
+
+    const getRubricLabel = (level: number | null): string => {
+      if (level === null || isNaN(level) || level <= 0) return '-';
+      const found = rubrics.find(r => r.level === level);
+      if (found) return found.label;
+      if (level >= 3) return 'ปฏิบัติได้';
+      if (level === 2) return 'ได้บางครั้ง';
+      return 'ควรเสริม';
+    };
+
+    const getCompLabel = (unitNum: number): string => {
+      if (!hasComp) return '';
+      const compObj = comps[unitNum - 1];
+      if (compObj && compObj.title && compObj.title.trim()) {
+        return `สมรรถนะ ${unitNum}: ${compObj.title.trim()}`;
+      }
+      const subStr = subtopics[unitNum - 1];
+      if (subStr && subStr.trim()) {
+        return subStr.trim();
+      }
+      return `สมรรถนะ ${unitNum}`;
+    };
+
+    let rawElements: { id: string; name: string; unitNumber: number; competencyLabel: string }[] = [];
+    if (items.length > 0) {
+      rawElements = items.map((it, idx) => {
+        const uNum = it.unitNumber || 1;
+        return {
+          id: it.id,
+          name: it.name || `องค์ประกอบที่ ${idx + 1}`,
+          unitNumber: uNum,
+          competencyLabel: getCompLabel(uNum)
+        };
+      });
+    } else if (comps.length > 0) {
+      comps.forEach((c, cIdx) => {
+        const uNum = cIdx + 1;
+        const els = c.elements && c.elements.length > 0 ? c.elements : ['องค์ประกอบที่ 1'];
+        els.forEach((elName, eIdx) => {
+          rawElements.push({
+            id: `asg-k-${uNum}-${eIdx + 1}`,
+            name: elName || `องค์ประกอบที่ ${eIdx + 1}`,
+            unitNumber: uNum,
+            competencyLabel: getCompLabel(uNum)
+          });
+        });
+      });
+    } else {
+      rawElements = [
+        {
+          id: 'asg-k-1-1',
+          name: 'องค์ประกอบที่ 1',
+          unitNumber: 1,
+          competencyLabel: hasComp ? 'สมรรถนะ 1' : ''
+        }
+      ];
+    }
+
+    const asgScores = rec?.assignmentScores || {};
+    const elementResults = rawElements.map((el, idx) => {
+      let val = asgScores[el.id];
+      if (val === undefined) {
+        const asgKeys = Object.keys(asgScores);
+        if (asgKeys.length === rawElements.length && typeof asgScores[asgKeys[idx]] === 'number') {
+          val = asgScores[asgKeys[idx]];
+        }
+      }
+      const numVal = typeof val === 'number' && !isNaN(val) && val > 0 ? val : null;
+      return {
+        ...el,
+        score: numVal,
+        displayScore: numVal !== null ? String(numVal) : '-',
+        label: getRubricLabel(numVal)
+      };
+    });
+
+    const validScores = elementResults
+      .map(e => e.score)
+      .filter((v): v is number => v !== null && v > 0);
+
+    let overallLevel: number | null = null;
+    if (validScores.length > 0) {
+      const avg = validScores.reduce((a, b) => a + b, 0) / validScores.length;
+      overallLevel = Math.min(maxRubric, Math.max(1, Math.round(avg)));
+    } else if (rec && typeof rec.totalScore === 'number' && rec.totalScore > 0 && rec.totalScore <= maxRubric) {
+      overallLevel = Math.round(rec.totalScore);
+    } else if (rec && typeof rec.courseworkScore === 'number' && rec.courseworkScore > 0 && rec.courseworkScore <= maxRubric) {
+      overallLevel = Math.round(rec.courseworkScore);
+    }
+
+    return {
+      hasCompetency: hasComp,
+      elements: elementResults,
+      overallLevel,
+      overallDisplay: overallLevel !== null ? String(overallLevel) : '-',
+      overallLabel: getRubricLabel(overallLevel),
+      getRubricLabel
+    };
+  };
 
   // 1. Auto-detect default advisor for this specific grade from personnel list (from "ข้อมูล/อื่นๆ" > บุคลากร)
   const autoDetectedAdvisor = useMemo(() => {
@@ -568,6 +685,153 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
     return `ผู้อำนวยการโรงเรียน${cleanSchool}`;
   }, [director, schoolInfo.schoolName]);
 
+  // Editable Signatures State for ปพ.6 (Directly editable by clicking and typing on preview)
+  const [signAdvisorName, setSignAdvisorName] = useState<string>('');
+  const [signAdvisorPosition, setSignAdvisorPosition] = useState<string>('ครูประจำชั้น');
+  const [signDirectorName, setSignDirectorName] = useState<string>('');
+  const [signDirectorPosition, setSignDirectorPosition] = useState<string>('');
+  const [signGuardianName, setSignGuardianName] = useState<string>('');
+  const [signGuardianPosition, setSignGuardianPosition] = useState<string>('ผู้ปกครองนักเรียน');
+
+  useEffect(() => {
+    setSignAdvisorName(advisorName || '......................................................');
+  }, [advisorName]);
+
+  useEffect(() => {
+    setSignDirectorName(directorName || '......................................................');
+  }, [directorName]);
+
+  useEffect(() => {
+    setSignDirectorPosition(directorPosition || 'ผู้อำนวยการโรงเรียน');
+  }, [directorPosition]);
+
+  useEffect(() => {
+    setSignGuardianName(
+      (student.guardianName || student.fatherName || student.motherName || '').trim() ||
+      '......................................................'
+    );
+  }, [student.guardianName, student.fatherName, student.motherName]);
+
+  const renderAdvisorSignatureBlock = (showDate: boolean = true, isLeadingNone: boolean = false, isLargeFont: boolean = false) => (
+    <div className="space-y-1 text-center text-black">
+      <p className={`text-black font-medium text-center ${isLargeFont ? 'text-sm' : ''}`}>ลงชื่อ ..............................................................</p>
+      <div className="space-y-1 text-center">
+        <div className={`flex items-center justify-center font-normal text-black ${isLargeFont ? 'text-sm' : ''}`}>
+          <span className="select-none font-normal">(</span>
+          <input
+            type="text"
+            value={signAdvisorName}
+            onChange={(e) => setSignAdvisorName(e.target.value)}
+            onFocus={(e) => {
+              if (/^\.+$/.test(e.target.value.trim())) {
+                e.target.select();
+              }
+            }}
+            placeholder="......................................................"
+            className={`bg-transparent text-center border-b border-transparent hover:border-slate-400 focus:border-purple-600 focus:bg-purple-50/40 focus:outline-none px-1 py-0 leading-tight text-black font-normal min-w-[140px] max-w-[220px] transition-colors cursor-text print:border-none print:bg-transparent ${isLargeFont ? 'text-sm' : ''}`}
+            title="คลิกเพื่อแก้ไขชื่อ"
+          />
+          <span className="select-none font-normal">)</span>
+        </div>
+        <div className="w-full text-center">
+          <input
+            type="text"
+            value={signAdvisorPosition}
+            onChange={(e) => setSignAdvisorPosition(e.target.value)}
+            placeholder="ตำแหน่ง"
+            className={`bg-transparent text-center border-b border-transparent hover:border-slate-400 focus:border-purple-600 focus:bg-purple-50/40 focus:outline-none px-1 py-0 leading-tight text-black font-semibold ${isLargeFont ? 'text-[13px]' : 'text-[11px]'} w-full mx-auto block transition-colors cursor-text print:border-none print:bg-transparent`}
+            title="คลิกเพื่อแก้ไขตำแหน่ง"
+          />
+        </div>
+      </div>
+      {showDate && (
+        <p className={`text-black font-medium text-center ${isLargeFont ? 'text-xs' : 'text-[10px]'} ${isLeadingNone ? 'leading-none' : ''}`}>
+          วันที่ ...... เดือน ........................ พ.ศ. ...........
+        </p>
+      )}
+    </div>
+  );
+
+  const renderDirectorSignatureBlock = (showDate: boolean = true, isLargeFont: boolean = false) => (
+    <div className="space-y-1 text-center text-black">
+      <p className={`text-black font-medium text-center ${isLargeFont ? 'text-sm' : ''}`}>ลงชื่อ ..............................................................</p>
+      <div className="space-y-1 text-center">
+        <div className={`flex items-center justify-center font-normal text-black ${isLargeFont ? 'text-sm' : ''}`}>
+          <span className="select-none font-normal">(</span>
+          <input
+            type="text"
+            value={signDirectorName}
+            onChange={(e) => setSignDirectorName(e.target.value)}
+            onFocus={(e) => {
+              if (/^\.+$/.test(e.target.value.trim())) {
+                e.target.select();
+              }
+            }}
+            placeholder="......................................................"
+            className={`bg-transparent text-center border-b border-transparent hover:border-slate-400 focus:border-purple-600 focus:bg-purple-50/40 focus:outline-none px-1 py-0 leading-tight text-black font-normal min-w-[140px] max-w-[220px] transition-colors cursor-text print:border-none print:bg-transparent ${isLargeFont ? 'text-sm' : ''}`}
+            title="คลิกเพื่อแก้ไขชื่อ"
+          />
+          <span className="select-none font-normal">)</span>
+        </div>
+        <div className="w-full text-center">
+          <input
+            type="text"
+            value={signDirectorPosition}
+            onChange={(e) => setSignDirectorPosition(e.target.value)}
+            placeholder="ตำแหน่ง"
+            className={`bg-transparent text-center border-b border-transparent hover:border-slate-400 focus:border-purple-600 focus:bg-purple-50/40 focus:outline-none px-1 py-0 leading-tight text-black font-semibold ${isLargeFont ? 'text-[13px]' : 'text-[11px]'} w-full mx-auto block transition-colors cursor-text print:border-none print:bg-transparent`}
+            title="คลิกเพื่อแก้ไขตำแหน่ง"
+          />
+        </div>
+      </div>
+      {showDate && (
+        <p className={`text-black font-medium text-center ${isLargeFont ? 'text-xs' : 'text-[10px]'}`}>
+          วันที่ ...... เดือน ........................ พ.ศ. ...........
+        </p>
+      )}
+    </div>
+  );
+
+  const renderGuardianSignatureBlock = (showDate: boolean = true) => (
+    <div className="space-y-1 text-center text-black">
+      <p className="text-black font-medium text-center">ลงชื่อ ..............................................................</p>
+      <div className="space-y-1 text-center">
+        <div className="flex items-center justify-center font-normal text-black">
+          <span className="select-none font-normal">(</span>
+          <input
+            type="text"
+            value={signGuardianName}
+            onChange={(e) => setSignGuardianName(e.target.value)}
+            onFocus={(e) => {
+              if (/^\.+$/.test(e.target.value.trim())) {
+                e.target.select();
+              }
+            }}
+            placeholder="......................................................"
+            className="bg-transparent text-center border-b border-transparent hover:border-slate-400 focus:border-purple-600 focus:bg-purple-50/40 focus:outline-none px-1 py-0 leading-tight text-black font-normal min-w-[140px] max-w-[220px] transition-colors cursor-text print:border-none print:bg-transparent"
+            title="คลิกเพื่อแก้ไขชื่อ"
+          />
+          <span className="select-none font-normal">)</span>
+        </div>
+        <div className="w-full text-center">
+          <input
+            type="text"
+            value={signGuardianPosition}
+            onChange={(e) => setSignGuardianPosition(e.target.value)}
+            placeholder="ความเกี่ยวข้อง"
+            className="bg-transparent text-center border-b border-transparent hover:border-slate-400 focus:border-purple-600 focus:bg-purple-50/40 focus:outline-none px-1 py-0 leading-tight text-black font-semibold text-[11px] w-full mx-auto block transition-colors cursor-text print:border-none print:bg-transparent"
+            title="คลิกเพื่อแก้ไขความเกี่ยวข้อง/ตำแหน่ง"
+          />
+        </div>
+      </div>
+      {showDate && (
+        <p className="text-black text-center text-[10px] leading-none">
+          วันที่ ...... เดือน ........................ พ.ศ. ...........
+        </p>
+      )}
+    </div>
+  );
+
   // Strict helpers to ensure grade records only show in the exact semester they were recorded
   const isGradeRecordForSemester = (g: GradeRecord, targetSem: string, targetYear: string): boolean => {
     if (!g) return false;
@@ -605,9 +869,16 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
       const matchesYear = !s.academicYear || String(s.academicYear) === String(academicYear);
       return sGrade === studentGrade && matchesYear;
     });
-    const basePool = yearMatched.length > 0
+    let basePool = yearMatched.length > 0
       ? yearMatched
       : effectiveSubjects.filter(s => (s.gradeLevel || '').trim() === studentGrade);
+
+    // Filter by student room if room-matched subjects exist
+    const studentRoomClean = String(student.room || '1').replace(/^ห้อง\s*/, '').trim() || '1';
+    const roomMatched = basePool.filter(s => (String(s.room || '1').replace(/^ห้อง\s*/, '').trim() || '1') === studentRoomClean);
+    if (roomMatched.length > 0) {
+      basePool = roomMatched;
+    }
 
     // Strictly match the student's grade level and current semester
     const exactSemMatched = basePool.filter(s => String(s.semester) === String(semester));
@@ -665,6 +936,11 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
     });
 
     return unique.sort((a, b) => {
+      if (typeof a.sortOrder === 'number' && typeof b.sortOrder === 'number' && a.sortOrder !== b.sortOrder) {
+        return a.sortOrder - b.sortOrder;
+      }
+      if (typeof a.sortOrder === 'number' && typeof b.sortOrder !== 'number') return -1;
+      if (typeof a.sortOrder !== 'number' && typeof b.sortOrder === 'number') return 1;
       const ordA = getPrimarySubjectOrder(a);
       const ordB = getPrimarySubjectOrder(b);
       if (ordA !== ordB) return ordA - ordB;
@@ -758,6 +1034,8 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
         }
       }
 
+      const kindergartenEval = !isAct && isKindergartenGrade ? evaluateKindergartenSubject(subj, rec) : null;
+
       return {
         subject: subj,
         isActivity: isAct,
@@ -766,14 +1044,60 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
         total: totalDisplay,
         grade: gradeStr,
         weight,
-        teacherDisplayName: subjectTeacher || advisorName || '-'
+        teacherDisplayName: subjectTeacher || advisorName || '-',
+        kindergartenEval
       };
     });
 
     const gpa = totalCredits > 0 ? (totalPoints / totalCredits).toFixed(2) : '-';
 
-    return { rows, gpa, totalCredits };
-  }, [studentSubjects, effectiveGrades, student.id, semester, academicYear, personnel, advisorName]);
+    // Paginate kindergarten rows across A4 pages so aspects that exceed page capacity flow onto the next A4 sheet
+    const kindergartenPages: { rows: typeof rows; startIndex: number }[] = [];
+    if (isKindergartenGrade && rows.length > 0) {
+      const MAX_UNITS_PER_PAGE = 14;
+      let currentChunk: typeof rows = [];
+      let currentUnits = 0;
+      let chunkStartIdx = 0;
+
+      rows.forEach((item, idx) => {
+        const els = item.kindergartenEval?.elements || [];
+        const subjNameLen = (item.subject.name || '').length;
+        let itemUnits = subjNameLen > 32 ? 1.8 : 1.2;
+
+        if (!item.isActivity) {
+          els.forEach((el, eIdx) => {
+            const prevEl = eIdx > 0 ? els[eIdx - 1] : null;
+            if (item.kindergartenEval?.hasCompetency && el.competencyLabel && el.competencyLabel !== prevEl?.competencyLabel) {
+              itemUnits += el.competencyLabel.length > 35 ? 1.7 : 1.15;
+            }
+            itemUnits += (el.name || '').length > 28 ? 1.65 : 1.1;
+          });
+          if (els.length > 0) {
+            itemUnits += 1.2;
+          }
+        }
+
+        if (currentChunk.length > 0 && currentUnits + itemUnits > MAX_UNITS_PER_PAGE) {
+          kindergartenPages.push({ rows: currentChunk, startIndex: chunkStartIdx });
+          currentChunk = [item];
+          currentUnits = itemUnits;
+          chunkStartIdx = idx;
+        } else {
+          if (currentChunk.length === 0) chunkStartIdx = idx;
+          currentChunk.push(item);
+          currentUnits += itemUnits;
+        }
+      });
+
+      if (currentChunk.length > 0) {
+        kindergartenPages.push({ rows: currentChunk, startIndex: chunkStartIdx });
+      }
+    } else {
+      kindergartenPages.push({ rows, startIndex: 0 });
+    }
+
+    return { rows, gpa, totalCredits, kindergartenPages };
+  }, [studentSubjects, effectiveGrades, student.id, semester, academicYear, personnel, advisorName, isKindergartenGrade]);
 
   // Combined 2-Semester Subject Evaluation (ภาคเรียนที่ 1 + ภาคเรียนที่ 2)
   const combinedAcademicResults = useMemo(() => {
@@ -956,8 +1280,6 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
       const weight = subj.hoursPerWeek ? subj.hoursPerWeek / 2 : 1;
 
       if (isAct) {
-        // Requirement 2: รวมภาคเรียน ตรง column คะแนน และ column รวมคะแนน ให้แสดง "ผ่าน หรือ ไม่ผ่าน"
-        // เน้นภาคเรียนที่ 1 ก็ดึงของภาคเรียนที่ 1 / ภาคเรียนที่ 2 ก็ดึงของภาคเรียนที่ 2
         const act1 = (rec1?.activityResult === 'ผ่าน' || rec1?.activityResult === 'ไม่ผ่าน') ? rec1.activityResult : '-';
         const act2 = (rec2?.activityResult === 'ผ่าน' || rec2?.activityResult === 'ไม่ผ่าน') ? rec2.activityResult : '-';
 
@@ -967,7 +1289,6 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
         total2Display = act2;
         grade2Display = '-';
 
-        // Combined activity evaluation:
         if (act1 === 'ผ่าน' && act2 === 'ผ่าน') {
           avgTotalDisplay = 'ผ่าน';
         } else if (act1 === 'ไม่ผ่าน' || act2 === 'ไม่ผ่าน') {
@@ -978,8 +1299,6 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
           avgTotalDisplay = '-';
         }
         combinedGradeDisplay = '-';
-
-        // Non-credit: do not add to GPA
       } else {
         const grade1 = calculateThaiGrade(total1Num, max1);
         const grade2 = calculateThaiGrade(total2Num, max2);
@@ -1049,6 +1368,21 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
       const teacher2 = resolveSubjectTeacher(grp.sem2Subj) || (!grp.sem2Subj ? resolveSubjectTeacher(subj) : '');
       const subjectTeacher = resolveSubjectTeacher(subj) || teacher1 || teacher2;
 
+      const kEval1 = !isAct && isKindergartenGrade ? evaluateKindergartenSubject(grp.sem1Subj || subj, rec1) : null;
+      const kEval2 = !isAct && isKindergartenGrade ? evaluateKindergartenSubject(grp.sem2Subj || subj, rec2) : null;
+      let kCombinedLevel: number | null = null;
+      let kCombinedLabel = '-';
+      if (kEval1 && kEval2) {
+        if (kEval1.overallLevel !== null && kEval2.overallLevel !== null) {
+          kCombinedLevel = Math.round((kEval1.overallLevel + kEval2.overallLevel) / 2);
+        } else if (kEval1.overallLevel !== null) {
+          kCombinedLevel = kEval1.overallLevel;
+        } else if (kEval2.overallLevel !== null) {
+          kCombinedLevel = kEval2.overallLevel;
+        }
+        kCombinedLabel = kEval1.getRubricLabel(kCombinedLevel);
+      }
+
       return {
         subject: subj,
         isActivity: isAct,
@@ -1061,6 +1395,10 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
         teacherDisplayName: subjectTeacher || advisorName || '-',
         teacher1DisplayName: teacher1 || advisorName || '-',
         teacher2DisplayName: teacher2 || advisorName || '-',
+        kEval1,
+        kEval2,
+        kCombinedDisplay: kCombinedLevel !== null ? String(kCombinedLevel) : '-',
+        kCombinedLabel
       };
     });
 
@@ -1068,13 +1406,62 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
     const gpa2 = totalCredits2 > 0 ? (totalPoints2 / totalCredits2).toFixed(2) : '-';
     const gpaCombined = totalCreditsCombined > 0 ? (totalPointsCombined / totalCreditsCombined).toFixed(2) : '-';
 
+    // Paginate combined kindergarten rows across A4 pages so aspects that exceed page capacity flow onto the next A4 sheet
+    const kindergartenPages: { rows: typeof rows; startIndex: number }[] = [];
+    if (isKindergartenGrade && rows.length > 0) {
+      const MAX_UNITS_PER_PAGE = 12.5;
+      let currentChunk: typeof rows = [];
+      let currentUnits = 0;
+      let chunkStartIdx = 0;
+
+      rows.forEach((item, idx) => {
+        const els1 = item.kEval1?.elements || [];
+        const els2 = item.kEval2?.elements || [];
+        const baseEls = els1.length >= els2.length ? els1 : els2;
+        const hasComp = item.kEval1?.hasCompetency ?? item.kEval2?.hasCompetency ?? true;
+        const subjNameLen = (item.subject.name || '').length;
+        let itemUnits = subjNameLen > 22 ? 1.9 : 1.3;
+
+        if (!item.isActivity) {
+          baseEls.forEach((el, eIdx) => {
+            const prevEl = eIdx > 0 ? baseEls[eIdx - 1] : null;
+            if (hasComp && el.competencyLabel && el.competencyLabel !== prevEl?.competencyLabel) {
+              itemUnits += el.competencyLabel.length > 24 ? 1.8 : 1.25;
+            }
+            itemUnits += (el.name || '').length > 20 ? 1.75 : 1.15;
+          });
+          if (baseEls.length > 0) {
+            itemUnits += 1.2;
+          }
+        }
+
+        if (currentChunk.length > 0 && currentUnits + itemUnits > MAX_UNITS_PER_PAGE) {
+          kindergartenPages.push({ rows: currentChunk, startIndex: chunkStartIdx });
+          currentChunk = [item];
+          currentUnits = itemUnits;
+          chunkStartIdx = idx;
+        } else {
+          if (currentChunk.length === 0) chunkStartIdx = idx;
+          currentChunk.push(item);
+          currentUnits += itemUnits;
+        }
+      });
+
+      if (currentChunk.length > 0) {
+        kindergartenPages.push({ rows: currentChunk, startIndex: chunkStartIdx });
+      }
+    } else {
+      kindergartenPages.push({ rows, startIndex: 0 });
+    }
+
     return {
       rows,
       gpa1,
       gpa2,
       gpaCombined,
+      kindergartenPages,
     };
-  }, [effectiveSubjects, studentSubjects, effectiveGrades, student.id, student.gradeLevel, grade, semester, academicYear, personnel, advisorName, isPrimaryGrade]);
+  }, [effectiveSubjects, studentSubjects, effectiveGrades, student.id, student.gradeLevel, grade, semester, academicYear, personnel, advisorName, isPrimaryGrade, isKindergartenGrade]);
 
   // Helper to compute monthly attendance for a specific semester ('1' or '2')
   const computeTermAttendance = useMemo(() => {
@@ -1705,6 +2092,22 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
             </button>
           )}
 
+          {isKindergartenGrade && (activeTab === 'academic' || activeTab === 'all') && (
+            <button
+              type="button"
+              onClick={() => setIsKindergartenSummaryOnly(prev => !prev)}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                isKindergartenSummaryOnly
+                  ? 'bg-amber-600 text-white shadow-xs ring-2 ring-amber-300'
+                  : 'bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-300'
+              }`}
+              title="สลับโหมดสรุปผลการประเมินแต่ละด้าน (จบใน 1 หน้า A4)"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>สรุป (1 หน้า A4)</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => setActiveTab('all')}
@@ -1727,7 +2130,7 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
           {(activeTab === 'cover' || activeTab === 'all') && (
             <div
               className="a4-pp6-page bg-white border border-slate-300 rounded-lg py-6 sm:py-8 max-w-[210mm] min-h-[297mm] mx-auto text-slate-900 shadow-xl print:border-none print:shadow-none print:m-0 font-['Sarabun','TH_Sarabun_New',sans-serif] text-[13px] leading-relaxed flex flex-col justify-between"
-              style={{ width: '210mm', maxWidth: '210mm', paddingLeft: '20mm', paddingRight: '15mm' }}
+              style={{ width: '210mm', maxWidth: '210mm', paddingLeft: isKindergartenGrade ? '13mm' : '20mm', paddingRight: '15mm' }}
             >
               <div>
                 {/* Top Section: Logo in Center, Photo on Right, Title Block centered under Logo */}
@@ -1927,7 +2330,7 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
               {/* Page 1 of Student Profile */}
               <div
                 className="a4-pp6-page bg-white border border-slate-300 rounded-lg py-6 sm:py-8 max-w-[210mm] min-h-[297mm] mx-auto text-slate-900 shadow-xl print:border-none print:shadow-none print:m-0 print:break-before-page text-[13px] leading-relaxed flex flex-col justify-between"
-                style={{ width: '210mm', maxWidth: '210mm', paddingLeft: '20mm', paddingRight: '15mm' }}
+                style={{ width: '210mm', maxWidth: '210mm', paddingLeft: isKindergartenGrade ? '13mm' : '20mm', paddingRight: '15mm' }}
               >
                 <div>
                   {/* Title: ข้อมูลส่วนตัวผู้เรียน */}
@@ -2140,7 +2543,7 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
               {/* Page 2 of Student Profile (Matching Reference PDF Page 2) */}
               <div
                 className="a4-pp6-page bg-white border border-slate-300 rounded-lg pt-6 sm:pt-8 max-w-[210mm] min-h-[297mm] mx-auto text-slate-900 shadow-xl print:border-none print:shadow-none print:m-0 print:break-before-page text-[13px] leading-relaxed flex flex-col justify-between"
-                style={{ width: '210mm', maxWidth: '210mm', paddingLeft: '20mm', paddingRight: '15mm', paddingBottom: '2.3cm' }}
+                style={{ width: '210mm', maxWidth: '210mm', paddingLeft: isKindergartenGrade ? '13mm' : '20mm', paddingRight: '15mm', paddingBottom: '2.3cm' }}
               >
                 <div>
                   {/* Section: โรงเรียนเดิม */}
@@ -2310,10 +2713,8 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
 
                 {/* Bottom Signature - exactly 2.3cm from bottom edge */}
                 <div className="pt-4 text-center text-xs text-black mt-auto mb-0">
-                  <div className="w-64 mx-auto space-y-1 text-black">
-                    <p className="text-black">ลงชื่อ ..............................................................</p>
-                    <p className="font-normal text-black">({advisorName || '......................................................'})</p>
-                    <p className="text-black font-semibold text-[11px] leading-none m-0 p-0">ครูประจำชั้น</p>
+                  <div className="w-64 mx-auto text-black">
+                    {renderAdvisorSignatureBlock(false)}
                   </div>
                 </div>
               </div>
@@ -2353,299 +2754,741 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
                     <Layers className="w-3.5 h-3.5" />
                     <span>รวมภาคเรียน</span>
                   </button>
-                </div>
-              </div>
-
-              <div
-                className="a4-pp6-page bg-white border border-slate-300 rounded-lg py-6 sm:py-8 max-w-[210mm] min-h-[297mm] mx-auto text-black shadow-xl print:border-none print:shadow-none print:m-0 print:break-before-page flex flex-col justify-between"
-                style={{ width: '210mm', maxWidth: '210mm', paddingLeft: '20mm', paddingRight: '15mm', color: '#000000' }}
-              >
-                
-                <div className="space-y-6">
-                  {renderPP6Header(undefined, undefined, isCombinedAcademic)}
-
-                  {/* Student Info Bar: รหัสประจำตัว, ชื่อ-นามสกุล, เลขที่ (สีขาวทางการ) */}
-                  <div className="flex flex-wrap items-center justify-between text-xs bg-white p-2.5 rounded-lg border border-slate-800 gap-4 mb-5 text-black">
-                    <div>
-                      <span className="font-bold text-black">รหัสประจำตัว: </span>
-                      <span className="font-semibold text-black font-mono">{student.studentCode || '-'}</span>
-                    </div>
-                    <div>
-                      <span className="font-bold text-black">ชื่อ-นามสกุล: </span>
-                      <span className="font-semibold text-black">{student.prefix}{student.firstName} {student.lastName}</span>
-                    </div>
-                    <div>
-                      <span className="font-bold text-black">เลขที่: </span>
-                      <span className="font-semibold text-black">{student.rollNumber || '-'}</span>
-                    </div>
-                  </div>
-
-                  {/* Subject Score Table */}
-                  {!isCombinedAcademic ? (
-                    <div className="border border-slate-800 rounded-lg overflow-hidden mb-5 bg-white">
-                      <table className="w-full text-left text-[11px] border-collapse bg-white">
-                        <thead>
-                          <tr className="bg-white text-black font-bold text-center">
-                            <th className="py-2 px-2 border-r border-b border-slate-800 w-10 text-black">ที่</th>
-                            <th className="py-2 px-2 border-r border-b border-slate-800 w-24 text-black">รหัสวิชา</th>
-                            <th className="py-2 px-3 border-r border-b border-slate-800 text-center text-black">รายวิชา</th>
-                            <th className="py-2 px-2 border-r border-b border-slate-800 w-16 text-black">ระหว่างภาค</th>
-                            <th className="py-2 px-2 border-r border-b border-slate-800 w-16 text-black">ปลายภาค</th>
-                            <th className="py-2 px-2 border-r border-b border-slate-800 w-16 bg-white text-black font-bold">รวม</th>
-                            {!isPrimaryGrade && (
-                              <th className="py-2 px-2 border-r border-b border-slate-800 w-16 bg-white text-black font-black">เกรด</th>
-                            )}
-                            <th className="py-2 px-3 border-b border-slate-800 text-black">ครูผู้สอนในรายวิชา</th>
-                          </tr>
-                        </thead>
-                        <tbody className="bg-white">
-                          {academicResults.rows.length === 0 ? (
-                            <tr>
-                              <td colSpan={isPrimaryGrade ? 7 : 8} className={`py-8 text-center text-black bg-white ${!isPrimaryGrade ? 'border-b border-slate-800' : ''}`}>
-                                ยังไม่มีข้อมูลรายวิชาในระบบ
-                              </td>
-                            </tr>
-                          ) : (
-                            academicResults.rows.map((item, idx) => {
-                              const hasBottomBorder = !isPrimaryGrade || idx < academicResults.rows.length - 1;
-                              const rowBorderB = hasBottomBorder ? 'border-b border-slate-800' : '';
-                              return (
-                                <tr key={item.subject.id} className="bg-white">
-                                  <td className={`py-1.5 px-2 text-center font-mono text-black border-r border-slate-800 ${rowBorderB}`}>
-                                    {idx + 1}
-                                  </td>
-                                  <td className={`py-1.5 px-2 text-center font-mono font-semibold text-black border-r border-slate-800 ${rowBorderB}`}>
-                                    {item.subject.code || '-'}
-                                  </td>
-                                  <td className={`py-1.5 px-3 font-medium text-black border-r border-slate-800 ${rowBorderB}`}>
-                                    {item.subject.name}
-                                  </td>
-                                  <td className={`py-1.5 px-2 text-center font-mono text-black border-r border-slate-800 ${rowBorderB}`}>
-                                    {item.coursework}
-                                  </td>
-                                  <td className={`py-1.5 px-2 text-center font-mono text-black border-r border-slate-800 ${rowBorderB}`}>
-                                    {item.exam}
-                                  </td>
-                                  <td className={`py-1.5 px-2 text-center ${item.isActivity ? 'font-sans' : 'font-mono'} font-bold text-black bg-white border-r border-slate-800 ${rowBorderB}`}>
-                                    {item.total}
-                                  </td>
-                                  {!isPrimaryGrade && (
-                                    <td className={`py-1.5 px-2 text-center font-bold text-xs border-r border-slate-800 bg-white text-black ${rowBorderB}`}>
-                                      {item.grade}
-                                    </td>
-                                  )}
-                                  <td className={`py-1.5 px-3 text-black font-medium ${rowBorderB}`}>
-                                    {item.teacherDisplayName || item.subject.teacherName || advisorName || '-'}
-                                  </td>
-                                </tr>
-                              );
-                            })
-                          )}
-                          {!isPrimaryGrade && (
-                            <tr className="bg-white font-bold text-black text-xs">
-                              <td colSpan={6} className="py-2 px-3 text-center border-r border-slate-800 text-black">
-                                ผลการเรียนเฉลี่ยรวม (GPA)
-                              </td>
-                              <td colSpan={2} className="py-2 px-2 text-center text-sm font-black text-black bg-white">
-                                {academicResults.gpa}
-                              </td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    /* Combined 2-Semester Subject Score Table (รวม 2 ภาคเรียน) */
-                    <div className="border border-slate-800 rounded-lg overflow-hidden mb-5 bg-white">
-                      {isPrimaryGrade ? (
-                        <table className="w-full text-left text-[11px] border-collapse bg-white">
-                          <thead>
-                            <tr className="bg-white text-black font-bold text-center">
-                              <th rowSpan={2} className="py-2 px-1 border-r border-b border-slate-800 w-7 text-black">ที่</th>
-                              <th rowSpan={2} className="py-2 px-1.5 border-r border-b border-slate-800 w-16 text-black">รหัสวิชา</th>
-                              <th rowSpan={2} className="py-2 px-2 border-r border-b border-slate-800 text-center text-black">รายวิชา</th>
-                              <th colSpan={2} className="py-1.5 px-1.5 border-r border-b border-slate-800 text-center text-black">ภาคเรียนที่ 1</th>
-                              <th colSpan={2} className="py-1.5 px-1.5 border-r border-b border-slate-800 text-center text-black">ภาคเรียนที่ 2</th>
-                              <th rowSpan={2} className="py-2 px-1.5 border-r border-b border-slate-800 w-16 text-black">รวมคะแนน</th>
-                              <th rowSpan={2} className="py-2 px-1 border-b border-slate-800 w-10 text-black">เกรด</th>
-                            </tr>
-                            <tr className="bg-white text-black font-bold text-center text-[10px]">
-                              <th className="py-1 px-1 border-r border-b border-slate-800 w-14 text-black">คะแนน</th>
-                              <th className="py-1 px-1.5 border-r border-b border-slate-800 text-black">ครูผู้สอน</th>
-                              <th className="py-1 px-1 border-r border-b border-slate-800 w-14 text-black">คะแนน</th>
-                              <th className="py-1 px-1.5 border-r border-b border-slate-800 text-black">ครูผู้สอน</th>
-                            </tr>
-                          </thead>
-                          <tbody className="bg-white">
-                            {combinedAcademicResults.rows.length === 0 ? (
-                              <tr>
-                                <td colSpan={9} className="py-8 text-center text-black bg-white border-b border-slate-800">
-                                  ยังไม่มีข้อมูลรายวิชาในระบบ
-                                </td>
-                              </tr>
-                            ) : (
-                              combinedAcademicResults.rows.map((item, idx) => (
-                                <tr key={item.subject.id || idx} className="bg-white">
-                                  <td className="py-1.5 px-1 text-center font-mono text-black border-r border-b border-slate-800">
-                                    {idx + 1}
-                                  </td>
-                                  <td className="py-1.5 px-1.5 text-center font-mono font-semibold text-black border-r border-b border-slate-800">
-                                    {item.subject.code || '-'}
-                                  </td>
-                                  <td className="py-1.5 px-2 font-medium text-black border-r border-b border-slate-800">
-                                    {item.subject.name}
-                                  </td>
-                                  <td className={`py-1.5 px-1 text-center ${item.isActivity ? 'font-sans font-bold' : 'font-mono'} text-black border-r border-b border-slate-800`}>
-                                    {item.total1}
-                                  </td>
-                                  <td className="py-1.5 px-1.5 text-black font-medium text-[10px] border-r border-b border-slate-800">
-                                    {item.teacher1DisplayName}
-                                  </td>
-                                  <td className={`py-1.5 px-1 text-center ${item.isActivity ? 'font-sans font-bold' : 'font-mono'} text-black border-r border-b border-slate-800`}>
-                                    {item.total2}
-                                  </td>
-                                  <td className="py-1.5 px-1.5 text-black font-medium text-[10px] border-r border-b border-slate-800">
-                                    {item.teacher2DisplayName}
-                                  </td>
-                                  {item.isActivity ? (
-                                    <td colSpan={2} className="py-1.5 px-1 text-center font-sans font-bold text-black border-b border-slate-800 bg-white">
-                                      {item.avgTotal}
-                                    </td>
-                                  ) : (
-                                    <>
-                                      <td className="py-1.5 px-1 text-center font-mono font-bold text-black border-r border-b border-slate-800 bg-white">
-                                        {item.avgTotal}
-                                      </td>
-                                      <td className="py-1.5 px-1 text-center font-black text-xs text-black border-b border-slate-800 bg-white">
-                                        {item.combinedGrade}
-                                      </td>
-                                    </>
-                                  )}
-                                </tr>
-                              ))
-                            )}
-                            <tr className="bg-white font-bold text-black text-xs">
-                              <td colSpan={7} className="py-2 px-3 text-center border-r border-slate-800 text-black font-bold">
-                                เกรดเฉลี่ย
-                              </td>
-                              <td colSpan={2} className="py-2 px-2 text-center text-sm font-black text-black bg-white">
-                                {combinedAcademicResults.gpaCombined}
-                              </td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      ) : (
-                        <table className="w-full text-left text-[11px] border-collapse bg-white">
-                          <thead>
-                            <tr className="bg-white text-black font-bold text-center">
-                              <th rowSpan={2} className="py-2 px-1.5 border-r border-b border-slate-800 w-8 text-black">ที่</th>
-                              <th rowSpan={2} className="py-2 px-2 border-r border-b border-slate-800 w-20 text-black">รหัสวิชา</th>
-                              <th rowSpan={2} className="py-2 px-2.5 border-r border-b border-slate-800 text-center text-black">รายวิชา</th>
-                              <th colSpan={2} className="py-1.5 px-2 border-r border-b border-slate-800 text-center text-black">ภาคเรียนที่ 1</th>
-                              <th colSpan={2} className="py-1.5 px-2 border-r border-b border-slate-800 text-center text-black">ภาคเรียนที่ 2</th>
-                              <th colSpan={2} className="py-1.5 px-2 border-r border-b border-slate-800 text-center text-black">รวม 2 ภาคเรียน</th>
-                              <th rowSpan={2} className="py-2 px-2.5 border-b border-slate-800 text-center text-black">ครูผู้สอนในรายวิชา</th>
-                            </tr>
-                            <tr className="bg-white text-black font-bold text-center text-[10px]">
-                              <th className="py-1 px-1.5 border-r border-b border-slate-800 w-12 text-black">คะแนน</th>
-                              <th className="py-1 px-1.5 border-r border-b border-slate-800 w-11 text-black">เกรด</th>
-                              <th className="py-1 px-1.5 border-r border-b border-slate-800 w-12 text-black">คะแนน</th>
-                              <th className="py-1 px-1.5 border-r border-b border-slate-800 w-11 text-black">เกรด</th>
-                              <th className="py-1 px-1.5 border-r border-b border-slate-800 w-14 text-black">คะแนนเฉลี่ย</th>
-                              <th className="py-1 px-1.5 border-r border-b border-slate-800 w-11 text-black">เกรด</th>
-                            </tr>
-                          </thead>
-                          <tbody className="bg-white">
-                            {combinedAcademicResults.rows.length === 0 ? (
-                              <tr>
-                                <td colSpan={10} className="py-8 text-center text-black bg-white border-b border-slate-800">
-                                  ยังไม่มีข้อมูลรายวิชาในระบบ
-                                </td>
-                              </tr>
-                            ) : (
-                              combinedAcademicResults.rows.map((item, idx) => (
-                                <tr key={item.subject.id || idx} className="bg-white">
-                                  <td className="py-1.5 px-1.5 text-center font-mono text-black border-r border-b border-slate-800">
-                                    {idx + 1}
-                                  </td>
-                                  <td className="py-1.5 px-2 text-center font-mono font-semibold text-black border-r border-b border-slate-800">
-                                    {item.subject.code || '-'}
-                                  </td>
-                                  <td className="py-1.5 px-2.5 font-medium text-black border-r border-b border-slate-800">
-                                    {item.subject.name}
-                                  </td>
-                                  <td className={`py-1.5 px-1.5 text-center ${item.isActivity ? 'font-sans font-bold' : 'font-mono'} text-black border-r border-b border-slate-800`}>
-                                    {item.total1}
-                                  </td>
-                                  <td className="py-1.5 px-1.5 text-center font-bold text-black border-r border-b border-slate-800">
-                                    {item.grade1}
-                                  </td>
-                                  <td className={`py-1.5 px-1.5 text-center ${item.isActivity ? 'font-sans font-bold' : 'font-mono'} text-black border-r border-b border-slate-800`}>
-                                    {item.total2}
-                                  </td>
-                                  <td className="py-1.5 px-1.5 text-center font-bold text-black border-r border-b border-slate-800">
-                                    {item.grade2}
-                                  </td>
-                                  {item.isActivity ? (
-                                    <td colSpan={2} className="py-1.5 px-1.5 text-center font-sans font-bold text-black border-r border-b border-slate-800 bg-white">
-                                      {item.avgTotal}
-                                    </td>
-                                  ) : (
-                                    <>
-                                      <td className="py-1.5 px-1.5 text-center font-mono font-bold text-black border-r border-b border-slate-800 bg-white">
-                                        {item.avgTotal}
-                                      </td>
-                                      <td className="py-1.5 px-1.5 text-center font-black text-xs text-black border-r border-b border-slate-800 bg-white">
-                                        {item.combinedGrade}
-                                      </td>
-                                    </>
-                                  )}
-                                  <td className="py-1.5 px-2.5 text-black font-medium border-b border-slate-800">
-                                    {item.teacherDisplayName}
-                                  </td>
-                                </tr>
-                              ))
-                            )}
-                            <tr className="bg-white font-bold text-black text-xs">
-                              <td colSpan={3} className="py-2 px-3 text-center border-r border-slate-800 text-black">
-                                ผลการเรียนเฉลี่ยรวม (GPA)
-                              </td>
-                              <td colSpan={2} className="py-2 px-2 text-center font-black text-black border-r border-slate-800 bg-white">
-                                {combinedAcademicResults.gpa1}
-                              </td>
-                              <td colSpan={2} className="py-2 px-2 text-center font-black text-black border-r border-slate-800 bg-white">
-                                {combinedAcademicResults.gpa2}
-                              </td>
-                              <td colSpan={2} className="py-2 px-2 text-center text-sm font-black text-black border-r border-slate-800 bg-white">
-                                {combinedAcademicResults.gpaCombined}
-                              </td>
-                              <td className="py-2 px-2 bg-white"></td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      )}
-                    </div>
+                  {isKindergartenGrade && (
+                    <button
+                      type="button"
+                      onClick={() => setIsKindergartenSummaryOnly(prev => !prev)}
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                        isKindergartenSummaryOnly
+                          ? 'bg-amber-600 text-white shadow-2xs'
+                          : 'text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-300'
+                      }`}
+                      title="สรุปผลการประเมินพัฒนาการแต่ละด้าน จบใน 1 หน้ากระดาษ A4"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                      <span>สรุป (1 หน้า A4)</span>
+                    </button>
                   )}
-
                 </div>
-
-                {/* Bottom Signatures: Teacher & Director */}
-                <div className="pt-6 mt-8 mb-[2in] grid grid-cols-2 gap-8 text-xs text-center print:mb-[2in] text-black" style={{ color: '#000000' }}>
-                  <div className="space-y-1 text-black" style={{ color: '#000000' }}>
-                    <p className="text-black font-medium" style={{ color: '#000000' }}>ลงชื่อ ..............................................................</p>
-                    <p className="font-normal text-black" style={{ color: '#000000' }}>({advisorName || '......................................................'})</p>
-                    <p className="text-black font-semibold text-[11px]" style={{ color: '#000000' }}>ครูประจำชั้น</p>
-                    <p className="text-black font-medium text-[10px]" style={{ color: '#000000' }}>วันที่ ...... เดือน ........................ พ.ศ. ...........</p>
-                  </div>
-                  <div className="space-y-1 text-black" style={{ color: '#000000' }}>
-                    <p className="text-black font-medium" style={{ color: '#000000' }}>ลงชื่อ ..............................................................</p>
-                    <p className="font-normal text-black" style={{ color: '#000000' }}>({directorName || '......................................................'})</p>
-                    <p className="text-black font-semibold text-[11px]" style={{ color: '#000000' }}>{directorPosition}</p>
-                    <p className="text-black font-medium text-[10px]" style={{ color: '#000000' }}>วันที่ ...... เดือน ........................ พ.ศ. ...........</p>
-                  </div>
-                </div>
-
               </div>
+
+              {isKindergartenGrade ? (
+                <div className="space-y-8 print:space-y-0">
+                  {(isKindergartenSummaryOnly
+                    ? [{ rows: (!isCombinedAcademic ? academicResults.rows : combinedAcademicResults.rows), startIndex: 0 }]
+                    : (!isCombinedAcademic ? academicResults.kindergartenPages : combinedAcademicResults.kindergartenPages)
+                  ).map((kPage, pageIdx) => (
+                    <div
+                      key={`k-acad-page-${isKindergartenSummaryOnly ? 'summ' : (isCombinedAcademic ? 'comb' : 'sem')}-${pageIdx}`}
+                      className="a4-pp6-page bg-white border border-slate-300 rounded-lg pt-5 sm:pt-6 max-w-[210mm] min-h-[297mm] mx-auto text-black shadow-xl print:border-none print:shadow-none print:m-0 print:break-before-page flex flex-col justify-between"
+                      style={{ width: '210mm', maxWidth: '210mm', paddingLeft: '13mm', paddingRight: '15mm', paddingBottom: '1.6cm', color: '#000000' }}
+                    >
+                      <div className="space-y-4">
+                        {renderPP6Header(undefined, undefined, isCombinedAcademic, true)}
+
+                        {/* Student Info Bar: รหัสประจำตัว, ชื่อ-นามสกุล, เลขที่ (สีขาว-ดำทางการ) */}
+                        <div className="flex flex-wrap items-center justify-between text-sm bg-white p-2.5 rounded-lg border border-black gap-4 mb-3 text-black">
+                          <div>
+                            <span className="font-bold text-black">รหัสประจำตัว: </span>
+                            <span className="font-semibold text-black font-mono">{student.studentCode || '-'}</span>
+                          </div>
+                          <div>
+                            <span className="font-bold text-black">ชื่อ-นามสกุล: </span>
+                            <span className="font-semibold text-black">{student.prefix}{student.firstName} {student.lastName}</span>
+                          </div>
+                          <div>
+                            <span className="font-bold text-black">เลขที่: </span>
+                            <span className="font-semibold text-black">{student.rollNumber || '-'}</span>
+                          </div>
+                        </div>
+
+                        {!isCombinedAcademic ? (
+                          <div className="border border-black rounded-lg overflow-hidden mb-3 bg-white">
+                            <table className="w-full text-left text-[13px] border-collapse bg-white text-black">
+                              <thead>
+                                <tr className="bg-white text-black font-bold text-center">
+                                  <th className="py-2 px-2 border-r border-b border-black w-9 bg-white text-black">ที่</th>
+                                  <th className="py-2 px-2 border-r border-b border-black w-20 bg-white text-black">รหัส</th>
+                                  <th className="py-2 px-3 border-r border-b border-black text-center bg-white text-black">
+                                    ด้านความสามารถผู้เรียน
+                                  </th>
+                                  <th className="py-2 px-2 border-r border-b border-black w-16 bg-white text-black">ระดับ</th>
+                                  <th className="py-2 px-2 border-r border-b border-black w-28 bg-white text-black font-bold">ผลการประเมิน</th>
+                                  <th className="py-2 px-3 border-b border-black w-36 bg-white text-black">ครูผู้ประเมิน</th>
+                                </tr>
+                              </thead>
+                              <tbody className="bg-white text-black">
+                                {kPage.rows.length === 0 ? (
+                                  <tr className="bg-white">
+                                    <td colSpan={6} className="py-8 text-center text-black bg-white">
+                                      ยังไม่มีข้อมูลด้านความสามารถในระบบ
+                                    </td>
+                                  </tr>
+                                ) : (
+                                  <>
+                                    {(kPage.rows as typeof academicResults.rows).map((item, idx) => {
+                                      const isLastItem = idx === kPage.rows.length - 1;
+                                      const kEval = item.kindergartenEval;
+                                      const elements = kEval?.elements || [];
+
+                                      return (
+                                        <React.Fragment key={item.subject.id || idx}>
+                                          <tr className={`bg-white text-black font-bold ${isKindergartenSummaryOnly ? 'h-11' : ''}`}>
+                                            <td className="py-1.5 px-2 text-center font-mono bg-white text-black border-r border-b border-black align-middle">
+                                              {kPage.startIndex + idx + 1}
+                                            </td>
+                                            <td className="py-1.5 px-2 text-center font-mono font-semibold bg-white text-black border-r border-b border-black align-middle">
+                                              {item.subject.code || '-'}
+                                            </td>
+                                            <td className="py-1.5 px-3 font-bold bg-white text-black border-r border-b border-black align-middle break-words whitespace-normal leading-snug">
+                                              {item.subject.name}
+                                            </td>
+                                            <td className="py-1.5 px-2 text-center font-mono font-bold bg-white text-black border-r border-b border-black align-middle">
+                                              {item.isActivity ? '-' : (isKindergartenSummaryOnly ? (kEval?.overallDisplay || '-') : (elements.length > 0 ? '-' : (kEval?.overallDisplay || '-')))}
+                                            </td>
+                                            <td className="py-1.5 px-2 text-center font-bold bg-white text-black border-r border-b border-black align-middle">
+                                              {item.isActivity ? item.total : (isKindergartenSummaryOnly ? (kEval?.overallLabel || '-') : (elements.length > 0 ? '-' : (kEval?.overallLabel || '-')))}
+                                            </td>
+                                            <td className="py-1.5 px-3 bg-white text-black font-medium border-b border-black align-middle break-words whitespace-normal leading-snug">
+                                              {item.teacherDisplayName || item.subject.teacherName || advisorName || '-'}
+                                            </td>
+                                          </tr>
+
+                                          {!isKindergartenSummaryOnly && !item.isActivity && elements.map((el, eIdx) => {
+                                            const prevEl = eIdx > 0 ? elements[eIdx - 1] : null;
+                                            const showCompHeader = kEval?.hasCompetency && el.competencyLabel && el.competencyLabel !== prevEl?.competencyLabel;
+
+                                            return (
+                                              <React.Fragment key={el.id || eIdx}>
+                                                {showCompHeader && (
+                                                  <tr className="bg-white text-black">
+                                                    <td className="py-1 px-2 bg-white border-r border-b border-black"></td>
+                                                    <td className="py-1 px-2 bg-white border-r border-b border-black"></td>
+                                                    <td className="py-1 px-3 pl-5 font-semibold text-[12.5px] bg-white text-black border-r border-b border-black break-words whitespace-normal leading-snug">
+                                                      • {el.competencyLabel}
+                                                    </td>
+                                                    <td className="py-1 px-2 bg-white border-r border-b border-black"></td>
+                                                    <td className="py-1 px-2 bg-white border-r border-b border-black"></td>
+                                                    <td className="py-1 px-3 bg-white border-b border-black"></td>
+                                                  </tr>
+                                                )}
+                                                <tr className="bg-white text-black">
+                                                  <td className="py-1 px-2 bg-white border-r border-b border-black"></td>
+                                                  <td className="py-1 px-2 bg-white border-r border-b border-black"></td>
+                                                  <td className={`py-1 px-3 ${kEval?.hasCompetency ? 'pl-8' : 'pl-5'} text-[12.5px] bg-white text-black border-r border-b border-black break-words whitespace-normal leading-snug`}>
+                                                    - องค์ประกอบที่ {eIdx + 1}{(() => {
+                                                      const clean = (el.name || '').replace(/^องค์ประกอบ(?:\/ประเด็น|ที่)?\s*\d+\s*[:\-]?\s*/, '').trim();
+                                                      return clean ? `: ${clean}` : (el.name && !el.name.includes('องค์ประกอบ') ? `: ${el.name}` : '');
+                                                    })()}
+                                                  </td>
+                                                  <td className="py-1 px-2 text-center font-mono text-[12.5px] bg-white text-black border-r border-b border-black">
+                                                    {el.displayScore}
+                                                  </td>
+                                                  <td className="py-1 px-2 text-center text-[12.5px] bg-white text-black border-r border-b border-black">
+                                                    {el.label}
+                                                  </td>
+                                                  <td className="py-1 px-3 bg-white border-b border-black"></td>
+                                                </tr>
+                                              </React.Fragment>
+                                            );
+                                          })}
+
+                                          {!isKindergartenSummaryOnly && !item.isActivity && elements.length > 0 && (
+                                            <tr className="bg-white text-black font-bold">
+                                              <td
+                                                colSpan={3}
+                                                className={`py-1.5 px-3 text-center font-bold text-[12.5px] bg-white text-black border-r border-black ${isLastItem ? '' : 'border-b border-black'} break-words whitespace-normal leading-snug`}
+                                              >
+                                                สรุปเกณฑ์และระดับคุณภาพ
+                                              </td>
+                                              <td className={`py-1.5 px-2 text-center font-mono font-bold text-[12.5px] bg-white text-black border-r border-black ${isLastItem ? '' : 'border-b border-black'}`}>
+                                                {kEval?.overallDisplay || '-'}
+                                              </td>
+                                              <td className={`py-1.5 px-2 text-center font-bold text-[12.5px] bg-white text-black border-r border-black ${isLastItem ? '' : 'border-b border-black'}`}>
+                                                {kEval?.overallLabel || '-'}
+                                              </td>
+                                              <td className={`py-1.5 px-3 bg-white ${isLastItem ? '' : 'border-b border-black'}`}></td>
+                                            </tr>
+                                          )}
+                                        </React.Fragment>
+                                      );
+                                    })}
+
+                                    {isKindergartenSummaryOnly && (() => {
+                                      const allAspectLevels = (academicResults.rows as typeof academicResults.rows)
+                                        .filter(r => !r.isActivity && r.kindergartenEval?.overallLevel !== null)
+                                        .map(r => r.kindergartenEval!.overallLevel as number);
+
+                                      let grandAvgLevel: number | null = null;
+                                      if (allAspectLevels.length > 0) {
+                                        grandAvgLevel = Math.round(allAspectLevels.reduce((a, b) => a + b, 0) / allAspectLevels.length);
+                                      }
+                                      const firstEval = (academicResults.rows as typeof academicResults.rows).find(r => !r.isActivity && r.kindergartenEval)?.kindergartenEval;
+                                      const grandAvgLabel = firstEval ? firstEval.getRubricLabel(grandAvgLevel) : (grandAvgLevel ? (grandAvgLevel >= 3 ? 'ปฏิบัติได้' : grandAvgLevel === 2 ? 'ได้บางครั้ง' : 'ควรเสริม') : '-');
+                                      const grandAvgDisplay = grandAvgLevel !== null ? String(grandAvgLevel) : '-';
+
+                                      return (
+                                        <tr className="bg-white text-black font-bold">
+                                          <td
+                                            colSpan={3}
+                                            className="py-2.5 px-3 text-center font-bold text-[13px] bg-white text-black border-r border-black"
+                                          >
+                                            สรุปผลการประเมินพัฒนาการทุกด้าน
+                                          </td>
+                                          <td className="py-2.5 px-2 text-center font-mono font-bold text-[13px] bg-white text-black border-r border-black">
+                                            {grandAvgDisplay}
+                                          </td>
+                                          <td className="py-2.5 px-2 text-center font-bold text-[13px] bg-white text-black border-r border-black">
+                                            {grandAvgLabel}
+                                          </td>
+                                          <td className="py-2.5 px-3 text-center text-[12px] bg-white text-black">
+                                            {advisorName || '-'}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })()}
+                                  </>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <div className="border border-black rounded-lg overflow-hidden mb-3 bg-white">
+                            <table className="w-full text-left text-[13px] border-collapse bg-white text-black">
+                              <thead>
+                                <tr className="bg-white text-black font-bold text-center">
+                                  <th rowSpan={2} className="py-2 px-1 border-r border-b border-black w-7 bg-white text-black">ที่</th>
+                                  <th rowSpan={2} className="py-2 px-1.5 border-r border-b border-black w-16 bg-white text-black">รหัส</th>
+                                  <th rowSpan={2} className="py-2 px-2 border-r border-b border-black text-center bg-white text-black">
+                                    ด้านความสามารถผู้เรียน
+                                  </th>
+                                  <th colSpan={2} className="py-1.5 px-1.5 border-r border-b border-black text-center bg-white text-black">ภาคเรียนที่ 1</th>
+                                  <th colSpan={2} className="py-1.5 px-1.5 border-r border-b border-black text-center bg-white text-black">ภาคเรียนที่ 2</th>
+                                  <th colSpan={2} className="py-1.5 px-1.5 border-r border-b border-black text-center bg-white text-black">สรุปตลอดปี</th>
+                                  <th rowSpan={2} className="py-2 px-2 border-b border-black text-center bg-white text-black">ครูผู้ประเมิน</th>
+                                </tr>
+                                <tr className="bg-white text-black font-bold text-center text-[11.5px]">
+                                  <th className="py-1 px-1 border-r border-b border-black w-11 bg-white text-black">ระดับ</th>
+                                  <th className="py-1 px-1 border-r border-b border-black w-18 bg-white text-black">ผลประเมิน</th>
+                                  <th className="py-1 px-1 border-r border-b border-black w-11 bg-white text-black">ระดับ</th>
+                                  <th className="py-1 px-1 border-r border-b border-black w-18 bg-white text-black">ผลประเมิน</th>
+                                  <th className="py-1 px-1 border-r border-b border-black w-11 bg-white text-black">ระดับ</th>
+                                  <th className="py-1 px-1 border-r border-b border-black w-18 bg-white text-black">ผลประเมิน</th>
+                                </tr>
+                              </thead>
+                              <tbody className="bg-white text-black">
+                                {kPage.rows.length === 0 ? (
+                                  <tr className="bg-white">
+                                    <td colSpan={10} className="py-8 text-center text-black bg-white">
+                                      ยังไม่มีข้อมูลด้านความสามารถในระบบ
+                                    </td>
+                                  </tr>
+                                ) : (
+                                  <>
+                                    {(kPage.rows as typeof combinedAcademicResults.rows).map((item, idx) => {
+                                      const isLastItem = idx === kPage.rows.length - 1;
+                                      const elements1 = item.kEval1?.elements || [];
+                                      const elements2 = item.kEval2?.elements || [];
+                                      const baseElements = elements1.length >= elements2.length ? elements1 : elements2;
+                                      const hasComp = item.kEval1?.hasCompetency ?? item.kEval2?.hasCompetency ?? true;
+
+                                      return (
+                                        <React.Fragment key={item.subject.id || idx}>
+                                          <tr className={`bg-white text-black font-bold ${isKindergartenSummaryOnly ? 'h-11' : ''}`}>
+                                            <td className="py-1.5 px-1 text-center font-mono bg-white text-black border-r border-b border-black align-middle">
+                                              {kPage.startIndex + idx + 1}
+                                            </td>
+                                            <td className="py-1.5 px-1.5 text-center font-mono font-semibold bg-white text-black border-r border-b border-black align-middle">
+                                              {item.subject.code || '-'}
+                                            </td>
+                                            <td className="py-1.5 px-2 font-bold bg-white text-black border-r border-b border-black align-middle break-words whitespace-normal leading-snug">
+                                              {item.subject.name}
+                                            </td>
+                                            <td className="py-1.5 px-1 text-center font-mono font-bold bg-white text-black border-r border-b border-black align-middle">
+                                              {item.isActivity ? '-' : (isKindergartenSummaryOnly ? (item.kEval1?.overallDisplay || '-') : (baseElements.length > 0 ? '-' : (item.kEval1?.overallDisplay || '-')))}
+                                            </td>
+                                            <td className="py-1.5 px-1 text-center font-bold text-xs bg-white text-black border-r border-b border-black align-middle">
+                                              {item.isActivity ? item.total1 : (isKindergartenSummaryOnly ? (item.kEval1?.overallLabel || '-') : (baseElements.length > 0 ? '-' : (item.kEval1?.overallLabel || '-')))}
+                                            </td>
+                                            <td className="py-1.5 px-1 text-center font-mono font-bold bg-white text-black border-r border-b border-black align-middle">
+                                              {item.isActivity ? '-' : (isKindergartenSummaryOnly ? (item.kEval2?.overallDisplay || '-') : (baseElements.length > 0 ? '-' : (item.kEval2?.overallDisplay || '-')))}
+                                            </td>
+                                            <td className="py-1.5 px-1 text-center font-bold text-xs bg-white text-black border-r border-b border-black align-middle">
+                                              {item.isActivity ? item.total2 : (isKindergartenSummaryOnly ? (item.kEval2?.overallLabel || '-') : (baseElements.length > 0 ? '-' : (item.kEval2?.overallLabel || '-')))}
+                                            </td>
+                                            <td className="py-1.5 px-1 text-center font-mono font-bold bg-white text-black border-r border-b border-black align-middle">
+                                              {item.isActivity ? '-' : (isKindergartenSummaryOnly ? item.kCombinedDisplay : (baseElements.length > 0 ? '-' : item.kCombinedDisplay))}
+                                            </td>
+                                            <td className="py-1.5 px-1 text-center font-bold text-xs bg-white text-black border-r border-b border-black align-middle">
+                                              {item.isActivity ? item.avgTotal : (isKindergartenSummaryOnly ? item.kCombinedLabel : (baseElements.length > 0 ? '-' : item.kCombinedLabel))}
+                                            </td>
+                                            <td className="py-1.5 px-2 bg-white text-black font-medium text-xs border-b border-black align-middle break-words whitespace-normal leading-snug">
+                                              {item.teacherDisplayName}
+                                            </td>
+                                          </tr>
+
+                                          {!isKindergartenSummaryOnly && !item.isActivity && baseElements.map((el, eIdx) => {
+                                            const el1 = elements1[eIdx];
+                                            const el2 = elements2[eIdx];
+                                            const prevEl = eIdx > 0 ? baseElements[eIdx - 1] : null;
+                                            const showCompHeader = hasComp && el.competencyLabel && el.competencyLabel !== prevEl?.competencyLabel;
+
+                                            let combElScore: number | null = null;
+                                            if (el1?.score && el2?.score) {
+                                              combElScore = Math.round((el1.score + el2.score) / 2);
+                                            } else if (el1?.score) {
+                                              combElScore = el1.score;
+                                            } else if (el2?.score) {
+                                              combElScore = el2.score;
+                                            }
+                                            const combElLabel = item.kEval1?.getRubricLabel(combElScore) || '-';
+
+                                            return (
+                                              <React.Fragment key={el.id || eIdx}>
+                                                {showCompHeader && (
+                                                  <tr className="bg-white text-black">
+                                                    <td className="py-1 px-1 bg-white border-r border-b border-black"></td>
+                                                    <td className="py-1 px-1.5 bg-white border-r border-b border-black"></td>
+                                                    <td className="py-1 px-2 pl-4 font-semibold text-xs bg-white text-black border-r border-b border-black break-words whitespace-normal leading-snug">
+                                                      • {el.competencyLabel}
+                                                    </td>
+                                                    <td colSpan={6} className="py-1 px-1 bg-white border-r border-b border-black"></td>
+                                                    <td className="py-1 px-2 bg-white border-b border-black"></td>
+                                                  </tr>
+                                                )}
+                                                <tr className="bg-white text-black">
+                                                  <td className="py-1 px-1 bg-white border-r border-b border-black"></td>
+                                                  <td className="py-1 px-1.5 bg-white border-r border-b border-black"></td>
+                                                  <td className={`py-1 px-2 ${hasComp ? 'pl-6' : 'pl-4'} text-xs bg-white text-black border-r border-b border-black break-words whitespace-normal leading-snug`}>
+                                                    - องค์ประกอบที่ {eIdx + 1}{(() => {
+                                                      const clean = (el.name || '').replace(/^องค์ประกอบ(?:\/ประเด็น|ที่)?\s*\d+\s*[:\-]?\s*/, '').trim();
+                                                      return clean ? `: ${clean}` : (el.name && !el.name.includes('องค์ประกอบ') ? `: ${el.name}` : '');
+                                                    })()}
+                                                  </td>
+                                                  <td className="py-1 px-1 text-center font-mono text-xs bg-white text-black border-r border-b border-black">
+                                                    {el1?.displayScore || '-'}
+                                                  </td>
+                                                  <td className="py-1 px-1 text-center text-[11.5px] bg-white text-black border-r border-b border-black">
+                                                    {el1?.label || '-'}
+                                                  </td>
+                                                  <td className="py-1 px-1 text-center font-mono text-xs bg-white text-black border-r border-b border-black">
+                                                    {el2?.displayScore || '-'}
+                                                  </td>
+                                                  <td className="py-1 px-1 text-center text-[11.5px] bg-white text-black border-r border-b border-black">
+                                                    {el2?.label || '-'}
+                                                  </td>
+                                                  <td className="py-1 px-1 text-center font-mono text-xs bg-white text-black border-r border-b border-black">
+                                                    {combElScore !== null ? String(combElScore) : '-'}
+                                                  </td>
+                                                  <td className="py-1 px-1 text-center text-[11.5px] bg-white text-black border-r border-b border-black">
+                                                    {combElLabel}
+                                                  </td>
+                                                  <td className="py-1 px-2 bg-white border-b border-black"></td>
+                                                </tr>
+                                              </React.Fragment>
+                                            );
+                                          })}
+
+                                          {!isKindergartenSummaryOnly && !item.isActivity && baseElements.length > 0 && (
+                                            <tr className="bg-white text-black font-bold">
+                                              <td
+                                                colSpan={3}
+                                                className={`py-1.5 px-3 text-center font-bold text-xs bg-white text-black border-r border-black ${isLastItem ? '' : 'border-b border-black'} break-words whitespace-normal leading-snug`}
+                                              >
+                                                สรุปเกณฑ์และระดับคุณภาพ
+                                              </td>
+                                              <td className={`py-1.5 px-1 text-center font-mono font-bold text-xs bg-white text-black border-r border-black ${isLastItem ? '' : 'border-b border-black'}`}>
+                                                {item.kEval1?.overallDisplay || '-'}
+                                              </td>
+                                              <td className={`py-1.5 px-1 text-center font-bold text-xs bg-white text-black border-r border-black ${isLastItem ? '' : 'border-b border-black'}`}>
+                                                {item.kEval1?.overallLabel || '-'}
+                                              </td>
+                                              <td className={`py-1.5 px-1 text-center font-mono font-bold text-xs bg-white text-black border-r border-black ${isLastItem ? '' : 'border-b border-black'}`}>
+                                                {item.kEval2?.overallDisplay || '-'}
+                                              </td>
+                                              <td className={`py-1.5 px-1 text-center font-bold text-xs bg-white text-black border-r border-black ${isLastItem ? '' : 'border-b border-black'}`}>
+                                                {item.kEval2?.overallLabel || '-'}
+                                              </td>
+                                              <td className={`py-1.5 px-1 text-center font-mono font-bold text-xs bg-white text-black border-r border-black ${isLastItem ? '' : 'border-b border-black'}`}>
+                                                {item.kCombinedDisplay}
+                                              </td>
+                                              <td className={`py-1.5 px-1 text-center font-bold text-xs bg-white text-black border-r border-black ${isLastItem ? '' : 'border-b border-black'}`}>
+                                                {item.kCombinedLabel}
+                                              </td>
+                                              <td className={`py-1 px-2 bg-white ${isLastItem ? '' : 'border-b border-black'}`}></td>
+                                            </tr>
+                                          )}
+                                        </React.Fragment>
+                                      );
+                                    })}
+
+                                    {isKindergartenSummaryOnly && (() => {
+                                      const term1Levels = (combinedAcademicResults.rows as typeof combinedAcademicResults.rows)
+                                        .filter(r => !r.isActivity && r.kEval1?.overallLevel !== null)
+                                        .map(r => r.kEval1!.overallLevel as number);
+                                      const term2Levels = (combinedAcademicResults.rows as typeof combinedAcademicResults.rows)
+                                        .filter(r => !r.isActivity && r.kEval2?.overallLevel !== null)
+                                        .map(r => r.kEval2!.overallLevel as number);
+
+                                      let grandTerm1Level: number | null = null;
+                                      if (term1Levels.length > 0) {
+                                        grandTerm1Level = Math.round(term1Levels.reduce((a, b) => a + b, 0) / term1Levels.length);
+                                      }
+                                      let grandTerm2Level: number | null = null;
+                                      if (term2Levels.length > 0) {
+                                        grandTerm2Level = Math.round(term2Levels.reduce((a, b) => a + b, 0) / term2Levels.length);
+                                      }
+
+                                      let grandCombLevel: number | null = null;
+                                      if (grandTerm1Level !== null && grandTerm2Level !== null) {
+                                        grandCombLevel = Math.round((grandTerm1Level + grandTerm2Level) / 2);
+                                      } else if (grandTerm1Level !== null) {
+                                        grandCombLevel = grandTerm1Level;
+                                      } else if (grandTerm2Level !== null) {
+                                        grandCombLevel = grandTerm2Level;
+                                      }
+
+                                      const firstKEval = (combinedAcademicResults.rows as typeof combinedAcademicResults.rows).find(r => !r.isActivity && (r.kEval1 || r.kEval2));
+                                      const getLabel = (lvl: number | null) => {
+                                        if (lvl === null) return '-';
+                                        if (firstKEval?.kEval1) return firstKEval.kEval1.getRubricLabel(lvl);
+                                        if (firstKEval?.kEval2) return firstKEval.kEval2.getRubricLabel(lvl);
+                                        return lvl >= 3 ? 'ปฏิบัติได้' : lvl === 2 ? 'ได้บางครั้ง' : 'ควรเสริม';
+                                      };
+
+                                      const grandTerm1Label = getLabel(grandTerm1Level);
+                                      const grandTerm2Label = getLabel(grandTerm2Level);
+                                      const grandCombLabel = getLabel(grandCombLevel);
+
+                                      return (
+                                        <tr className="bg-white text-black font-bold">
+                                          <td
+                                            colSpan={3}
+                                            className="py-2.5 px-3 text-center font-bold text-xs bg-white text-black border-r border-black"
+                                          >
+                                            สรุปผลการประเมินพัฒนาการทุกด้าน
+                                          </td>
+                                          <td className="py-2.5 px-1 text-center font-mono font-bold text-xs bg-white text-black border-r border-black">
+                                            {grandTerm1Level !== null ? String(grandTerm1Level) : '-'}
+                                          </td>
+                                          <td className="py-2.5 px-1 text-center font-bold text-xs bg-white text-black border-r border-black">
+                                            {grandTerm1Label}
+                                          </td>
+                                          <td className="py-2.5 px-1 text-center font-mono font-bold text-xs bg-white text-black border-r border-black">
+                                            {grandTerm2Level !== null ? String(grandTerm2Level) : '-'}
+                                          </td>
+                                          <td className="py-2.5 px-1 text-center font-bold text-xs bg-white text-black border-r border-black">
+                                            {grandTerm2Label}
+                                          </td>
+                                          <td className="py-2.5 px-1 text-center font-mono font-bold text-xs bg-white text-black border-r border-black">
+                                            {grandCombLevel !== null ? String(grandCombLevel) : '-'}
+                                          </td>
+                                          <td className="py-2.5 px-1 text-center font-bold text-xs bg-white text-black border-r border-black">
+                                            {grandCombLabel}
+                                          </td>
+                                          <td className="py-2.5 px-2 text-center text-xs bg-white text-black">
+                                            {advisorName || '-'}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })()}
+                                  </>
+                                )}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Bottom Signatures: Teacher & Director (spaced 1.6cm from bottom edge) */}
+                      <div className="pt-4 mt-auto mb-0 grid grid-cols-2 gap-8 text-sm text-center text-black">
+                        {renderAdvisorSignatureBlock(true, false, true)}
+                        {renderDirectorSignatureBlock(true, true)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div
+                  className="a4-pp6-page bg-white border border-slate-300 rounded-lg py-6 sm:py-8 max-w-[210mm] min-h-[297mm] mx-auto text-black shadow-xl print:border-none print:shadow-none print:m-0 print:break-before-page flex flex-col justify-between"
+                  style={{ width: '210mm', maxWidth: '210mm', paddingLeft: '20mm', paddingRight: '15mm', color: '#000000' }}
+                >
+                  <div className="space-y-6">
+                    {renderPP6Header(undefined, undefined, isCombinedAcademic)}
+
+                    {/* Student Info Bar: รหัสประจำตัว, ชื่อ-นามสกุล, เลขที่ (สีขาวทางการ) */}
+                    <div className="flex flex-wrap items-center justify-between text-xs bg-white p-2.5 rounded-lg border border-slate-800 gap-4 mb-5 text-black">
+                      <div>
+                        <span className="font-bold text-black">รหัสประจำตัว: </span>
+                        <span className="font-semibold text-black font-mono">{student.studentCode || '-'}</span>
+                      </div>
+                      <div>
+                        <span className="font-bold text-black">ชื่อ-นามสกุล: </span>
+                        <span className="font-semibold text-black">{student.prefix}{student.firstName} {student.lastName}</span>
+                      </div>
+                      <div>
+                        <span className="font-bold text-black">เลขที่: </span>
+                        <span className="font-semibold text-black">{student.rollNumber || '-'}</span>
+                      </div>
+                    </div>
+
+                    {/* Subject Score Table */}
+                    {!isCombinedAcademic ? (
+                      <div className="border border-slate-800 rounded-lg overflow-hidden mb-5 bg-white">
+                        <table className="w-full text-left text-[11px] border-collapse bg-white">
+                          <thead>
+                            <tr className="bg-white text-black font-bold text-center">
+                              <th className="py-2 px-2 border-r border-b border-slate-800 w-10 text-black">ที่</th>
+                              <th className="py-2 px-2 border-r border-b border-slate-800 w-24 text-black">รหัสวิชา</th>
+                              <th className="py-2 px-3 border-r border-b border-slate-800 text-center text-black">รายวิชา</th>
+                              <th className="py-2 px-2 border-r border-b border-slate-800 w-16 text-black">ระหว่างภาค</th>
+                              <th className="py-2 px-2 border-r border-b border-slate-800 w-16 text-black">ปลายภาค</th>
+                              <th className="py-2 px-2 border-r border-b border-slate-800 w-16 bg-white text-black font-bold">รวม</th>
+                              {!isPrimaryGrade && (
+                                <th className="py-2 px-2 border-r border-b border-slate-800 w-16 bg-white text-black font-black">เกรด</th>
+                              )}
+                              <th className="py-2 px-3 border-b border-slate-800 text-black">ครูผู้สอนในรายวิชา</th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white">
+                            {academicResults.rows.length === 0 ? (
+                              <tr>
+                                <td colSpan={isPrimaryGrade ? 7 : 8} className={`py-8 text-center text-black bg-white ${!isPrimaryGrade ? 'border-b border-slate-800' : ''}`}>
+                                  ยังไม่มีข้อมูลรายวิชาในระบบ
+                                </td>
+                              </tr>
+                            ) : (
+                              academicResults.rows.map((item, idx) => {
+                                const hasBottomBorder = !isPrimaryGrade || idx < academicResults.rows.length - 1;
+                                const rowBorderB = hasBottomBorder ? 'border-b border-slate-800' : '';
+                                return (
+                                  <tr key={item.subject.id} className="bg-white">
+                                    <td className={`py-1.5 px-2 text-center font-mono text-black border-r border-slate-800 ${rowBorderB}`}>
+                                      {idx + 1}
+                                    </td>
+                                    <td className={`py-1.5 px-2 text-center font-mono font-semibold text-black border-r border-slate-800 ${rowBorderB}`}>
+                                      {item.subject.code || '-'}
+                                    </td>
+                                    <td className={`py-1.5 px-3 font-medium text-black border-r border-slate-800 ${rowBorderB}`}>
+                                      {item.subject.name}
+                                    </td>
+                                    <td className={`py-1.5 px-2 text-center font-mono text-black border-r border-slate-800 ${rowBorderB}`}>
+                                      {item.coursework}
+                                    </td>
+                                    <td className={`py-1.5 px-2 text-center font-mono text-black border-r border-slate-800 ${rowBorderB}`}>
+                                      {item.exam}
+                                    </td>
+                                    <td className={`py-1.5 px-2 text-center ${item.isActivity ? 'font-sans' : 'font-mono'} font-bold text-black bg-white border-r border-slate-800 ${rowBorderB}`}>
+                                      {item.total}
+                                    </td>
+                                    {!isPrimaryGrade && (
+                                      <td className={`py-1.5 px-2 text-center font-bold text-xs border-r border-slate-800 bg-white text-black ${rowBorderB}`}>
+                                        {item.grade}
+                                      </td>
+                                    )}
+                                    <td className={`py-1.5 px-3 text-black font-medium ${rowBorderB}`}>
+                                      {item.teacherDisplayName || item.subject.teacherName || advisorName || '-'}
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            )}
+                            {!isPrimaryGrade && (
+                              <tr className="bg-white font-bold text-black text-xs">
+                                <td colSpan={6} className="py-2 px-3 text-center border-r border-slate-800 text-black">
+                                  ผลการเรียนเฉลี่ยรวม (GPA)
+                                </td>
+                                <td colSpan={2} className="py-2 px-2 text-center text-sm font-black text-black bg-white">
+                                  {academicResults.gpa}
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      /* Combined 2-Semester Subject Score Table (รวม 2 ภาคเรียน) */
+                      <div className="border border-slate-800 rounded-lg overflow-hidden mb-5 bg-white">
+                        {isPrimaryGrade ? (
+                          <table className="w-full text-left text-[11px] border-collapse bg-white">
+                            <thead>
+                              <tr className="bg-white text-black font-bold text-center">
+                                <th rowSpan={2} className="py-2 px-1 border-r border-b border-slate-800 w-7 text-black">ที่</th>
+                                <th rowSpan={2} className="py-2 px-1.5 border-r border-b border-slate-800 w-16 text-black">รหัสวิชา</th>
+                                <th rowSpan={2} className="py-2 px-2 border-r border-b border-slate-800 text-center text-black">รายวิชา</th>
+                                <th colSpan={2} className="py-1.5 px-1.5 border-r border-b border-slate-800 text-center text-black">ภาคเรียนที่ 1</th>
+                                <th colSpan={2} className="py-1.5 px-1.5 border-r border-b border-slate-800 text-center text-black">ภาคเรียนที่ 2</th>
+                                <th rowSpan={2} className="py-2 px-1.5 border-r border-b border-slate-800 w-16 text-black">รวมคะแนน</th>
+                                <th rowSpan={2} className="py-2 px-1 border-b border-slate-800 w-10 text-black">เกรด</th>
+                              </tr>
+                              <tr className="bg-white text-black font-bold text-center text-[10px]">
+                                <th className="py-1 px-1 border-r border-b border-slate-800 w-14 text-black">คะแนน</th>
+                                <th className="py-1 px-1.5 border-r border-b border-slate-800 text-black">ครูผู้สอน</th>
+                                <th className="py-1 px-1 border-r border-b border-slate-800 w-14 text-black">คะแนน</th>
+                                <th className="py-1 px-1.5 border-r border-b border-slate-800 text-black">ครูผู้สอน</th>
+                              </tr>
+                            </thead>
+                            <tbody className="bg-white">
+                              {combinedAcademicResults.rows.length === 0 ? (
+                                <tr>
+                                  <td colSpan={9} className="py-8 text-center text-black bg-white border-b border-slate-800">
+                                    ยังไม่มีข้อมูลรายวิชาในระบบ
+                                  </td>
+                                </tr>
+                              ) : (
+                                combinedAcademicResults.rows.map((item, idx) => (
+                                  <tr key={item.subject.id || idx} className="bg-white">
+                                    <td className="py-1.5 px-1 text-center font-mono text-black border-r border-b border-slate-800">
+                                      {idx + 1}
+                                    </td>
+                                    <td className="py-1.5 px-1.5 text-center font-mono font-semibold text-black border-r border-b border-slate-800">
+                                      {item.subject.code || '-'}
+                                    </td>
+                                    <td className="py-1.5 px-2 font-medium text-black border-r border-b border-slate-800">
+                                      {item.subject.name}
+                                    </td>
+                                    <td className={`py-1.5 px-1 text-center ${item.isActivity ? 'font-sans font-bold' : 'font-mono'} text-black border-r border-b border-slate-800`}>
+                                      {item.total1}
+                                    </td>
+                                    <td className="py-1.5 px-1.5 text-black font-medium text-[10px] border-r border-b border-slate-800">
+                                      {item.teacher1DisplayName}
+                                    </td>
+                                    <td className={`py-1.5 px-1 text-center ${item.isActivity ? 'font-sans font-bold' : 'font-mono'} text-black border-r border-b border-slate-800`}>
+                                      {item.total2}
+                                    </td>
+                                    <td className="py-1.5 px-1.5 text-black font-medium text-[10px] border-r border-b border-slate-800">
+                                      {item.teacher2DisplayName}
+                                    </td>
+                                    {item.isActivity ? (
+                                      <td colSpan={2} className="py-1.5 px-1 text-center font-sans font-bold text-black border-b border-slate-800 bg-white">
+                                        {item.avgTotal}
+                                      </td>
+                                    ) : (
+                                      <>
+                                        <td className="py-1.5 px-1 text-center font-mono font-bold text-black border-r border-b border-slate-800 bg-white">
+                                          {item.avgTotal}
+                                        </td>
+                                        <td className="py-1.5 px-1 text-center font-black text-xs text-black border-b border-slate-800 bg-white">
+                                          {item.combinedGrade}
+                                        </td>
+                                      </>
+                                    )}
+                                  </tr>
+                                ))
+                              )}
+                              <tr className="bg-white font-bold text-black text-xs">
+                                <td colSpan={7} className="py-2 px-3 text-center border-r border-slate-800 text-black font-bold">
+                                  เกรดเฉลี่ย
+                                </td>
+                                <td colSpan={2} className="py-2 px-2 text-center text-sm font-black text-black bg-white">
+                                  {combinedAcademicResults.gpaCombined}
+                                </td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        ) : (
+                          <table className="w-full text-left text-[11px] border-collapse bg-white">
+                            <thead>
+                              <tr className="bg-white text-black font-bold text-center">
+                                <th rowSpan={2} className="py-2 px-1.5 border-r border-b border-slate-800 w-8 text-black">ที่</th>
+                                <th rowSpan={2} className="py-2 px-2 border-r border-b border-slate-800 w-20 text-black">รหัสวิชา</th>
+                                <th rowSpan={2} className="py-2 px-2.5 border-r border-b border-slate-800 text-center text-black">รายวิชา</th>
+                                <th colSpan={2} className="py-1.5 px-2 border-r border-b border-slate-800 text-center text-black">ภาคเรียนที่ 1</th>
+                                <th colSpan={2} className="py-1.5 px-2 border-r border-b border-slate-800 text-center text-black">ภาคเรียนที่ 2</th>
+                                <th colSpan={2} className="py-1.5 px-2 border-r border-b border-slate-800 text-center text-black">รวม 2 ภาคเรียน</th>
+                                <th rowSpan={2} className="py-2 px-2.5 border-b border-slate-800 text-center text-black">ครูผู้สอนในรายวิชา</th>
+                              </tr>
+                              <tr className="bg-white text-black font-bold text-center text-[10px]">
+                                <th className="py-1 px-1.5 border-r border-b border-slate-800 w-12 text-black">คะแนน</th>
+                                <th className="py-1 px-1.5 border-r border-b border-slate-800 w-11 text-black">เกรด</th>
+                                <th className="py-1 px-1.5 border-r border-b border-slate-800 w-12 text-black">คะแนน</th>
+                                <th className="py-1 px-1.5 border-r border-b border-slate-800 w-11 text-black">เกรด</th>
+                                <th className="py-1 px-1.5 border-r border-b border-slate-800 w-14 text-black">คะแนนเฉลี่ย</th>
+                                <th className="py-1 px-1.5 border-r border-b border-slate-800 w-11 text-black">เกรด</th>
+                              </tr>
+                            </thead>
+                            <tbody className="bg-white">
+                              {combinedAcademicResults.rows.length === 0 ? (
+                                <tr>
+                                  <td colSpan={10} className="py-8 text-center text-black bg-white border-b border-slate-800">
+                                    ยังไม่มีข้อมูลรายวิชาในระบบ
+                                  </td>
+                                </tr>
+                              ) : (
+                                combinedAcademicResults.rows.map((item, idx) => (
+                                  <tr key={item.subject.id || idx} className="bg-white">
+                                    <td className="py-1.5 px-1.5 text-center font-mono text-black border-r border-b border-slate-800">
+                                      {idx + 1}
+                                    </td>
+                                    <td className="py-1.5 px-2 text-center font-mono font-semibold text-black border-r border-b border-slate-800">
+                                      {item.subject.code || '-'}
+                                    </td>
+                                    <td className="py-1.5 px-2.5 font-medium text-black border-r border-b border-slate-800">
+                                      {item.subject.name}
+                                    </td>
+                                    <td className={`py-1.5 px-1.5 text-center ${item.isActivity ? 'font-sans font-bold' : 'font-mono'} text-black border-r border-b border-slate-800`}>
+                                      {item.total1}
+                                    </td>
+                                    <td className="py-1.5 px-1.5 text-center font-bold text-black border-r border-b border-slate-800">
+                                      {item.grade1}
+                                    </td>
+                                    <td className={`py-1.5 px-1.5 text-center ${item.isActivity ? 'font-sans font-bold' : 'font-mono'} text-black border-r border-b border-slate-800`}>
+                                      {item.total2}
+                                    </td>
+                                    <td className="py-1.5 px-1.5 text-center font-bold text-black border-r border-b border-slate-800">
+                                      {item.grade2}
+                                    </td>
+                                    {item.isActivity ? (
+                                      <td colSpan={2} className="py-1.5 px-1.5 text-center font-sans font-bold text-black border-r border-b border-slate-800 bg-white">
+                                        {item.avgTotal}
+                                      </td>
+                                    ) : (
+                                      <>
+                                        <td className="py-1.5 px-1.5 text-center font-mono font-bold text-black border-r border-b border-slate-800 bg-white">
+                                          {item.avgTotal}
+                                        </td>
+                                        <td className="py-1.5 px-1.5 text-center font-black text-xs text-black border-r border-b border-slate-800 bg-white">
+                                          {item.combinedGrade}
+                                        </td>
+                                      </>
+                                    )}
+                                    <td className="py-1.5 px-2.5 text-black font-medium border-b border-slate-800">
+                                      {item.teacherDisplayName}
+                                    </td>
+                                  </tr>
+                                ))
+                              )}
+                              <tr className="bg-white font-bold text-black text-xs">
+                                <td colSpan={3} className="py-2 px-3 text-center border-r border-slate-800 text-black">
+                                  ผลการเรียนเฉลี่ยรวม (GPA)
+                                </td>
+                                <td colSpan={2} className="py-2 px-2 text-center font-black text-black border-r border-slate-800 bg-white">
+                                  {combinedAcademicResults.gpa1}
+                                </td>
+                                <td colSpan={2} className="py-2 px-2 text-center font-black text-black border-r border-slate-800 bg-white">
+                                  {combinedAcademicResults.gpa2}
+                                </td>
+                                <td colSpan={2} className="py-2 px-2 text-center text-sm font-black text-black border-r border-slate-800 bg-white">
+                                  {combinedAcademicResults.gpaCombined}
+                                </td>
+                                <td className="py-2 px-2 bg-white"></td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                    )}
+
+                  </div>
+
+                  {/* Bottom Signatures: Teacher & Director */}
+                  <div className="pt-6 mt-8 mb-[2in] grid grid-cols-2 gap-8 text-xs text-center print:mb-[2in] text-black">
+                    {renderAdvisorSignatureBlock(true)}
+                    {renderDirectorSignatureBlock(true)}
+                  </div>
+
+                </div>
+              )}
             </div>
           )}
 
@@ -2687,7 +3530,7 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
 
               <div
                 className="a4-pp6-page bg-white border border-slate-300 rounded-lg py-6 sm:py-8 max-w-[210mm] min-h-[297mm] mx-auto text-black shadow-xl print:border-none print:shadow-none print:m-0 print:break-before-page flex flex-col justify-between"
-                style={{ width: '210mm', maxWidth: '210mm', paddingLeft: '20mm', paddingRight: '15mm', color: '#000000' }}
+                style={{ width: '210mm', maxWidth: '210mm', paddingLeft: isKindergartenGrade ? '13mm' : '20mm', paddingRight: '15mm', color: '#000000' }}
               >
                 
                 <div className={isCombinedAttendance ? 'space-y-3' : 'space-y-6'}>
@@ -2899,11 +3742,8 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
                 </div>
 
                 {/* Bottom Signature: Class Advisor */}
-                <div className={`${isCombinedAttendance ? 'pt-4 mb-2 print:mb-2' : 'pt-6 mb-[2.5in] print:mb-[2.5in]'} text-xs text-center max-w-sm mx-auto space-y-1 text-black`} style={{ color: '#000000' }}>
-                  <p className="text-black font-medium" style={{ color: '#000000' }}>ลงชื่อ ..............................................................</p>
-                  <p className="font-normal text-black" style={{ color: '#000000' }}>({advisorName || '......................................................'})</p>
-                  <p className="font-semibold text-[11px] text-black" style={{ color: '#000000' }}>ครูประจำชั้น</p>
-                  <p className="text-[10px] font-medium text-black" style={{ color: '#000000' }}>วันที่ ...... เดือน ........................ พ.ศ. ...........</p>
+                <div className={`${isCombinedAttendance ? 'pt-4 mb-2 print:mb-2' : 'pt-6 mb-[2.5in] print:mb-[2.5in]'} text-xs text-center max-w-sm mx-auto text-black`}>
+                  {renderAdvisorSignatureBlock(true)}
                 </div>
 
               </div>
@@ -2948,7 +3788,7 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
 
               <div
                 className={`a4-pp6-page bg-white border border-slate-300 rounded-lg ${isCombinedHealth ? 'pt-6 sm:pt-8' : 'py-6 sm:py-8'} max-w-[210mm] min-h-[297mm] mx-auto text-black shadow-xl print:border-none print:shadow-none print:m-0 print:break-before-page flex flex-col justify-between`}
-                style={{ width: '210mm', maxWidth: '210mm', paddingLeft: '20mm', paddingRight: '15mm', ...(isCombinedHealth ? { paddingBottom: '2.3cm' } : {}), color: '#000000' }}
+                style={{ width: '210mm', maxWidth: '210mm', paddingLeft: isKindergartenGrade ? '13mm' : '20mm', paddingRight: '15mm', ...(isCombinedHealth ? { paddingBottom: '2.3cm' } : {}), color: '#000000' }}
               >
                 <div className={isCombinedHealth ? 'space-y-4' : 'space-y-6'}>
                   {renderPP6Header(undefined, 'บันทึกข้อมูลสุขภาพ', isCombinedHealth)}
@@ -3293,11 +4133,8 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
                 </div>
 
                 {/* Bottom Signature: Class Advisor */}
-                <div className={`${isCombinedHealth ? 'pt-4 mb-0 print:mb-0' : 'pt-6 mb-[3in] print:mb-[3in]'} text-xs text-center max-w-sm mx-auto space-y-1 text-black`} style={{ color: '#000000' }}>
-                  <p className="text-black font-medium">ลงชื่อ ..............................................................</p>
-                  <p className="font-normal text-black">({advisorName || '......................................................'})</p>
-                  <p className="text-black font-semibold text-[11px]">ครูประจำชั้น</p>
-                  <p className={`text-black font-medium text-[10px] ${isCombinedHealth ? 'leading-none' : ''}`}>วันที่ ...... เดือน ........................ พ.ศ. ...........</p>
+                <div className={`${isCombinedHealth ? 'pt-4 mb-0 print:mb-0' : 'pt-6 mb-[3in] print:mb-[3in]'} text-xs text-center max-w-sm mx-auto text-black`}>
+                  {renderAdvisorSignatureBlock(true, isCombinedHealth)}
                 </div>
 
               </div>
@@ -3308,7 +4145,7 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
           {(activeTab === 'comments' || activeTab === 'all') && (
             <div
               className="a4-pp6-page bg-white border border-slate-300 rounded-lg pt-6 sm:pt-8 max-w-[210mm] min-h-[297mm] mx-auto text-slate-900 shadow-xl print:border-none print:shadow-none print:m-0 print:break-before-page flex flex-col justify-between"
-              style={{ width: '210mm', maxWidth: '210mm', paddingLeft: '20mm', paddingRight: '15mm', paddingBottom: '2.3cm' }}
+              style={{ width: '210mm', maxWidth: '210mm', paddingLeft: isKindergartenGrade ? '13mm' : '20mm', paddingRight: '15mm', paddingBottom: '2.3cm' }}
             >
               
               <div className="space-y-4">
@@ -3466,23 +4303,8 @@ export const PhorPhor6Modal: React.FC<PhorPhor6ModalProps> = ({
 
               {/* Bottom Signatures: 2 Columns (Left: Teacher, Right: Parent) - 2.3cm from bottom edge */}
               <div className="pt-4 grid grid-cols-2 gap-8 text-xs text-center mt-2 mb-0 text-black">
-                {/* ฝั่งซ้าย: ครูประจำชั้น */}
-                <div className="space-y-1 text-black">
-                  <p className="text-black">ลงชื่อ ..............................................................</p>
-                  <p className="font-normal text-black">({advisorName || '......................................................'})</p>
-                  <p className="text-black font-semibold text-[11px]">ครูประจำชั้น</p>
-                  <p className="text-black text-[10px] leading-none">วันที่ ...... เดือน ........................ พ.ศ. ...........</p>
-                </div>
-
-                {/* ฝั่งขวา: ผู้ปกครอง */}
-                <div className="space-y-1 text-black">
-                  <p className="text-black">ลงชื่อ ..............................................................</p>
-                  <p className="font-normal text-black">
-                    ({student.guardianName || student.fatherName || student.motherName || '......................................................'})
-                  </p>
-                  <p className="text-black font-semibold text-[11px]">ผู้ปกครองนักเรียน</p>
-                  <p className="text-black text-[10px] leading-none">วันที่ ...... เดือน ........................ พ.ศ. ...........</p>
-                </div>
+                {renderAdvisorSignatureBlock(true, true)}
+                {renderGuardianSignatureBlock(true)}
               </div>
 
             </div>

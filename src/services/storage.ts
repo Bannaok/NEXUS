@@ -3062,6 +3062,7 @@ export const StorageService = {
         role: found.role || 'member',
         assignedGrade: found.gradeLevel,
         assignedRoom: found.room || (found.gradeLevel ? '1' : undefined),
+        assignedClasses: found.assignedClasses,
         position: found.position,
         learningGroup: found.learningGroup,
         avatarUrl: found.avatarUrl,

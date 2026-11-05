@@ -373,6 +373,38 @@ export const ThreeReportsModal: React.FC<ThreeReportsModalProps> = ({
     ) || null;
   }, [personnel, selectedAcademicHeadId]);
 
+  // Editable Signatures State (Allows directly editing the name in parentheses and position below it on preview)
+  const [signAdvisorName, setSignAdvisorName] = useState<string>('');
+  const [signAdvisorPosition, setSignAdvisorPosition] = useState<string>('ครูประจำชั้น');
+  const [signAcademicHeadName, setSignAcademicHeadName] = useState<string>('');
+  const [signAcademicHeadPosition, setSignAcademicHeadPosition] = useState<string>('หัวหน้าฝ่ายวิชาการ');
+  const [signDirectorName, setSignDirectorName] = useState<string>('');
+  const [signDirectorPosition, setSignDirectorPosition] = useState<string>('');
+
+  useEffect(() => {
+    setSignAdvisorName(
+      selectedAdvisor
+        ? `${selectedAdvisor.prefix || ''}${selectedAdvisor.firstName || ''} ${selectedAdvisor.lastName || ''}`.trim()
+        : '................................................'
+    );
+  }, [selectedAdvisor]);
+
+  useEffect(() => {
+    setSignAcademicHeadName(
+      selectedAcademicHead
+        ? `${selectedAcademicHead.prefix || ''}${selectedAcademicHead.firstName || ''} ${selectedAcademicHead.lastName || ''}`.trim()
+        : '................................................'
+    );
+  }, [selectedAcademicHead]);
+
+  useEffect(() => {
+    setSignDirectorName(directorDisplayName || '................................................');
+  }, [directorDisplayName]);
+
+  useEffect(() => {
+    setSignDirectorPosition(directorPosition || 'ผู้อำนวยการโรงเรียนบ้านนาออก');
+  }, [directorPosition]);
+
   const previewContainerRef = useRef<HTMLDivElement>(null);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
 
@@ -439,31 +471,109 @@ export const ThreeReportsModal: React.FC<ThreeReportsModalProps> = ({
     return classStudents.find(s => s.id === selectedStudentId) || classStudents[0] || null;
   }, [classStudents, selectedStudentId]);
 
-  // Signatures Component for A4 Pages
+  // Signatures Component for A4 Pages (Directly editable by clicking and typing on preview)
   const renderSignatures = () => (
     <div className="grid grid-cols-3 gap-2 text-center text-[11.5px] text-black" style={{ marginTop: '2.1cm' }}>
-      <div className="space-y-1">
-        <p className="text-black">ลงชื่อ ..................................................</p>
-        <p className="font-normal text-black">
-          ({selectedAdvisor ? `${selectedAdvisor.prefix || ''}${selectedAdvisor.firstName || ''} ${selectedAdvisor.lastName || ''}`.trim() : '................................................'})
-        </p>
-        <p className="text-black text-[10.5px]">ครูประจำชั้น</p>
+      {/* Advisor */}
+      <div className="space-y-1 text-center">
+        <p className="text-black text-center">ลงชื่อ ..................................................</p>
+        <div className="space-y-1 text-center">
+          <div className="flex items-center justify-center font-normal text-black text-[11px] leading-tight">
+            <span className="select-none font-normal">(</span>
+            <input
+              type="text"
+              value={signAdvisorName}
+              onChange={(e) => setSignAdvisorName(e.target.value)}
+              onFocus={(e) => {
+                if (/^\.+$/.test(e.target.value.trim())) {
+                  e.target.select();
+                }
+              }}
+              placeholder="................................................"
+              className="bg-transparent text-center border-b border-transparent hover:border-slate-400 focus:border-teal-600 focus:bg-teal-50/40 focus:outline-none px-1 py-0 text-black text-[11px] leading-tight min-w-[140px] max-w-[200px] transition-colors cursor-text print:border-none print:bg-transparent"
+              title="คลิกเพื่อแก้ไขชื่อ"
+            />
+            <span className="select-none font-normal">)</span>
+          </div>
+          <div className="w-full text-center">
+            <input
+              type="text"
+              value={signAdvisorPosition}
+              onChange={(e) => setSignAdvisorPosition(e.target.value)}
+              placeholder="ตำแหน่ง"
+              className="bg-transparent text-center border-b border-transparent hover:border-slate-400 focus:border-teal-600 focus:bg-teal-50/40 focus:outline-none px-1 py-0 leading-tight text-[10.5px] text-black w-full mx-auto block transition-colors cursor-text print:border-none print:bg-transparent"
+              title="คลิกเพื่อแก้ไขตำแหน่ง"
+            />
+          </div>
+        </div>
       </div>
 
-      <div className="space-y-1">
-        <p className="text-black">ลงชื่อ ..................................................</p>
-        <p className="font-normal text-black">
-          ({selectedAcademicHead ? `${selectedAcademicHead.prefix || ''}${selectedAcademicHead.firstName || ''} ${selectedAcademicHead.lastName || ''}`.trim() : '................................................'})
-        </p>
-        <p className="text-black text-[10.5px]">หัวหน้าฝ่ายวิชาการ</p>
+      {/* Academic Head */}
+      <div className="space-y-1 text-center">
+        <p className="text-black text-center">ลงชื่อ ..................................................</p>
+        <div className="space-y-1 text-center">
+          <div className="flex items-center justify-center font-normal text-black text-[11px] leading-tight">
+            <span className="select-none font-normal">(</span>
+            <input
+              type="text"
+              value={signAcademicHeadName}
+              onChange={(e) => setSignAcademicHeadName(e.target.value)}
+              onFocus={(e) => {
+                if (/^\.+$/.test(e.target.value.trim())) {
+                  e.target.select();
+                }
+              }}
+              placeholder="................................................"
+              className="bg-transparent text-center border-b border-transparent hover:border-slate-400 focus:border-teal-600 focus:bg-teal-50/40 focus:outline-none px-1 py-0 text-black text-[11px] leading-tight min-w-[140px] max-w-[200px] transition-colors cursor-text print:border-none print:bg-transparent"
+              title="คลิกเพื่อแก้ไขชื่อ"
+            />
+            <span className="select-none font-normal">)</span>
+          </div>
+          <div className="w-full text-center">
+            <input
+              type="text"
+              value={signAcademicHeadPosition}
+              onChange={(e) => setSignAcademicHeadPosition(e.target.value)}
+              placeholder="ตำแหน่ง"
+              className="bg-transparent text-center border-b border-transparent hover:border-slate-400 focus:border-teal-600 focus:bg-teal-50/40 focus:outline-none px-1 py-0 leading-tight text-[10.5px] text-black w-full mx-auto block transition-colors cursor-text print:border-none print:bg-transparent"
+              title="คลิกเพื่อแก้ไขตำแหน่ง"
+            />
+          </div>
+        </div>
       </div>
 
-      <div className="space-y-1">
-        <p className="text-black">ลงชื่อ ..................................................</p>
-        <p className="font-normal text-black">
-          ({directorDisplayName})
-        </p>
-        <p className="text-black text-[10.5px]">{directorPosition || 'ผู้อำนวยการโรงเรียนบ้านนาออก'}</p>
+      {/* Director */}
+      <div className="space-y-1 text-center">
+        <p className="text-black text-center">ลงชื่อ ..................................................</p>
+        <div className="space-y-1 text-center">
+          <div className="flex items-center justify-center font-normal text-black text-[11px] leading-tight">
+            <span className="select-none font-normal">(</span>
+            <input
+              type="text"
+              value={signDirectorName}
+              onChange={(e) => setSignDirectorName(e.target.value)}
+              onFocus={(e) => {
+                if (/^\.+$/.test(e.target.value.trim())) {
+                  e.target.select();
+                }
+              }}
+              placeholder="................................................"
+              className="bg-transparent text-center border-b border-transparent hover:border-slate-400 focus:border-teal-600 focus:bg-teal-50/40 focus:outline-none px-1 py-0 text-black text-[11px] leading-tight min-w-[140px] max-w-[200px] transition-colors cursor-text print:border-none print:bg-transparent"
+              title="คลิกเพื่อแก้ไขชื่อ"
+            />
+            <span className="select-none font-normal">)</span>
+          </div>
+          <div className="w-full text-center">
+            <input
+              type="text"
+              value={signDirectorPosition}
+              onChange={(e) => setSignDirectorPosition(e.target.value)}
+              placeholder="ตำแหน่ง"
+              className="bg-transparent text-center border-b border-transparent hover:border-slate-400 focus:border-teal-600 focus:bg-teal-50/40 focus:outline-none px-1 py-0 leading-tight text-[10.5px] text-black w-full mx-auto block transition-colors cursor-text print:border-none print:bg-transparent"
+              title="คลิกเพื่อแก้ไขตำแหน่ง"
+            />
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -497,6 +607,9 @@ export const ThreeReportsModal: React.FC<ThreeReportsModalProps> = ({
   );
 
   // Render a Single Reading/Writing Table (Reading, Thinking, or Writing)
+  const isKindergartenGrade = ['อ.1', 'อ.2', 'อ.3'].includes(grade);
+  const sheetLeftPadding = isKindergartenGrade ? '13mm' : '20mm';
+
   const renderSingleRWTableSheet = (table: AssessmentTableConfig, tableIndex: number, pageNum: number) => {
     const tableType = getStudentTableType(table);
     const maxScore = table.indicators.reduce((sum, ind) => sum + (ind.maxScore || 0), 0);
@@ -505,7 +618,7 @@ export const ThreeReportsModal: React.FC<ThreeReportsModalProps> = ({
       <div 
         key={table.id}
         className={`${reportOrientation === 'landscape' ? 'a4-landscape-paper min-h-[210mm]' : 'a4-portrait-paper min-h-[297mm]'} bg-white border border-slate-300 shadow-xl rounded-sm py-4 sm:py-5 mx-auto text-black relative transition-all`}
-        style={{ width: reportOrientation === 'landscape' ? '297mm' : '210mm', maxWidth: reportOrientation === 'landscape' ? '297mm' : '210mm', paddingLeft: '20mm', paddingRight: '10mm' }}
+        style={{ width: reportOrientation === 'landscape' ? '297mm' : '210mm', maxWidth: reportOrientation === 'landscape' ? '297mm' : '210mm', paddingLeft: sheetLeftPadding, paddingRight: '10mm' }}
       >
         {renderA4Header(`แบบประเมินการอ่าน คิดวิเคราะห์ และเขียน (ตารางที่ ${tableIndex}: ${table.title})`)}
 
@@ -650,7 +763,7 @@ export const ThreeReportsModal: React.FC<ThreeReportsModalProps> = ({
     return (
       <div 
         className={`${reportOrientation === 'landscape' ? 'a4-landscape-paper min-h-[210mm]' : 'a4-portrait-paper min-h-[297mm]'} bg-white border border-slate-300 shadow-xl rounded-sm py-4 sm:py-5 mx-auto text-black relative transition-all`}
-        style={{ width: reportOrientation === 'landscape' ? '297mm' : '210mm', maxWidth: reportOrientation === 'landscape' ? '297mm' : '210mm', paddingLeft: '20mm', paddingRight: '10mm' }}
+        style={{ width: reportOrientation === 'landscape' ? '297mm' : '210mm', maxWidth: reportOrientation === 'landscape' ? '297mm' : '210mm', paddingLeft: sheetLeftPadding, paddingRight: '10mm' }}
       >
         {renderA4Header('แบบสรุปผลการประเมินการอ่าน คิดวิเคราะห์ และเขียน', 'สรุปผลเชิงปริมาณและคุณภาพ')}
 
@@ -789,7 +902,7 @@ export const ThreeReportsModal: React.FC<ThreeReportsModalProps> = ({
   const renderCharacteristicsOverviewSheet = () => (
     <div 
       className={`${reportOrientation === 'landscape' ? 'a4-landscape-paper min-h-[210mm]' : 'a4-portrait-paper min-h-[297mm]'} bg-white border border-slate-300 shadow-xl rounded-sm py-4 sm:py-5 mx-auto text-black relative transition-all`}
-      style={{ width: reportOrientation === 'landscape' ? '297mm' : '210mm', maxWidth: reportOrientation === 'landscape' ? '297mm' : '210mm', paddingLeft: '20mm', paddingRight: '10mm' }}
+      style={{ width: reportOrientation === 'landscape' ? '297mm' : '210mm', maxWidth: reportOrientation === 'landscape' ? '297mm' : '210mm', paddingLeft: sheetLeftPadding, paddingRight: '10mm' }}
     >
       {renderA4Header('แบบสรุปผลการประเมินคุณลักษณะอันพึงประสงค์ 8 ประการ', 'สรุปผลรายบุคคลทั้งห้องเรียน')}
 
@@ -917,7 +1030,7 @@ export const ThreeReportsModal: React.FC<ThreeReportsModalProps> = ({
               {/* PAGE 1: Items 1 - 4 */}
               <div 
                 className={`${reportOrientation === 'landscape' ? 'a4-landscape-paper min-h-[210mm]' : 'a4-portrait-paper min-h-[297mm]'} bg-white border border-slate-300 shadow-xl rounded-sm py-5 sm:py-6 mx-auto text-black relative transition-all print:shadow-none print:m-0 print:border-none`}
-                style={{ width: reportOrientation === 'landscape' ? '297mm' : '210mm', maxWidth: reportOrientation === 'landscape' ? '297mm' : '210mm', paddingLeft: '20mm', paddingRight: '10mm', pageBreakAfter: 'always', breakAfter: 'page' }}
+                style={{ width: reportOrientation === 'landscape' ? '297mm' : '210mm', maxWidth: reportOrientation === 'landscape' ? '297mm' : '210mm', paddingLeft: sheetLeftPadding, paddingRight: '10mm', pageBreakAfter: 'always', breakAfter: 'page' }}
               >
                 {renderA4Header('แบบประเมินคุณลักษณะอันพึงประสงค์ 8 ประการ (รายบุคคล)')}
 
@@ -1016,7 +1129,7 @@ export const ThreeReportsModal: React.FC<ThreeReportsModalProps> = ({
               {/* PAGE 2: Items 5 - 8 + Signatures */}
               <div 
                 className={`${reportOrientation === 'landscape' ? 'a4-landscape-paper min-h-[210mm]' : 'a4-portrait-paper min-h-[297mm]'} bg-white border border-slate-300 shadow-xl rounded-sm pb-5 sm:pb-6 mx-auto text-black relative transition-all print:shadow-none print:m-0 print:border-none`}
-                style={{ width: reportOrientation === 'landscape' ? '297mm' : '210mm', maxWidth: reportOrientation === 'landscape' ? '297mm' : '210mm', paddingTop: '19mm', paddingLeft: '20mm', paddingRight: '10mm', pageBreakAfter: 'always', breakAfter: 'page' }}
+                style={{ width: reportOrientation === 'landscape' ? '297mm' : '210mm', maxWidth: reportOrientation === 'landscape' ? '297mm' : '210mm', paddingTop: '19mm', paddingLeft: sheetLeftPadding, paddingRight: '10mm', pageBreakAfter: 'always', breakAfter: 'page' }}
               >
                 {/* Student Info Bar */}
                 <div className="mb-3 px-3.5 py-2 bg-white border border-slate-800 rounded text-[13px] flex items-center justify-between gap-2 leading-normal text-black" style={{ backgroundColor: '#ffffff' }}>
@@ -1122,7 +1235,7 @@ export const ThreeReportsModal: React.FC<ThreeReportsModalProps> = ({
   const renderCompetenciesSheet = () => (
     <div 
       className={`${reportOrientation === 'landscape' ? 'a4-landscape-paper min-h-[210mm]' : 'a4-portrait-paper min-h-[297mm]'} bg-white border border-slate-300 shadow-xl rounded-sm py-4 sm:py-5 mx-auto text-black relative transition-all`}
-      style={{ width: reportOrientation === 'landscape' ? '297mm' : '210mm', maxWidth: reportOrientation === 'landscape' ? '297mm' : '210mm', paddingLeft: '20mm', paddingRight: '10mm' }}
+      style={{ width: reportOrientation === 'landscape' ? '297mm' : '210mm', maxWidth: reportOrientation === 'landscape' ? '297mm' : '210mm', paddingLeft: sheetLeftPadding, paddingRight: '10mm' }}
     >
       {renderA4Header('แบบรายงานการประเมินสมรรถนะสำคัญของผู้เรียน 5 ด้าน', 'สรุปผลรายบุคคลทั้งห้องเรียน')}
 
@@ -1254,7 +1367,7 @@ export const ThreeReportsModal: React.FC<ThreeReportsModalProps> = ({
             box-shadow: none !important;
             border: 1px solid #94a3b8 !important;
             border-radius: 0 !important;
-            padding: 5mm 10mm 5mm 20mm !important;
+            padding: 5mm 10mm 5mm ${sheetLeftPadding} !important;
             margin: 0 auto !important;
             width: 100% !important;
             max-width: ${reportOrientation === 'landscape' ? '297mm' : '210mm'} !important;

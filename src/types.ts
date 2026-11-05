@@ -1,5 +1,10 @@
 export type Role = 'developer' | 'admin' | 'member';
 
+export interface HomeroomClassAssignment {
+  gradeLevel: GradeLevel | string;
+  room?: string;
+}
+
 export interface UserSession {
   id: string;
   username: string;
@@ -12,6 +17,7 @@ export interface UserSession {
   phone?: string; // เบอร์โทรติดต่อ
   assignedGrade?: GradeLevel | string;
   assignedRoom?: string; // ห้องประจำชั้น เช่น '1', '2', '3'
+  assignedClasses?: HomeroomClassAssignment[]; // กรณีเป็นครูประจำชั้นหลายชั้น (เช่น 2-3 ชั้น)
   learningGroup?: string;
   avatarUrl?: string;
   schoolId?: string;
@@ -160,6 +166,7 @@ export interface Personnel {
   position: string;
   advisorGrade?: string; // ครูที่ปรึกษาประจำชั้น เช่น ป.1, ป.2, ฯลฯ
   advisorRoom?: string; // ห้องที่ปรึกษาประจำชั้น เช่น '1', '2', '3'
+  advisorClasses?: HomeroomClassAssignment[]; // กรณีเป็นที่ปรึกษาหลายชั้น
   birthDate: string;
   employmentDate: string;
   retirementDate: string;
@@ -278,6 +285,12 @@ export interface RubricLevel {
   label: string; // e.g. 'ควรเสริม', 'ได้บางครั้ง', 'ปฏิบัติได้'
 }
 
+export interface KindergartenCompetency {
+  id: string;
+  title: string; // ชื่อสมรรถนะ (ไม่บังคับพิมพ์) ตามหลักสูตรการศึกษาปฐมวัย พ.ศ. 2568
+  elements: string[]; // องค์ประกอบ/ประเด็น 1, 2, 3... ที่อยู่ภายใต้สมรรถนะนี้
+}
+
 export interface Subject {
   id: string;
   code: string; // e.g., ว11101
@@ -296,11 +309,14 @@ export interface Subject {
   learningUnitDetails?: LearningUnitDetail[]; // รายละเอียดชื่อและคะแนนเก็บแต่ละหน่วย
   academicYear?: string; // ปีการศึกษา เช่น '2568', '2569'
   teachingSchedule?: Record<number, number>; // dayOfWeek (1=จันทร์, 2=อังคาร, 3=พุธ, 4=พฤหัสบดี, 5=ศุกร์) -> hours (default 1)
-  subtopics?: string[]; // สำหรับ อ.1, อ.2, อ.3 หัวข้อย่อยด้านล่างชื่อวิชา
+  subtopics?: string[]; // สำหรับ อ.1, อ.2, อ.3 สมรรถนะ/หน้าประเมินด้านล่างชื่อวิชา
+  kindergartenCompetencies?: KindergartenCompetency[]; // สำหรับ อ.1, อ.2, อ.3 โครงสร้างสมรรถนะ + องค์ประกอบ/ประเด็น (หลักสูตรปฐมวัย พ.ศ. 2568)
+  hasKindergartenCompetency?: boolean; // สำหรับ อ.1, อ.2, อ.3 เปิด/ปิด ช่องสมรรถนะ (true = มีสมรรถนะ+องค์ประกอบ/ประเด็น, false = มีเฉพาะองค์ประกอบ/ประเด็นของด้านความสามารถ)
   rubricLevels?: RubricLevel[]; // สำหรับ อ.1, อ.2, อ.3 ระดับคะแนนคุณภาพ (เช่น 1: ควรเสริม, 2: ได้บางครั้ง, 3: ปฏิบัติได้)
   rubricMaxLevel?: number; // จำนวนระดับคะแนนคุณภาพ (ค่าเริ่มต้น 3)
   hasCustomAssignments?: boolean;
   isActivity?: boolean; // กิจกรรมพัฒนาผู้เรียน (ประเมินผล ผ่าน / ไม่ผ่าน)
+  sortOrder?: number; // ลำดับการจัดเรียงรายวิชาที่ Admin กำหนดด้วยการลากเลื่อน
 }
 
 export interface GradeRecord {
@@ -469,6 +485,7 @@ export interface MemberAccount {
   phone?: string; // เบอร์โทรติดต่อ
   gradeLevel?: GradeLevel;
   room?: string; // ห้องประจำชั้น เช่น '1', '2', '3'
+  assignedClasses?: HomeroomClassAssignment[]; // กรณีเป็นครูประจำชั้นหลายชั้น (เช่น 2-3 ชั้น)
   position: string;
   learningGroup?: string;
   avatarUrl?: string;

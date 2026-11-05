@@ -168,12 +168,16 @@ export default function App() {
           ? (matchedMemberObj.room || (matchedMemberObj.gradeLevel ? '1' : undefined))
           : currentSession.assignedRoom;
         const expectedGrade = matchedMemberObj ? matchedMemberObj.gradeLevel : currentSession.assignedGrade;
+        const expectedClasses = matchedMemberObj ? matchedMemberObj.assignedClasses : currentSession.assignedClasses;
         const expectedAvatar = matchedMemberObj?.avatarUrl || currentSession.avatarUrl;
+
+        const classesChanged =
+          JSON.stringify(expectedClasses || []) !== JSON.stringify(currentSession.assignedClasses || []);
 
         if (
           resolvedSchoolId !== currentSession.schoolId ||
           (matchedSchool?.schoolName && matchedSchool.schoolName !== currentSession.schoolName) ||
-          (matchedMemberObj && (expectedGrade !== currentSession.assignedGrade || expectedRoom !== currentSession.assignedRoom || expectedAvatar !== currentSession.avatarUrl))
+          (matchedMemberObj && (expectedGrade !== currentSession.assignedGrade || expectedRoom !== currentSession.assignedRoom || classesChanged || expectedAvatar !== currentSession.avatarUrl))
         ) {
           const updatedSession: UserSession = {
             ...currentSession,
@@ -181,6 +185,7 @@ export default function App() {
             schoolName: matchedSchool?.schoolName || currentSession.schoolName,
             assignedGrade: expectedGrade,
             assignedRoom: expectedRoom,
+            assignedClasses: expectedClasses,
             avatarUrl: expectedAvatar
           };
           StorageService.setSession(updatedSession);

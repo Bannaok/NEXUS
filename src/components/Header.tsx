@@ -62,7 +62,11 @@ export const Header: React.FC<HeaderProps> = ({
               <div className="text-xs font-bold text-white truncate max-w-[170px]">
                 {user.fullName}
               </div>
-              {user.assignedGrade ? (
+              {user.assignedClasses && user.assignedClasses.length > 1 ? (
+                <p className="text-[10px] text-indigo-200/80 truncate leading-tight">
+                  ครูประจำชั้น {user.assignedClasses.map(c => `${c.gradeLevel}${c.room && c.room !== '1' ? `/${c.room}` : ''}`).join(', ')}
+                </p>
+              ) : user.assignedGrade ? (
                 <p className="text-[10px] text-indigo-200/80 truncate leading-tight">
                   ครูประจำชั้น {user.assignedGrade}{user.assignedRoom ? ` ห้อง ${user.assignedRoom}` : ''}
                 </p>
@@ -178,7 +182,9 @@ export const Header: React.FC<HeaderProps> = ({
                 {user.role === 'developer' 
                   ? 'Level 1: Developer'
                   : (user.position || (user.role === 'admin' ? 'Level 2: ผู้ดูแลโรงเรียน' : 'ครูผู้สอน'))}
-                {user.assignedGrade && ` • ชั้น ${user.assignedGrade}${user.assignedRoom ? ` ห้อง ${user.assignedRoom}` : ''}`}
+                {user.assignedClasses && user.assignedClasses.length > 1
+                  ? ` • ชั้น ${user.assignedClasses.map(c => `${c.gradeLevel}${c.room ? ` ห้อง ${c.room}` : ''}`).join(', ')}`
+                  : user.assignedGrade && ` • ชั้น ${user.assignedGrade}${user.assignedRoom ? ` ห้อง ${user.assignedRoom}` : ''}`}
               </p>
             </div>
           </div>

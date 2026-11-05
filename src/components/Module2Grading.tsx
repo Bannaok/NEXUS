@@ -11,7 +11,8 @@ import {
   AttendanceDayConfig,
   SchoolDayItem,
   RubricLevel,
-  LearningUnitDetail
+  LearningUnitDetail,
+  KindergartenCompetency
 } from '../types';
 import { StorageService } from '../services/storage';
 import { 
@@ -48,7 +49,8 @@ import {
   CalendarCheck,
   CheckSquare,
   Square,
-  Star
+  Star,
+  GripVertical
 } from 'lucide-react';
 import { Assessment3Booklets } from './Assessment3Booklets';
 
@@ -249,6 +251,14 @@ export const Module2Grading: React.FC<Module2Props> = ({
       if (orderA !== orderB) return orderA - orderB;
       const roomCmp = normalizeRoom(a.room).localeCompare(normalizeRoom(b.room), undefined, { numeric: true });
       if (roomCmp !== 0) return roomCmp;
+      const hasSortA = typeof a.sortOrder === 'number' && !isNaN(a.sortOrder);
+      const hasSortB = typeof b.sortOrder === 'number' && !isNaN(b.sortOrder);
+      if (hasSortA && hasSortB && a.sortOrder !== b.sortOrder) {
+        return (a.sortOrder as number) - (b.sortOrder as number);
+      }
+      if (hasSortA !== hasSortB) {
+        return hasSortA ? -1 : 1;
+      }
       const subjOrderA = getPrimarySubjectOrder(a);
       const subjOrderB = getPrimarySubjectOrder(b);
       if (subjOrderA !== subjOrderB) return subjOrderA - subjOrderB;
@@ -399,15 +409,149 @@ export const Module2Grading: React.FC<Module2Props> = ({
     assignmentId: string;
   } | null>(null);
 
-  // Constants & helpers for Kindergarten (อ.1, อ.2, อ.3)
+  // Constants & helpers for Kindergarten (อ.1, อ.2, อ.3) - หลักสูตรการศึกษาปฐมวัย พ.ศ. 2568
   const DEFAULT_KINDERGARTEN_RUBRIC_LEVELS: RubricLevel[] = [
     { level: 1, label: 'ควรเสริม' },
     { level: 2, label: 'ได้บางครั้ง' },
     { level: 3, label: 'ปฏิบัติได้' }
   ];
 
+  const EARLY_CHILDHOOD_2568_COMPETENCIES: {
+    title: string;
+    subjectSuggestion: string;
+    elements: string[];
+  }[] = [
+    {
+      title: 'สมรรถนะการเคลื่อนไหวและสุขภาวะทางกาย',
+      subjectSuggestion: 'พัฒนาการด้านร่างกาย',
+      elements: [
+        'ใช้กล้ามเนื้อมัดใหญ่เคลื่อนไหวและทรงตัวได้อย่างคล่องแคล่ว',
+        'ใช้กล้ามเนื้อมัดเล็กและประสานสัมพันธ์มือ-ตาได้เหมาะสม',
+        'ดูแลสุขอนามัย สุขนิสัย และรักษาความปลอดภัยของตนเอง'
+      ]
+    },
+    {
+      title: 'สมรรถนะการเข้าใจและจัดการอารมณ์ตนเอง',
+      subjectSuggestion: 'พัฒนาการด้านอารมณ์ จิตใจ',
+      elements: [
+        'รับรู้ เข้าใจ และแสดงออกทางอารมณ์ได้อย่างเหมาะสมตามวัย',
+        'มีความมั่นใจ ร่าเริงแจ่มใส และภาคภูมิใจในตนเอง',
+        'ชื่นชมศิลปะ ดนตรี การเคลื่อนไหว และธรรมชาติรอบตัว'
+      ]
+    },
+    {
+      title: 'สมรรถนะการอยู่ร่วมกับผู้อื่นและทักษะทางสังคม',
+      subjectSuggestion: 'พัฒนาการด้านสังคม',
+      elements: [
+        'ช่วยเหลือตนเองในกิจวัตรประจำวันและมีวินัยในตนเอง',
+        'เล่นและทำกิจกรรมร่วมกับผู้อื่นอย่างสร้างสรรค์',
+        'เคารพกติกา แบ่งปัน และมีน้ำใจช่วยเหลือผู้อื่น'
+      ]
+    },
+    {
+      title: 'สมรรถนะการสื่อสารและการใช้ภาษา',
+      subjectSuggestion: 'พัฒนาการด้านสติปัญญา',
+      elements: [
+        'การฟังอย่างตั้งใจและเข้าใจความหมายจากการสื่อสาร',
+        'การพูดสื่อสารความคิด ความรู้สึก และความต้องการตามวัย',
+        'การอ่านภาพ สัญลักษณ์ และการเขียนสื่อความหมายเบื้องต้น'
+      ]
+    },
+    {
+      title: 'สมรรถนะการคิดและการแก้ปัญหาเบื้องต้น',
+      subjectSuggestion: 'พัฒนาการด้านสติปัญญา',
+      elements: [
+        'การสังเกต จำแนก เปรียบเทียบ และจัดหมวดหมู่สิ่งต่างๆ',
+        'การคิดเชิงเหตุผลและการแก้ปัญหาในชีวิตประจำวัน',
+        'การสำรวจ คิดสร้างสรรค์ และจินตนาการ'
+      ]
+    }
+  ];
+
   const isKindergartenGrade = (grade?: string): boolean => {
     return grade === 'อ.1' || grade === 'อ.2' || grade === 'อ.3';
+  };
+
+  // Helper to extract hierarchical KindergartenCompetency[] from any Subject (new or legacy)
+  const extractKindergartenCompetencies = (sub?: Subject | null): KindergartenCompetency[] => {
+    if (!sub) {
+      return [{ id: `comp-${Date.now()}-1`, title: '', elements: [''] }];
+    }
+    if (sub.kindergartenCompetencies && sub.kindergartenCompetencies.length > 0) {
+      return sub.kindergartenCompetencies.map((c, idx) => ({
+        id: c.id || `comp-${idx + 1}`,
+        title: c.title || '',
+        elements: c.elements && c.elements.length > 0 ? [...c.elements] : ['']
+      }));
+    }
+    const subs = sub.subtopics && sub.subtopics.length > 0 ? sub.subtopics : [];
+    const asgs = sub.assignmentItems || [];
+    if (subs.length > 0) {
+      return subs.map((stName, idx) => {
+        const unitNum = idx + 1;
+        const unitAsgs = asgs.filter(a => a.unitNumber === unitNum);
+        const trimmedSt = (stName || '').trim();
+        const isGenericCompTitle = /^สมรรถนะ(\s*ที่)?\s*\d+$/i.test(trimmedSt);
+        const cleanedTitle = isGenericCompTitle
+          ? ''
+          : trimmedSt.replace(/^สมรรถนะ(\s*ที่)?\s*\d+\s*:\s*/i, '').trim();
+
+        if (unitAsgs.length > 1) {
+          return {
+            id: `comp-${unitNum}`,
+            title: cleanedTitle,
+            elements: unitAsgs.map(a => a.name)
+          };
+        } else if (unitAsgs.length === 1) {
+          const elName = unitAsgs[0].name;
+          const titleVal = isGenericCompTitle ? '' : (elName !== trimmedSt ? cleanedTitle : '');
+          return {
+            id: `comp-${unitNum}`,
+            title: titleVal,
+            elements: [elName || cleanedTitle || `องค์ประกอบ/ประเด็น 1`]
+          };
+        } else {
+          return {
+            id: `comp-${unitNum}`,
+            title: '',
+            elements: [cleanedTitle || trimmedSt || `องค์ประกอบ/ประเด็น 1`]
+          };
+        }
+      });
+    }
+    if (asgs.length > 0) {
+      return [
+        {
+          id: 'comp-1',
+          title: '',
+          elements: asgs.map(a => a.name)
+        }
+      ];
+    }
+    return [{ id: 'comp-1', title: '', elements: [''] }];
+  };
+
+  // Helper to sync KindergartenCompetency[] when subtopics or columns are edited on the grading screen
+  const syncCompetenciesFromUnitsAndItems = (
+    subtopicsList: string[],
+    itemsList: AssignmentItem[],
+    existingComps?: KindergartenCompetency[]
+  ): KindergartenCompetency[] => {
+    return subtopicsList.map((stName, idx) => {
+      const unitNum = idx + 1;
+      const unitItems = itemsList.filter(a => a.unitNumber === unitNum);
+      const trimmedSt = (stName || '').trim();
+      const isGenericCompTitle = /^สมรรถนะ(\s*ที่)?\s*\d+$/i.test(trimmedSt);
+      const cleanedTitle = isGenericCompTitle
+        ? ''
+        : trimmedSt.replace(/^สมรรถนะ(\s*ที่)?\s*\d+\s*:\s*/i, '').trim();
+      const prevComp = existingComps?.[idx];
+      return {
+        id: prevComp?.id || `comp-${unitNum}`,
+        title: cleanedTitle,
+        elements: unitItems.length > 0 ? unitItems.map(a => a.name) : [cleanedTitle || `องค์ประกอบ/ประเด็น 1`]
+      };
+    });
   };
 
   // Admin add subject / activity modal
@@ -417,6 +561,56 @@ export const Module2Grading: React.FC<Module2Props> = ({
   const [modalRoom, setModalRoom] = useState<string>('1');
   const [modalItemType, setModalItemType] = useState<'subject' | 'activity'>('subject');
   const [activityNamePresetInput, setActivityNamePresetInput] = useState<string>('');
+  const [subjectNameInput, setSubjectNameInput] = useState<string>('');
+
+  // Admin Drag-and-Drop Reordering States for Subjects List
+  const [draggedSubjectId, setDraggedSubjectId] = useState<string | null>(null);
+  const [dragOverSubjectId, setDragOverSubjectId] = useState<string | null>(null);
+  const touchDragTimerRef = React.useRef<number | null>(null);
+
+  const handleReorderSubjects = (fromId: string, toId: string, currentList: Subject[]) => {
+    if (user.role !== 'admin') return;
+    if (!fromId || !toId || fromId === toId) return;
+    const fromIndex = currentList.findIndex(s => s.id === fromId);
+    const toIndex = currentList.findIndex(s => s.id === toId);
+    if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) return;
+
+    const nextList = [...currentList];
+    const [moved] = nextList.splice(fromIndex, 1);
+    nextList.splice(toIndex, 0, moved);
+
+    // Assign explicit 1-based sortOrder to all items in this reordered view
+    const updatedFiltered = nextList.map((s, idx) => ({
+      ...s,
+      sortOrder: idx + 1
+    }));
+
+    // Propagate sortOrder to matching subjects in the other semester of the same academicYear, gradeLevel & room
+    const orderBySubKey = new Map<string, number>();
+    updatedFiltered.forEach(s => {
+      const key = `${s.gradeLevel}__${normalizeRoom(s.room)}__${Boolean(s.isActivity)}__${(s.code || '').trim().toUpperCase()}__${(s.name || '').trim()}`;
+      orderBySubKey.set(key, s.sortOrder!);
+    });
+
+    const updatedIds = new Set(updatedFiltered.map(s => s.id));
+    const extraSynced: Subject[] = [];
+    yearSubjects.forEach(s => {
+      if (updatedIds.has(s.id)) return;
+      const key = `${s.gradeLevel}__${normalizeRoom(s.room)}__${Boolean(s.isActivity)}__${(s.code || '').trim().toUpperCase()}__${(s.name || '').trim()}`;
+      const matchedOrder = orderBySubKey.get(key);
+      if (matchedOrder !== undefined && s.sortOrder !== matchedOrder) {
+        extraSynced.push({ ...s, sortOrder: matchedOrder });
+      }
+    });
+
+    const allToSave = [...updatedFiltered, ...extraSynced];
+    if (onSaveBulkSubjects) {
+      onSaveBulkSubjects(allToSave);
+    } else {
+      const saved = StorageService.saveBulkSubjects(allToSave);
+      if (onUpdateSubjectsList) onUpdateSubjectsList(saved);
+    }
+  };
 
   const MODAL_ALLOWED_GRADES: GradeLevel[] = [
     'อ.1', 'อ.2', 'อ.3',
@@ -424,8 +618,13 @@ export const Module2Grading: React.FC<Module2Props> = ({
     'ม.1', 'ม.2', 'ม.3'
   ];
 
-  // Kindergarten configuration states in modal
+  // Kindergarten configuration states in modal (หลักสูตรการศึกษาปฐมวัย พ.ศ. 2568: ด้านความสามารถ + เปิด/ปิดสมรรถนะ + องค์ประกอบ/ประเด็น)
+  const [hasKindergartenCompetency, setHasKindergartenCompetency] = useState<boolean>(true);
+  const [kindergartenDirectElements, setKindergartenDirectElements] = useState<string[]>(['']);
   const [kindergartenSubtopics, setKindergartenSubtopics] = useState<string[]>(['']);
+  const [kindergartenCompetencies, setKindergartenCompetencies] = useState<KindergartenCompetency[]>([
+    { id: 'comp-1', title: '', elements: [''] }
+  ]);
   const [kindergartenRubricLevels, setKindergartenRubricLevels] = useState<RubricLevel[]>(DEFAULT_KINDERGARTEN_RUBRIC_LEVELS);
   const [kindergartenRubricCount, setKindergartenRubricCount] = useState<number>(3);
 
@@ -433,6 +632,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
   const [selectedKindergartenSubtopic, setSelectedKindergartenSubtopic] = useState<string | null>(null);
   const [isAddKindergartenSubtopicModalOpen, setIsAddKindergartenSubtopicModalOpen] = useState(false);
   const [newKindergartenSubtopicInput, setNewKindergartenSubtopicInput] = useState('');
+  const [newKindergartenElementsInput, setNewKindergartenElementsInput] = useState<string[]>(['']);
   const [newKindergartenStandardInput, setNewKindergartenStandardInput] = useState('');
   const [newKindergartenIndicatorInput, setNewKindergartenIndicatorInput] = useState('');
   const [subtopicToRename, setSubtopicToRename] = useState<string | null>(null);
@@ -447,6 +647,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
   const [kindergartenColumnToEdit, setKindergartenColumnToEdit] = useState<AssignmentItem | null>(null);
   const [editKindergartenColumnInput, setEditKindergartenColumnInput] = useState('');
   const [subtopicToDelete, setSubtopicToDelete] = useState<string | null>(null);
+  const [kindergartenColumnToDelete, setKindergartenColumnToDelete] = useState<{ id: string; name: string } | null>(null);
   const [starMenuOpenSubtopic, setStarMenuOpenSubtopic] = useState<string | null>(null);
 
   const [gradingViewMode, setGradingViewMode] = useState<'score' | 'grade'>('score');
@@ -495,15 +696,26 @@ export const Module2Grading: React.FC<Module2Props> = ({
       setModalRoom(normalizeRoom(sub.room));
       setModalItemType(sub.isActivity ? 'activity' : 'subject');
       setActivityNamePresetInput(sub.name || '');
+      setSubjectNameInput(sub.name || '');
 
       if (sub.isActivity) {
         setSubjectUnitCountInput('');
         setSubjectUnitDetails([]);
+        setHasKindergartenCompetency(true);
+        setKindergartenDirectElements(['']);
         setKindergartenSubtopics(['']);
+        setKindergartenCompetencies([{ id: 'comp-1', title: '', elements: [''] }]);
         setKindergartenRubricLevels(DEFAULT_KINDERGARTEN_RUBRIC_LEVELS);
         setKindergartenRubricCount(3);
       } else if (isKindergartenGrade(sub.gradeLevel)) {
-        // อ.1, อ.2, อ.3: โหลดหัวข้อย่อย และระดับคะแนนคุณภาพ
+        // อ.1, อ.2, อ.3: โหลดโครงสร้างสมรรถนะ (ON/OFF) + องค์ประกอบ/ประเด็น (หลักสูตรปฐมวัย 2568) และระดับคะแนนคุณภาพ
+        const extractedComps = extractKindergartenCompetencies(sub);
+        const isCompOn = sub.hasKindergartenCompetency !== undefined ? sub.hasKindergartenCompetency : true;
+        setHasKindergartenCompetency(isCompOn);
+        setKindergartenCompetencies(extractedComps);
+        const flatElements = extractedComps.flatMap(c => c.elements).filter(Boolean);
+        setKindergartenDirectElements(flatElements.length > 0 ? flatElements : ['']);
+
         const existingSubs = sub.subtopics && sub.subtopics.length > 0 
           ? [...sub.subtopics] 
           : (sub.assignmentItems && sub.assignmentItems.length > 0 ? sub.assignmentItems.map(a => a.name) : ['']);
@@ -538,7 +750,10 @@ export const Module2Grading: React.FC<Module2Props> = ({
           };
         });
         setSubjectUnitDetails(details);
+        setHasKindergartenCompetency(true);
+        setKindergartenDirectElements(['']);
         setKindergartenSubtopics(['']);
+        setKindergartenCompetencies([{ id: 'comp-1', title: '', elements: [''] }]);
         setKindergartenRubricLevels(DEFAULT_KINDERGARTEN_RUBRIC_LEVELS);
         setKindergartenRubricCount(3);
       }
@@ -546,6 +761,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
       setEditingSubject(null);
       setModalItemType(defaultType);
       setActivityNamePresetInput('');
+      setSubjectNameInput('');
       const defaultGradeFromFilter: GradeLevel =
         selectedGradeFilter === 'อนุบาล'
           ? 'อ.1'
@@ -557,7 +773,10 @@ export const Module2Grading: React.FC<Module2Props> = ({
       setModalGradeLevel(defaultGradeFromFilter);
       const validRooms = getRoomsForGrade(defaultGradeFromFilter);
       setModalRoom(validRooms.includes(normalizeRoom(selectedSubjectRoomFilter)) ? normalizeRoom(selectedSubjectRoomFilter) : (validRooms[0] || '1'));
+      setHasKindergartenCompetency(true);
+      setKindergartenDirectElements(['']);
       setKindergartenSubtopics(['']);
+      setKindergartenCompetencies([{ id: `comp-${Date.now()}-1`, title: '', elements: [''] }]);
       setKindergartenRubricLevels(DEFAULT_KINDERGARTEN_RUBRIC_LEVELS);
       setKindergartenRubricCount(3);
       setSubjectUnitCountInput('');
@@ -826,12 +1045,25 @@ export const Module2Grading: React.FC<Module2Props> = ({
 
   const activeRubricMaxLevel = selectedSubject?.rubricMaxLevel || activeRubricLevels.length || 3;
 
+  const isSelectedKindergartenCompetencyOff = Boolean(
+    isSelectedSubjectKindergarten && selectedSubject?.hasKindergartenCompetency === false
+  );
+
   const currentKindergartenSubtopics: string[] = useMemo(() => {
     if (!selectedSubject) return [];
-    if (selectedSubject.subtopics !== undefined && selectedSubject.subtopics !== null) {
+    if (selectedSubject.hasKindergartenCompetency === false) {
+      return [selectedSubject.name || 'ด้านความสามารถ'];
+    }
+    if (selectedSubject.subtopics !== undefined && selectedSubject.subtopics !== null && selectedSubject.subtopics.length > 0) {
       return selectedSubject.subtopics;
     }
-    return ['มีสุขอนามัย และสุขนิสัยที่ดี', 'รักษาความปลอดภัย', 'พัฒนาการด้านร่างกาย'];
+    if (selectedSubject.kindergartenCompetencies && selectedSubject.kindergartenCompetencies.length > 0) {
+      return selectedSubject.kindergartenCompetencies.map((comp, idx) => {
+        const t = (comp.title || '').trim();
+        return t ? `สมรรถนะที่ ${idx + 1}: ${t}` : `สมรรถนะที่ ${idx + 1}`;
+      });
+    }
+    return ['สมรรถนะที่ 1: การเคลื่อนไหวและสุขภาวะทางกาย'];
   }, [selectedSubject]);
 
   const activeKindergartenSubtopic = useMemo(() => {
@@ -868,10 +1100,21 @@ export const Module2Grading: React.FC<Module2Props> = ({
     const targetUnit = activeKindergartenSubtopicIndex + 1;
     const currentItems = selectedSubject.assignmentItems || [];
     
-    // Items that have unitNumber matching this subtopic index
+    // Items that have unitNumber matching this competency/subtopic index
     const matches = currentItems.filter(a => a.unitNumber === targetUnit);
     if (matches.length > 0) {
       return matches;
+    }
+
+    // Check kindergartenCompetencies elements if present
+    const compObj = selectedSubject.kindergartenCompetencies?.[activeKindergartenSubtopicIndex];
+    if (compObj && compObj.elements && compObj.elements.length > 0) {
+      return compObj.elements.map((elName, eIdx) => ({
+        id: `asg-k-${targetUnit}-${eIdx + 1}`,
+        name: elName || `องค์ประกอบ/ประเด็น ${eIdx + 1}`,
+        unitNumber: targetUnit,
+        maxScore: activeRubricMaxLevel
+      }));
     }
 
     // Fallback: check matching name if legacy unitNumber not set
@@ -1038,57 +1281,73 @@ export const Module2Grading: React.FC<Module2Props> = ({
     setScoreRows(next);
     autoSaveGrades(next);
     setStarMenuOpenSubtopic(null);
-    onShowToast('success', 'บันทึกคะแนนดาวเรียบร้อย 🎉', `ให้คะแนนระดับ ${score} แก่ทุกช่องตารางในหน้า "${subtopicName}" สำหรับนักเรียนทุกคนแล้ว`);
+    onShowToast('success', 'บันทึกคะแนนดาวเรียบร้อย 🎉', `ให้คะแนนระดับ ${score} แก่ทุกองค์ประกอบ/ประเด็นใน "${subtopicName}" สำหรับนักเรียนทุกคนแล้ว`);
   };
 
-  // Add new unit / page on top bar (for kindergarten อ.1 - อ.3)
-  const handleAddKindergartenSubtopicSubmit = (newTitle: string, standard?: string, indicator?: string) => {
+  // Add new competency / page on top bar (for kindergarten อ.1 - อ.3 ตามหลักสูตรปฐมวัย 2568)
+  const handleAddKindergartenSubtopicSubmit = (newTitle: string, standard?: string, indicator?: string, elementsOverride?: string[]) => {
     if (!selectedSubject) return;
-    const trimmed = newTitle.trim();
-    if (!trimmed) return;
-
     const baseSubs = selectedSubject.subtopics !== undefined && selectedSubject.subtopics !== null
       ? [...selectedSubject.subtopics]
       : [...currentKindergartenSubtopics];
-    const updatedSubtopics = [...baseSubs, trimmed];
-    const targetUnit = updatedSubtopics.length;
+    const targetUnit = baseSubs.length + 1;
+    const rawTrimmed = (newTitle || '').trim();
+    const cleanedCompTitle = rawTrimmed.replace(/^สมรรถนะ(\s*ที่)?\s*\d+\s*:?\s*/i, '').trim();
+    const subtopicLabel = cleanedCompTitle
+      ? `สมรรถนะที่ ${targetUnit}: ${cleanedCompTitle}`
+      : `สมรรถนะที่ ${targetUnit}`;
 
-    const defaultCol: AssignmentItem = {
-      id: `asg-k-${Date.now()}-${targetUnit}`,
-      name: `${trimmed}`,
+    const updatedSubtopics = [...baseSubs, subtopicLabel];
+
+    const rawElements = (elementsOverride && elementsOverride.length > 0 ? elementsOverride : newKindergartenElementsInput)
+      .map(el => el.trim())
+      .filter(Boolean);
+    const finalElements = rawElements.length > 0 ? rawElements : ['องค์ประกอบ/ประเด็น 1'];
+
+    const baseTs = Date.now();
+    const newCols: AssignmentItem[] = finalElements.map((elName, eIdx) => ({
+      id: `asg-k-${baseTs}-${targetUnit}-${eIdx + 1}`,
+      name: elName,
       unitNumber: targetUnit,
       maxScore: activeRubricMaxLevel
-    };
-    const updatedAssignments = [...(selectedSubject.assignmentItems || []), defaultCol];
+    }));
+    const updatedAssignments = [...(selectedSubject.assignmentItems || []), ...newCols];
 
     // Maintain learningUnitDetails with standard & indicator
     const existingDetails = selectedSubject.learningUnitDetails ? [...selectedSubject.learningUnitDetails] : [];
     const newDetail: LearningUnitDetail = {
       unitNumber: targetUnit,
-      name: trimmed,
-      standard: standard?.trim() || '',
-      indicator: indicator?.trim() || ''
+      name: subtopicLabel,
+      standard: standard?.trim() || cleanedCompTitle || `สมรรถนะที่ ${targetUnit}`,
+      indicator: indicator?.trim() || finalElements.map((el, i) => `องค์ประกอบ/ประเด็น ${i + 1}: ${el}`).join(' • ')
     };
     const updatedDetails = [...existingDetails.filter(d => d.unitNumber !== targetUnit), newDetail];
+    const updatedComps = syncCompetenciesFromUnitsAndItems(
+      updatedSubtopics,
+      updatedAssignments,
+      selectedSubject.kindergartenCompetencies
+    );
 
     const updatedSubject: Subject = {
       ...selectedSubject,
       subtopics: updatedSubtopics,
+      kindergartenCompetencies: updatedComps,
       assignmentItems: updatedAssignments,
       learningUnits: updatedSubtopics.map((_, i) => i + 1),
       learningUnitDetails: updatedDetails
     };
 
     onSaveSubject(updatedSubject);
-    setSelectedKindergartenSubtopic(trimmed);
+    setSelectedKindergartenSubtopic(subtopicLabel);
     setIsAddKindergartenSubtopicModalOpen(false);
     setNewKindergartenSubtopicInput('');
+    setNewKindergartenElementsInput(['']);
     setNewKindergartenStandardInput('');
     setNewKindergartenIndicatorInput('');
-    onShowToast('success', 'เพิ่มหน้าหน่วยสำเร็จ 🎉', `สร้างหน้าชื่อหน่วย "${trimmed}" เรียบร้อยแล้ว`);
+    onShowToast('success', 'เพิ่มสมรรถนะสำเร็จ 🎉', `เพิ่ม "${subtopicLabel}" พร้อม ${finalElements.length} องค์ประกอบ/ประเด็น เรียบร้อยแล้ว`);
   };
 
-  // Open Edit Unit modal for kindergarten
+  // Open Edit Unit/Competency modal for kindergarten
   const handleOpenEditKindergartenUnitModal = (stName: string) => {
     if (!selectedSubject) return;
     const baseSubs = selectedSubject.subtopics !== undefined && selectedSubject.subtopics !== null
@@ -1099,9 +1358,13 @@ export const Module2Grading: React.FC<Module2Props> = ({
     const detail = selectedSubject.learningUnitDetails?.find(
       d => (targetUnit > 0 && d.unitNumber === targetUnit) || d.name === stName
     );
+    const compObj = unitIndex >= 0 ? selectedSubject.kindergartenCompetencies?.[unitIndex] : undefined;
+    const cleanedCompTitle = compObj?.title !== undefined
+      ? compObj.title
+      : stName.replace(/^สมรรถนะ(\s*ที่)?\s*\d+\s*:?\s*/i, '').trim();
 
     setSubtopicToRename(stName);
-    setRenameSubtopicInput(stName);
+    setRenameSubtopicInput(cleanedCompTitle);
     setRenameStandardInput(detail?.standard || '');
     setRenameIndicatorInput(detail?.indicator || '');
   };
@@ -1121,7 +1384,18 @@ export const Module2Grading: React.FC<Module2Props> = ({
 
     const stIndex = baseSubs.indexOf(stName);
     const targetUnit = stIndex >= 0 ? stIndex + 1 : -1;
-    const updatedSubtopics = baseSubs.filter(s => s !== stName);
+    const remainingRawSubs = baseSubs.filter(s => s !== stName);
+    // Re-number generic "สมรรถนะที่ X" labels cleanly
+    const updatedSubtopics = remainingRawSubs.map((s, idx) => {
+      const uNum = idx + 1;
+      const isGeneric = /^สมรรถนะ(\s*ที่)?\s*\d+$/i.test(s.trim());
+      if (isGeneric) return `สมรรถนะที่ ${uNum}`;
+      const stripped = s.replace(/^สมรรถนะ(\s*ที่)?\s*\d+\s*:\s*/i, '').trim();
+      if (/^สมรรถนะ(\s*ที่)?\s*\d+\s*:/i.test(s.trim())) {
+        return `สมรรถนะที่ ${uNum}: ${stripped}`;
+      }
+      return s;
+    });
 
     let currentItems = selectedSubject.assignmentItems;
     if (!currentItems || currentItems.length === 0) {
@@ -1158,9 +1432,16 @@ export const Module2Grading: React.FC<Module2Props> = ({
         return d;
       });
 
+    const updatedComps = syncCompetenciesFromUnitsAndItems(
+      updatedSubtopics,
+      updatedAssignments,
+      (selectedSubject.kindergartenCompetencies || []).filter((_, i) => i !== stIndex)
+    );
+
     const updatedSubject: Subject = {
       ...selectedSubject,
       subtopics: updatedSubtopics,
+      kindergartenCompetencies: updatedComps,
       assignmentItems: updatedAssignments,
       learningUnits: updatedSubtopics.map((_, i) => i + 1),
       learningUnitDetails: updatedDetails,
@@ -1184,34 +1465,33 @@ export const Module2Grading: React.FC<Module2Props> = ({
     const nextActive = updatedSubtopics[0] || null;
     setSelectedKindergartenSubtopic(nextActive);
     setSubtopicToDelete(null);
-    onShowToast('info', 'ลบหน้าหน่วยแล้ว', `ลบหน้า "${stName}" เรียบร้อยแล้ว`);
+    onShowToast('info', 'ลบสมรรถนะแล้ว', `ลบ "${stName}" เรียบร้อยแล้ว`);
   };
 
-  // Edit unit name, standard, and indicator for kindergarten
+  // Edit competency name, standard, and indicator for kindergarten (ชื่อสมรรถนะไม่บังคับพิมพ์)
   const handleEditKindergartenSubtopicSubmit = (oldName: string, newName: string, standard?: string, indicator?: string) => {
     if (!selectedSubject) return;
-    const trimmed = newName.trim();
-    if (!trimmed) return;
-
     const baseSubs = selectedSubject.subtopics !== undefined && selectedSubject.subtopics !== null
       ? [...selectedSubject.subtopics]
       : [...currentKindergartenSubtopics];
 
     const unitIndex = baseSubs.indexOf(oldName);
     const targetUnit = unitIndex >= 0 ? unitIndex + 1 : baseSubs.length;
+    const cleanedTitle = (newName || '').replace(/^สมรรถนะ(\s*ที่)?\s*\d+\s*:?\s*/i, '').trim();
+    const formattedSubtopic = cleanedTitle
+      ? `สมรรถนะที่ ${targetUnit}: ${cleanedTitle}`
+      : `สมรรถนะที่ ${targetUnit}`;
 
-    const updatedSubtopics = baseSubs.map(s => s === oldName ? trimmed : s);
-    const updatedAssignments = (selectedSubject.assignmentItems || []).map(a => 
-      a.name === oldName ? { ...a, name: trimmed } : a
-    );
+    const updatedSubtopics = baseSubs.map((s, idx) => (idx === unitIndex || s === oldName ? formattedSubtopic : s));
+    const updatedAssignments = [...(selectedSubject.assignmentItems || [])];
 
     // Update learningUnitDetails
     const existingDetails = selectedSubject.learningUnitDetails ? [...selectedSubject.learningUnitDetails] : [];
     const existingDetailIndex = existingDetails.findIndex(d => d.unitNumber === targetUnit || d.name === oldName);
     const updatedDetail: LearningUnitDetail = {
       unitNumber: targetUnit,
-      name: trimmed,
-      standard: standard?.trim() || '',
+      name: formattedSubtopic,
+      standard: standard?.trim() || cleanedTitle || '',
       indicator: indicator?.trim() || ''
     };
 
@@ -1222,9 +1502,16 @@ export const Module2Grading: React.FC<Module2Props> = ({
       updatedDetails = [...existingDetails, updatedDetail];
     }
 
+    const updatedComps = syncCompetenciesFromUnitsAndItems(
+      updatedSubtopics,
+      updatedAssignments,
+      selectedSubject.kindergartenCompetencies
+    );
+
     const updatedSubject: Subject = {
       ...selectedSubject,
       subtopics: updatedSubtopics,
+      kindergartenCompetencies: updatedComps,
       assignmentItems: updatedAssignments,
       learningUnits: updatedSubtopics.map((_, i) => i + 1),
       learningUnitDetails: updatedDetails
@@ -1232,13 +1519,13 @@ export const Module2Grading: React.FC<Module2Props> = ({
 
     onSaveSubject(updatedSubject);
     if (selectedKindergartenSubtopic === oldName) {
-      setSelectedKindergartenSubtopic(trimmed);
+      setSelectedKindergartenSubtopic(formattedSubtopic);
     }
     setSubtopicToRename(null);
     setRenameSubtopicInput('');
     setRenameStandardInput('');
     setRenameIndicatorInput('');
-    onShowToast('success', 'บันทึกข้อมูลหน่วยสำเร็จ 🎉', `อัปเดตข้อมูลหน่วย "${trimmed}" เรียบร้อยแล้ว`);
+    onShowToast('success', 'บันทึกข้อมูลสมรรถนะสำเร็จ 🎉', `อัปเดต "${formattedSubtopic}" เรียบร้อยแล้ว`);
   };
 
   // Rename subtopic / page (backward-compatible wrapper)
@@ -1246,7 +1533,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
     handleEditKindergartenSubtopicSubmit(oldName, newName, renameStandardInput, renameIndicatorInput);
   };
 
-  // Add a new column directly in the current subtopic's table
+  // Add a new องค์ประกอบ/ประเด็น column directly in the current competency's table
   const handleAddKindergartenColumnSubmit = (columnName: string) => {
     if (!selectedSubject || !activeKindergartenSubtopic) return;
     const trimmed = columnName.trim();
@@ -1267,7 +1554,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
     if (existingForPage.length === 0) {
       const defaultCol: AssignmentItem = {
         id: `asg-k-${targetUnit}-1`,
-        name: activeKindergartenSubtopic,
+        name: `องค์ประกอบ/ประเด็น 1`,
         unitNumber: targetUnit,
         maxScore: activeRubricMaxLevel
       };
@@ -1276,18 +1563,26 @@ export const Module2Grading: React.FC<Module2Props> = ({
       updatedItems = [...currentItems, newCol];
     }
 
+    const updatedComps = syncCompetenciesFromUnitsAndItems(
+      currentKindergartenSubtopics,
+      updatedItems,
+      selectedSubject.kindergartenCompetencies
+    );
+
     const updatedSubject: Subject = {
       ...selectedSubject,
+      subtopics: currentKindergartenSubtopics,
+      kindergartenCompetencies: updatedComps,
       assignmentItems: updatedItems
     };
 
     onSaveSubject(updatedSubject);
     setIsAddKindergartenColumnModalOpen(false);
     setNewKindergartenColumnInput('');
-    onShowToast('success', 'เพิ่มช่องตารางประเมินสำเร็จ 🎉', `เพิ่มช่อง "${trimmed}" ในหน้า "${activeKindergartenSubtopic}" แล้ว`);
+    onShowToast('success', 'เพิ่มองค์ประกอบ/ประเด็นสำเร็จ 🎉', `เพิ่ม "${trimmed}" ภายใต้ "${activeKindergartenSubtopic}" แล้ว`);
   };
 
-  // Rename a column in current subtopic's table
+  // Rename an องค์ประกอบ/ประเด็น column in current competency's table
   const handleRenameKindergartenColumn = (colId: string, newName: string) => {
     if (!selectedSubject) return;
     const trimmed = newName.trim();
@@ -1309,21 +1604,28 @@ export const Module2Grading: React.FC<Module2Props> = ({
       updatedItems = [...currentItems, newCol];
     }
 
+    const updatedComps = syncCompetenciesFromUnitsAndItems(
+      currentKindergartenSubtopics,
+      updatedItems,
+      selectedSubject.kindergartenCompetencies
+    );
+
     const updatedSubject: Subject = {
       ...selectedSubject,
+      subtopics: currentKindergartenSubtopics,
+      kindergartenCompetencies: updatedComps,
       assignmentItems: updatedItems
     };
 
     onSaveSubject(updatedSubject);
     setKindergartenColumnToEdit(null);
     setEditKindergartenColumnInput('');
-    onShowToast('success', 'เปลี่ยนชื่อสำเร็จ 🎉', `แก้ไขชื่อช่องเป็น "${trimmed}" เรียบร้อยแล้ว`);
+    onShowToast('success', 'เปลี่ยนชื่อสำเร็จ 🎉', `แก้ไขชื่อองค์ประกอบ/ประเด็นเป็น "${trimmed}" เรียบร้อยแล้ว`);
   };
 
-  // Delete a column from current subtopic's table
+  // Delete an องค์ประกอบ/ประเด็น column from current competency's table
   const handleDeleteKindergartenColumn = (colId: string, colName: string) => {
     if (!selectedSubject) return;
-    if (!window.confirm(`คุณต้องการลบช่องตารางประเมิน "${colName}" ใช่หรือไม่?`)) return;
 
     let currentItems = selectedSubject.assignmentItems;
     const targetUnit = activeKindergartenSubtopicIndex + 1;
@@ -1337,9 +1639,16 @@ export const Module2Grading: React.FC<Module2Props> = ({
     }
 
     const updatedItems = currentItems.filter(it => it.id !== colId && !(it.unitNumber === targetUnit && it.name === colName));
+    const updatedComps = syncCompetenciesFromUnitsAndItems(
+      currentKindergartenSubtopics,
+      updatedItems,
+      selectedSubject.kindergartenCompetencies
+    );
+
     const updatedSubject: Subject = {
       ...selectedSubject,
       subtopics: selectedSubject.subtopics ?? currentKindergartenSubtopics,
+      kindergartenCompetencies: updatedComps,
       assignmentItems: updatedItems,
       hasCustomAssignments: true
     };
@@ -1359,7 +1668,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
     setScoreRows(next);
     autoSaveGrades(next);
 
-    onShowToast('info', 'ลบช่องตารางแล้ว', `ลบช่อง "${colName}" เรียบร้อยแล้ว`);
+    onShowToast('info', 'ลบองค์ประกอบ/ประเด็นแล้ว', `ลบ "${colName}" เรียบร้อยแล้ว`);
   };
 
   // Sync initial schedule from selectedSubject
@@ -1866,6 +2175,9 @@ export const Module2Grading: React.FC<Module2Props> = ({
   const autoSaveGrades = (updatedRows: Record<string, any>) => {
     if (!selectedSubject || !canGradeSubject) return;
     const maxCw = selectedSubject.courseworkScore || 70;
+    const isKinderSubj = !selectedSubject.isActivity && isKindergartenGrade(selectedSubject.gradeLevel);
+    const kItems = selectedSubject.assignmentItems || [];
+    const kMaxRubric = selectedSubject.rubricMaxLevel || (selectedSubject.rubricLevels?.length) || 3;
 
     const recordsToSave: GradeRecord[] = gradeStudents.map(s => {
       const row = updatedRows[s.id] || { 
@@ -1877,11 +2189,30 @@ export const Module2Grading: React.FC<Module2Props> = ({
         assignmentScores: {},
         activityResult: ''
       };
-      
-      const safeCw = selectedSubject.isActivity ? 0 : Math.min(maxCw, Number(row.coursework) || 0);
-      const safeExam = selectedSubject.isActivity ? 0 : Math.min(selectedSubject.examScore || 30, Number(row.exam) || 0);
-      const total = selectedSubject.isActivity ? 0 : Math.min(selectedSubject.totalScore || 100, safeCw + safeExam);
-      const gpa = selectedSubject.isActivity ? 0 : calculateThaiGrade(total);
+
+      let safeCw = selectedSubject.isActivity ? 0 : Math.min(maxCw, Number(row.coursework) || 0);
+      let safeExam = selectedSubject.isActivity ? 0 : Math.min(selectedSubject.examScore || 30, Number(row.exam) || 0);
+      let total = selectedSubject.isActivity ? 0 : Math.min(selectedSubject.totalScore || 100, safeCw + safeExam);
+      let gpa = selectedSubject.isActivity ? 0 : calculateThaiGrade(total);
+
+      if (isKinderSubj) {
+        const asgMap = row.assignmentScores || {};
+        const vals = (kItems.length > 0 ? kItems.map(it => asgMap[it.id]) : Object.values(asgMap))
+          .filter((v): v is number => typeof v === 'number' && !isNaN(v) && v > 0);
+        if (vals.length > 0) {
+          const avg = vals.reduce((acc, v) => acc + v, 0) / vals.length;
+          const level = Math.min(kMaxRubric, Math.max(1, Math.round(avg)));
+          safeCw = level;
+          safeExam = 0;
+          total = level;
+          gpa = level;
+        } else {
+          safeCw = 0;
+          safeExam = 0;
+          total = 0;
+          gpa = 0;
+        }
+      }
 
       const recordSem: '1' | '2' = (selectedSubject.semester === '1' || selectedSubject.semester === '2')
         ? selectedSubject.semester
@@ -2411,6 +2742,10 @@ export const Module2Grading: React.FC<Module2Props> = ({
       return;
     }
 
+    const isKinderSubj = !selectedSubject.isActivity && isKindergartenGrade(selectedSubject.gradeLevel);
+    const kItems = selectedSubject.assignmentItems || [];
+    const kMaxRubric = selectedSubject.rubricMaxLevel || (selectedSubject.rubricLevels?.length) || 3;
+
     const recordsToSave: GradeRecord[] = gradeStudents.map(s => {
       const row = scoreRows[s.id] || { 
         coursework: 0, 
@@ -2421,8 +2756,29 @@ export const Module2Grading: React.FC<Module2Props> = ({
         assignmentScores: {},
         activityResult: ''
       };
-      const total = selectedSubject.isActivity ? 0 : Math.min(selectedSubject.totalScore, (Number(row.coursework) || 0) + (Number(row.exam) || 0));
-      const gpa = selectedSubject.isActivity ? 0 : calculateThaiGrade(total);
+      let safeCw = selectedSubject.isActivity ? 0 : (Number(row.coursework) || 0);
+      let safeExam = selectedSubject.isActivity ? 0 : (Number(row.exam) || 0);
+      let total = selectedSubject.isActivity ? 0 : Math.min(selectedSubject.totalScore, safeCw + safeExam);
+      let gpa = selectedSubject.isActivity ? 0 : calculateThaiGrade(total);
+
+      if (isKinderSubj) {
+        const asgMap = row.assignmentScores || {};
+        const vals = (kItems.length > 0 ? kItems.map(it => asgMap[it.id]) : Object.values(asgMap))
+          .filter((v): v is number => typeof v === 'number' && !isNaN(v) && v > 0);
+        if (vals.length > 0) {
+          const avg = vals.reduce((acc, v) => acc + v, 0) / vals.length;
+          const level = Math.min(kMaxRubric, Math.max(1, Math.round(avg)));
+          safeCw = level;
+          safeExam = 0;
+          total = level;
+          gpa = level;
+        } else {
+          safeCw = 0;
+          safeExam = 0;
+          total = 0;
+          gpa = 0;
+        }
+      }
 
       const recordSem: '1' | '2' = (selectedSubject.semester === '1' || selectedSubject.semester === '2')
         ? selectedSubject.semester
@@ -2440,8 +2796,8 @@ export const Module2Grading: React.FC<Module2Props> = ({
         semester: recordSem,
         academicYear: recordYear,
         assignmentScores: row.assignmentScores || {},
-        courseworkScore: selectedSubject.isActivity ? 0 : (Number(row.coursework) || 0),
-        examScore: selectedSubject.isActivity ? 0 : (Number(row.exam) || 0),
+        courseworkScore: safeCw,
+        examScore: safeExam,
         totalScore: total,
         gradeGpa: gpa,
         readingWritingScore: Number(row.readingWriting) || 3,
@@ -2623,7 +2979,10 @@ export const Module2Grading: React.FC<Module2Props> = ({
           academicYear: trimmed,
           teacherId: '',
           teacherName: '',
-          assignmentItems: s.assignmentItems ? s.assignmentItems.map(it => ({ ...it })) : []
+          assignmentItems: s.assignmentItems ? s.assignmentItems.map(it => ({ ...it })) : [],
+          kindergartenCompetencies: s.kindergartenCompetencies
+            ? s.kindergartenCompetencies.map(c => ({ ...c, elements: [...c.elements] }))
+            : undefined
         }));
 
         if (onSaveBulkSubjects) {
@@ -2747,6 +3106,10 @@ export const Module2Grading: React.FC<Module2Props> = ({
           examScore: s.examScore,
           isActivity: s.isActivity,
           subtopics: s.subtopics ? [...s.subtopics] : existingMatch.subtopics,
+          kindergartenCompetencies: s.kindergartenCompetencies
+            ? s.kindergartenCompetencies.map(c => ({ ...c, elements: [...c.elements] }))
+            : existingMatch.kindergartenCompetencies,
+          hasKindergartenCompetency: s.hasKindergartenCompetency ?? existingMatch.hasKindergartenCompetency,
           rubricLevels: s.rubricLevels ? [...s.rubricLevels] : existingMatch.rubricLevels,
           rubricMaxLevel: s.rubricMaxLevel ?? existingMatch.rubricMaxLevel,
           learningUnits: s.learningUnits ? [...s.learningUnits] : existingMatch.learningUnits,
@@ -2763,6 +3126,10 @@ export const Module2Grading: React.FC<Module2Props> = ({
           semester: targetSemester,
           teacherId: '',
           teacherName: '',
+          hasKindergartenCompetency: s.hasKindergartenCompetency,
+          kindergartenCompetencies: s.kindergartenCompetencies
+            ? s.kindergartenCompetencies.map(c => ({ ...c, elements: [...c.elements] }))
+            : undefined,
           assignmentItems: s.assignmentItems
             ? s.assignmentItems.map((it, aIdx) => ({
                 ...it,
@@ -2810,16 +3177,64 @@ export const Module2Grading: React.FC<Module2Props> = ({
     const exam = isActivityMode ? 0 : Number(formData.get('examScore') || (isPrimary ? 15 : 30));
     const semChoice = formData.get('semester') as string;
     const isKindergarten = !isActivityMode && isKindergartenGrade(gradeLevel);
+    const codeVal = String(formData.get('code') || '').trim();
+    const nameVal = String(formData.get('name') || subjectNameInput || '').trim();
+    const roomVal = normalizeRoom(String(formData.get('room') || modalRoom || '1'));
 
     let cleanedSubtopics: string[] = [];
+    let cleanedCompetencies: KindergartenCompetency[] = [];
     let rubricLevelsToSave: RubricLevel[] = [];
     let rubricMax = 3;
 
     if (isKindergarten) {
-      cleanedSubtopics = kindergartenSubtopics.map(s => s.trim()).filter(Boolean);
-      if (cleanedSubtopics.length === 0) {
-        cleanedSubtopics = ['พัฒนาการและการเรียนรู้'];
+      if (!hasKindergartenCompetency) {
+        // โหมด OFF (ไม่มีสมรรถนะ มีเฉพาะ องค์ประกอบ/ประเด็น ของด้านความสามารถ)
+        const cleanElements = (kindergartenDirectElements || [])
+          .map(el => (el || '').trim())
+          .filter(Boolean);
+        const finalElements = cleanElements.length > 0 ? cleanElements : ['องค์ประกอบ/ประเด็น 1'];
+        cleanedCompetencies = [
+          {
+            id: editingSubject?.kindergartenCompetencies?.[0]?.id || `comp-${Date.now()}-1`,
+            title: '',
+            elements: finalElements
+          }
+        ];
+        cleanedSubtopics = [nameVal || 'ด้านความสามารถ'];
+      } else {
+        // โหมด ON (มีสมรรถนะ 1, 2... และมี องค์ประกอบ/ประเด็น อยู่ใต้สมรรถนะ)
+        const rawCompetencies =
+          kindergartenCompetencies.length > 0
+            ? kindergartenCompetencies
+            : [{ id: `comp-${Date.now()}-1`, title: '', elements: [''] }];
+
+        cleanedCompetencies = rawCompetencies.map((comp, cIdx) => {
+          const cleanTitle = (comp.title || '').trim();
+          const cleanElements = (comp.elements || [])
+            .map(el => (el || '').trim())
+            .filter(Boolean);
+          return {
+            id: comp.id || `comp-${Date.now()}-${cIdx + 1}`,
+            title: cleanTitle,
+            elements: cleanElements.length > 0 ? cleanElements : ['องค์ประกอบ/ประเด็น 1']
+          };
+        });
+
+        if (cleanedCompetencies.length === 0) {
+          cleanedCompetencies = [
+            {
+              id: `comp-${Date.now()}-1`,
+              title: '',
+              elements: ['องค์ประกอบ/ประเด็น 1']
+            }
+          ];
+        }
+
+        cleanedSubtopics = cleanedCompetencies.map((c, idx) =>
+          c.title ? `สมรรถนะที่ ${idx + 1}: ${c.title}` : `สมรรถนะที่ ${idx + 1}`
+        );
       }
+
       rubricMax = kindergartenRubricCount;
       rubricLevelsToSave = kindergartenRubricLevels.slice(0, rubricMax);
     }
@@ -2827,35 +3242,52 @@ export const Module2Grading: React.FC<Module2Props> = ({
     const unitNums = isActivityMode
       ? []
       : isKindergarten
-      ? cleanedSubtopics.map((_, i) => i + 1)
+      ? cleanedCompetencies.map((_, i) => i + 1)
       : (subjectUnitDetails.length > 0
           ? subjectUnitDetails.map(u => u.unitNumber)
           : (editingSubject?.learningUnits && editingSubject.learningUnits.length > 0 ? editingSubject.learningUnits : [1]));
 
-    const unitDetails = isActivityMode || isKindergarten
+    const unitDetails = isActivityMode
       ? []
+      : isKindergarten
+      ? cleanedCompetencies.map((c, idx) => ({
+          unitNumber: idx + 1,
+          name: cleanedSubtopics[idx],
+          score: rubricMax,
+          standard: !hasKindergartenCompetency ? (nameVal || 'ด้านความสามารถ') : (c.title || `สมรรถนะที่ ${idx + 1}`),
+          indicator: c.elements.map((el, eIdx) => `องค์ประกอบ/ประเด็น ${eIdx + 1}: ${el}`).join(', ')
+        }))
       : subjectUnitDetails.map(u => ({
           unitNumber: u.unitNumber,
           name: u.name.trim(),
           score: typeof u.score === 'number' ? u.score : (Number(u.score) || 0)
         }));
 
-    // Generate or update initial assignments based on unit details or kindergarten subtopics
+    // Generate or update initial assignments based on unit details or kindergarten competencies & elements
     let initialAssignments: AssignmentItem[] = isActivityMode
       ? []
       : (editingSubject?.assignmentItems ? [...editingSubject.assignmentItems] : []);
 
     if (!isActivityMode) {
       if (isKindergarten) {
-        initialAssignments = cleanedSubtopics.map((st, i) => {
-          const existing = editingSubject?.assignmentItems?.[i];
-          return {
-            id: existing ? existing.id : `asg-k-${Date.now()}-${i + 1}`,
-            name: st,
-            unitNumber: i + 1,
-            maxScore: rubricMax
-          };
+        const nextKindergartenItems: AssignmentItem[] = [];
+        const baseTs = Date.now();
+        cleanedCompetencies.forEach((comp, cIdx) => {
+          const unitNum = cIdx + 1;
+          const existingForUnit = (editingSubject?.assignmentItems || []).filter(
+            a => a.unitNumber === unitNum
+          );
+          comp.elements.forEach((elName, eIdx) => {
+            const existingItem = existingForUnit[eIdx];
+            nextKindergartenItems.push({
+              id: existingItem ? existingItem.id : `asg-k-${baseTs}-${unitNum}-${eIdx + 1}`,
+              name: elName || `องค์ประกอบ/ประเด็น ${eIdx + 1}`,
+              unitNumber: unitNum,
+              maxScore: rubricMax
+            });
+          });
         });
+        initialAssignments = nextKindergartenItems;
       } else if (!editingSubject && unitDetails.length > 0) {
         initialAssignments = unitDetails.map((ud) => ({
           id: `asg-${Date.now()}-${ud.unitNumber}`,
@@ -2883,10 +3315,6 @@ export const Module2Grading: React.FC<Module2Props> = ({
       }
     }
 
-    const codeVal = String(formData.get('code') || '').trim();
-    const nameVal = String(formData.get('name') || '').trim();
-    const roomVal = normalizeRoom(String(formData.get('room') || modalRoom || '1'));
-
     // Ensure grade & room filter shows the newly created/edited subject's grade level and room
     const matchesFilter =
       (selectedGradeFilter === 'มัธยม' && gradeLevel.startsWith('ม.')) ||
@@ -2898,6 +3326,16 @@ export const Module2Grading: React.FC<Module2Props> = ({
     setSelectedSubjectRoomFilter(roomVal);
 
     const defaultHours = isActivityMode ? 1 : 2;
+
+    // Calculate default sortOrder at the end of the grade/room list when adding a new subject
+    const existingInGradeRoom = yearSubjects.filter(
+      s => s.gradeLevel === gradeLevel && normalizeRoom(s.room) === roomVal
+    );
+    const maxExistingOrder = existingInGradeRoom.reduce(
+      (max, s, idx) => Math.max(max, typeof s.sortOrder === 'number' ? s.sortOrder : idx + 1),
+      0
+    );
+    const nextSortOrder = editingSubject?.sortOrder ?? (maxExistingOrder + 1);
 
     if (semChoice === 'both' && !editingSubject) {
       const baseTs = Date.now();
@@ -2919,9 +3357,12 @@ export const Module2Grading: React.FC<Module2Props> = ({
         learningUnits: unitNums,
         learningUnitDetails: unitDetails,
         subtopics: isKindergarten ? cleanedSubtopics : undefined,
+        kindergartenCompetencies: isKindergarten ? cleanedCompetencies : undefined,
+        hasKindergartenCompetency: isKindergarten ? hasKindergartenCompetency : undefined,
         rubricLevels: isKindergarten ? rubricLevelsToSave : undefined,
         rubricMaxLevel: isKindergarten ? rubricMax : undefined,
-        isActivity: isActivityMode
+        isActivity: isActivityMode,
+        sortOrder: nextSortOrder
       };
       const sub2: Subject = {
         id: `${isActivityMode ? 'act' : 'sub'}-${baseTs}-sem2`,
@@ -2941,9 +3382,14 @@ export const Module2Grading: React.FC<Module2Props> = ({
         learningUnits: unitNums,
         learningUnitDetails: unitDetails,
         subtopics: isKindergarten ? cleanedSubtopics : undefined,
+        kindergartenCompetencies: isKindergarten
+          ? cleanedCompetencies.map(c => ({ ...c, id: `${c.id}-sem2`, elements: [...c.elements] }))
+          : undefined,
+        hasKindergartenCompetency: isKindergarten ? hasKindergartenCompetency : undefined,
         rubricLevels: isKindergarten ? rubricLevelsToSave : undefined,
         rubricMaxLevel: isKindergarten ? rubricMax : undefined,
-        isActivity: isActivityMode
+        isActivity: isActivityMode,
+        sortOrder: nextSortOrder
       };
       if (onSaveBulkSubjects) {
         onSaveBulkSubjects([sub1, sub2]);
@@ -2956,13 +3402,16 @@ export const Module2Grading: React.FC<Module2Props> = ({
       setEditingSubject(null);
       setSubjectUnitCountInput('');
       setSubjectUnitDetails([]);
+      setHasKindergartenCompetency(true);
+      setKindergartenDirectElements(['']);
       setKindergartenSubtopics(['']);
+      setKindergartenCompetencies([{ id: `comp-${Date.now()}-1`, title: '', elements: [''] }]);
       setKindergartenRubricLevels(DEFAULT_KINDERGARTEN_RUBRIC_LEVELS);
       setKindergartenRubricCount(3);
       onShowToast(
         'success',
         isActivityMode ? 'บันทึกกิจกรรมสำเร็จ' : 'บันทึกวิชาสำเร็จ',
-        `บันทึก${isActivityMode ? 'กิจกรรม' : 'โครงสร้างรายวิชา'} ${sub1.code ? sub1.code + ' ' : ''}${sub1.name} (ชั้น ${gradeLevel} ห้อง ${roomVal} ทั้งเทอม 1 และเทอม 2) เรียบร้อยแล้ว`
+        `บันทึก${isActivityMode ? 'กิจกรรม' : (isKindergarten ? 'ด้านความสามารถ' : 'โครงสร้างรายวิชา')} ${sub1.code ? sub1.code + ' ' : ''}${sub1.name} (ชั้น ${gradeLevel} ห้อง ${roomVal} ทั้งเทอม 1 และเทอม 2) เรียบร้อยแล้ว`
       );
       return;
     }
@@ -2986,9 +3435,12 @@ export const Module2Grading: React.FC<Module2Props> = ({
       learningUnits: unitNums,
       learningUnitDetails: unitDetails,
       subtopics: isKindergarten ? cleanedSubtopics : undefined,
+      kindergartenCompetencies: isKindergarten ? cleanedCompetencies : undefined,
+      hasKindergartenCompetency: isKindergarten ? hasKindergartenCompetency : undefined,
       rubricLevels: isKindergarten ? rubricLevelsToSave : undefined,
       rubricMaxLevel: isKindergarten ? rubricMax : undefined,
-      isActivity: isActivityMode
+      isActivity: isActivityMode,
+      sortOrder: nextSortOrder
     };
 
     onSaveSubject(newSub);
@@ -3000,13 +3452,16 @@ export const Module2Grading: React.FC<Module2Props> = ({
     setEditingSubject(null);
     setSubjectUnitCountInput('');
     setSubjectUnitDetails([]);
+    setHasKindergartenCompetency(true);
+    setKindergartenDirectElements(['']);
     setKindergartenSubtopics(['']);
+    setKindergartenCompetencies([{ id: `comp-${Date.now()}-1`, title: '', elements: [''] }]);
     setKindergartenRubricLevels(DEFAULT_KINDERGARTEN_RUBRIC_LEVELS);
     setKindergartenRubricCount(3);
     onShowToast(
       'success',
       isActivityMode ? 'บันทึกกิจกรรมสำเร็จ' : 'บันทึกวิชาสำเร็จ',
-      `บันทึก${isActivityMode ? 'กิจกรรม' : 'โครงสร้างรายวิชา'} ${newSub.code ? newSub.code + ' ' : ''}${newSub.name} (ชั้น ${gradeLevel} ห้อง ${roomVal} ภาคเรียนที่ ${sem}) เรียบร้อยแล้ว`
+      `บันทึก${isActivityMode ? 'กิจกรรม' : (isKindergarten ? 'ด้านความสามารถ' : 'โครงสร้างรายวิชา')} ${newSub.code ? newSub.code + ' ' : ''}${newSub.name} (ชั้น ${gradeLevel} ห้อง ${roomVal} ภาคเรียนที่ ${sem}) เรียบร้อยแล้ว`
     );
   };
 
@@ -3452,21 +3907,79 @@ export const Module2Grading: React.FC<Module2Props> = ({
                         </button>
                       )}
 
-                      {/* ปุ่มสรุป อยู่ข้างๆ กับปุ่มคัดลอกตาราง เขียนแค่ว่า 'สรุป' ก็พอ (สำหรับ อ.1, อ.2, อ.3) */}
+                      {/* ปุ่มสรุป และ ปุ่มให้คะแนน อยู่บรรทัดเดียวกัน (สำหรับ อ.1, อ.2, อ.3) */}
                       {isSelectedSubjectKindergarten && (
-                        <button
-                          type="button"
-                          onClick={() => setKindergartenViewMode(kindergartenViewMode === 'inlineSummary' ? 'grading' : 'inlineSummary')}
-                          className={`px-2.5 py-1 text-xs font-bold rounded-lg border transition-all inline-flex items-center gap-1 shadow-2xs active:scale-95 cursor-pointer ${
-                            kindergartenViewMode === 'inlineSummary'
-                              ? 'bg-amber-600 text-white border-amber-600 ring-2 ring-amber-300'
-                              : 'bg-white hover:bg-amber-50 text-slate-700 hover:text-amber-900 border-slate-200'
-                          }`}
-                          title="สรุปผลการประเมินทั้งหมด (1 ตาราง)"
-                        >
-                          <FileText className={`w-3.5 h-3.5 ${kindergartenViewMode === 'inlineSummary' ? 'text-white' : 'text-amber-600'}`} />
-                          <span>สรุป</span>
-                        </button>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setKindergartenViewMode(kindergartenViewMode === 'inlineSummary' ? 'grading' : 'inlineSummary')}
+                            className={`px-2.5 py-1 text-xs font-bold rounded-lg border transition-all inline-flex items-center gap-1 shadow-2xs active:scale-95 cursor-pointer ${
+                              kindergartenViewMode === 'inlineSummary'
+                                ? 'bg-amber-600 text-white border-amber-600 ring-2 ring-amber-300'
+                                : 'bg-white hover:bg-amber-50 text-slate-700 hover:text-amber-900 border-slate-200'
+                            }`}
+                            title="สรุปผลการประเมินทั้งหมด (1 ตาราง)"
+                          >
+                            <FileText className={`w-3.5 h-3.5 ${kindergartenViewMode === 'inlineSummary' ? 'text-white' : 'text-amber-600'}`} />
+                            <span>สรุป</span>
+                          </button>
+
+                          {activeKindergartenSubtopic && canGradeSubject && !isAdminReadOnly && !isMemberLockedReadOnly && (
+                            <div className="relative">
+                              <button
+                                type="button"
+                                onClick={() => setStarMenuOpenSubtopic(starMenuOpenSubtopic === activeKindergartenSubtopic ? null : activeKindergartenSubtopic)}
+                                className="px-2.5 py-1 text-xs font-bold text-amber-900 bg-amber-200/90 hover:bg-amber-300 rounded-lg flex items-center gap-1 cursor-pointer transition-colors shrink-0 shadow-2xs border border-amber-300"
+                                title="ให้คะแนนระดับเดียวกันทุกคน"
+                              >
+                                <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-600" />
+                                <span>ให้คะแนน</span>
+                              </button>
+
+                              {starMenuOpenSubtopic === activeKindergartenSubtopic && (
+                                <>
+                                  <div
+                                    className="fixed inset-0 z-30"
+                                    onClick={() => setStarMenuOpenSubtopic(null)}
+                                  />
+                                  <div className="absolute right-0 top-full mt-1.5 z-40 bg-white border border-amber-200 rounded-xl shadow-lg p-1.5 min-w-[150px] animate-in fade-in zoom-in-95 text-slate-800">
+                                    <div className="text-[10px] font-bold text-amber-900 px-2 py-1 border-b border-amber-100 mb-1 flex items-center gap-1">
+                                      <Star className="w-3 h-3 text-amber-500 fill-amber-400" />
+                                      <span>ให้คะแนนเท่ากันทั้งหน้า</span>
+                                    </div>
+                                    <div className="space-y-0.5">
+                                      {Array.from({ length: activeRubricMaxLevel }, (_, i) => activeRubricMaxLevel - i).map((lvl) => {
+                                        const rubricObj = activeRubricLevels.find(r => r.level === lvl);
+                                        return (
+                                          <button
+                                            key={lvl}
+                                            type="button"
+                                            onClick={() => {
+                                              handleBatchSetRubricScoreForPage(activeKindergartenSubtopic, lvl);
+                                              setStarMenuOpenSubtopic(null);
+                                            }}
+                                            className="w-full text-left px-2 py-1.5 rounded-lg text-xs font-semibold hover:bg-amber-50 text-slate-700 hover:text-amber-900 flex items-center justify-between transition-colors cursor-pointer"
+                                          >
+                                            <div className="flex items-center gap-1.5">
+                                              <span className={`w-4 h-4 rounded text-[10px] font-bold text-white flex items-center justify-center ${
+                                                lvl === 3 ? 'bg-emerald-600' :
+                                                lvl === 2 ? 'bg-sky-600' :
+                                                lvl === 1 ? 'bg-amber-500' : 'bg-indigo-600'
+                                              }`}>
+                                                {lvl}
+                                              </span>
+                                              <span>{rubricObj?.label || `ระดับ ${lvl}`}</span>
+                                            </div>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       )}
                     </h3>
                   </div>
@@ -3493,192 +4006,103 @@ export const Module2Grading: React.FC<Module2Props> = ({
                     </div>
                   ) : isSelectedSubjectKindergarten ? (
                     <div className="w-full bg-slate-50/70 border border-slate-200/80 rounded-2xl p-2.5 space-y-2.5">
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 w-full">
-                        {/* ปุ่มหัวข้อย่อยแต่ละหน้า */}
-                        {currentKindergartenSubtopics.map((stName, idx) => {
-                          const isSelected = activeKindergartenSubtopic === stName;
-                          return (
-                            <div
-                              key={idx}
-                              className={`group/tab relative flex items-center justify-between h-11 px-2.5 rounded-xl transition-all shadow-2xs border ${
-                                isSelected
-                                  ? 'bg-amber-600 text-white border-amber-600 shadow-xs ring-2 ring-amber-300'
-                                  : 'bg-white hover:bg-amber-50 text-slate-700 hover:text-amber-900 border-slate-200 hover:border-amber-300'
-                              }`}
-                            >
+                      {/* แสดงแถบปุ่มสมรรถนะเฉพาะเมื่อเปิดใช้งานสมรรถนะ (ON) */}
+                      {!isSelectedKindergartenCompetencyOff && (
+                        <div className="flex items-center gap-2 flex-wrap pt-0.5 w-full">
+                          <span className="text-[11px] font-bold text-slate-600 mr-0.5 shrink-0 flex items-center gap-1">
+                            <span>สมรรถนะ :</span>
+                          </span>
+
+                          {/* รายการสมรรถนะเป็นข้อๆ กรอบวงกลมตัวเลข 1, 2, 3... */}
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {currentKindergartenSubtopics.map((stName, idx) => {
+                              const isSelected = activeKindergartenSubtopic === stName;
+                              const uNum = idx + 1;
+                              return (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedKindergartenSubtopic(stName);
+                                    if (kindergartenViewMode === 'inlineSummary') {
+                                      setKindergartenViewMode('grading');
+                                    }
+                                  }}
+                                  className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs transition-all shadow-2xs cursor-pointer select-none ${
+                                    isSelected
+                                      ? 'bg-amber-600 text-white ring-2 ring-amber-300 scale-105'
+                                      : 'bg-white hover:bg-amber-50 text-slate-700 hover:text-amber-900 border border-slate-300/80 hover:border-amber-400'
+                                  }`}
+                                  title={`สมรรถนะที่ ${uNum}: ${stName}`}
+                                >
+                                  {uNum}
+                                </button>
+                              );
+                            })}
+
+                            {/* ปุ่ม '+' สำหรับเพิ่มสมรรถนะใหม่ */}
+                            {canManageKindergartenTopics && (
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setSelectedKindergartenSubtopic(stName);
-                                  if (kindergartenViewMode === 'inlineSummary') {
-                                    setKindergartenViewMode('grading');
-                                  }
+                                  setNewKindergartenSubtopicInput('');
+                                  setNewKindergartenStandardInput('');
+                                  setNewKindergartenIndicatorInput('');
+                                  setNewKindergartenElementsInput(['']);
+                                  setIsAddKindergartenSubtopicModalOpen(true);
                                 }}
-                                className="flex-1 min-w-0 h-full text-left text-xs font-bold cursor-pointer flex items-center gap-2 py-1"
+                                className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-dashed border-amber-300 hover:border-amber-400 transition-all shadow-2xs active:scale-95 cursor-pointer"
+                                title="เพิ่มสมรรถนะ (+)"
                               >
-                                <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-mono shrink-0 ${
-                                  isSelected ? 'bg-white text-amber-700 font-black shadow-2xs' : 'bg-slate-100 text-slate-600 font-semibold'
-                                }`}>
-                                  {idx + 1}
-                                </span>
-                                <span className="truncate leading-snug" title={stName}>{stName}</span>
+                                <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
                               </button>
-
-                               {canManageKindergartenTopics && (
-                                <div className={`flex items-center gap-0.5 shrink-0 ml-1 transition-opacity ${
-                                  isSelected ? 'opacity-100' : 'opacity-70 group-hover/tab:opacity-100'
-                                }`}>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleOpenEditKindergartenUnitModal(stName);
-                                    }}
-                                    className={`p-1 rounded-lg transition-all cursor-pointer inline-flex items-center justify-center ${
-                                      isSelected
-                                        ? 'text-white/90 hover:text-white hover:bg-black/20'
-                                        : 'text-slate-400 hover:text-amber-700 hover:bg-amber-100'
-                                    }`}
-                                    title={`แก้ไขชื่อหน่วย มาตรฐาน และตัวชี้วัด`}
-                                  >
-                                    <Edit className="w-3.5 h-3.5 stroke-[2]" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleDeleteKindergartenSubtopic(stName);
-                                    }}
-                                    className={`p-1 rounded-lg transition-all cursor-pointer inline-flex items-center justify-center ${
-                                      isSelected
-                                        ? 'text-white/90 hover:text-white hover:bg-rose-900/40'
-                                        : 'text-slate-400 hover:text-rose-600 hover:bg-rose-100'
-                                    }`}
-                                    title={`ลบหน้าชื่อหน่วย "${stName}"`}
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5 stroke-[2]" />
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-
-                        {/* ปุ่ม '+' สำหรับเพิ่มหน้าหน่วยการเรียนรู้ใหม่ ในกริดขนาดเท่ากัน */}
-                        {canManageKindergartenTopics && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setNewKindergartenSubtopicInput(`หน่วยที่ ${currentKindergartenSubtopics.length + 1}`);
-                              setNewKindergartenStandardInput('');
-                              setNewKindergartenIndicatorInput('');
-                              setIsAddKindergartenSubtopicModalOpen(true);
-                            }}
-                            className="h-11 px-3 rounded-xl text-xs font-bold bg-amber-100/90 hover:bg-amber-200 text-amber-900 border border-dashed border-amber-400 transition-all shadow-2xs flex items-center justify-center gap-2 cursor-pointer active:scale-95"
-                            title="เพิ่มหน้า (+)"
-                          >
-                            <Plus className="w-4 h-4 stroke-[2.5]" />
-                            <span>เพิ่มหน้า</span>
-                          </button>
-                        )}
-                      </div>
-
-                      {/* แสดงข้อมูลหน่วยที่เลือก: มาตรฐานการเรียนรู้ และ ตัวชี้วัด */}
-                      {activeKindergartenSubtopic && (() => {
-                        const curIdx = currentKindergartenSubtopics.indexOf(activeKindergartenSubtopic);
-                        const curUnitNum = curIdx >= 0 ? curIdx + 1 : 1;
-                        const curDetail = selectedSubject?.learningUnitDetails?.find(
-                          d => (curUnitNum > 0 && d.unitNumber === curUnitNum) || d.name === activeKindergartenSubtopic
-                        );
-                        const std = curDetail?.standard?.trim();
-                        const ind = curDetail?.indicator?.trim();
-
-                        return (
-                          <div className="hidden sm:flex bg-amber-50/80 border border-amber-200/90 rounded-xl p-2.5 text-xs text-amber-950 sm:flex-row items-start sm:items-center justify-between gap-2 animate-in fade-in">
-                            <div className="flex-1 space-y-1">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-bold text-amber-950 bg-amber-200/70 px-2 py-0.5 rounded-md text-[11px]">
-                                  หน่วยที่ {curUnitNum}: {activeKindergartenSubtopic}
-                                </span>
-                              </div>
-                              <div className="flex flex-col sm:flex-row gap-1 sm:gap-4 text-[11px] text-amber-900/90 pt-0.5">
-                                <div>
-                                  <span className="font-bold text-amber-950">มาตรฐานการเรียนรู้: </span>
-                                  <span>{std || '-'}</span>
-                                </div>
-                                <div className="sm:border-l sm:border-amber-300 sm:pl-3">
-                                  <span className="font-bold text-amber-950">ตัวชี้วัด: </span>
-                                  <span>{ind || '-'}</span>
-                                </div>
-                              </div>
-                            </div>
-                            {canManageKindergartenTopics && activeKindergartenSubtopic && (
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                <div className="relative">
-                                  <button
-                                    type="button"
-                                    onClick={() => setStarMenuOpenSubtopic(starMenuOpenSubtopic === activeKindergartenSubtopic ? null : activeKindergartenSubtopic)}
-                                    className="px-2.5 py-1 text-[11px] font-bold text-amber-900 bg-amber-200/80 hover:bg-amber-300 rounded-lg flex items-center gap-1 cursor-pointer transition-colors shrink-0 shadow-2xs"
-                                    title="ให้คะแนนระดับเดียวกันทุกคนในหน้านี้"
-                                  >
-                                    <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-600" />
-                                    <span>ให้คะแนนทั้งหน้า</span>
-                                  </button>
-
-                                  {starMenuOpenSubtopic === activeKindergartenSubtopic && (
-                                    <>
-                                      <div
-                                        className="fixed inset-0 z-30"
-                                        onClick={() => setStarMenuOpenSubtopic(null)}
-                                      />
-                                      <div className="absolute right-0 top-full mt-1.5 z-40 bg-white border border-amber-200 rounded-xl shadow-lg p-1.5 min-w-[140px] animate-in fade-in zoom-in-95 text-slate-800">
-                                        <div className="text-[10px] font-bold text-amber-900 px-2 py-1 border-b border-amber-100 mb-1 flex items-center gap-1">
-                                          <Star className="w-3 h-3 text-amber-500 fill-amber-400" />
-                                          <span>ให้คะแนนเท่ากันทั้งหน้า</span>
-                                        </div>
-                                        <div className="space-y-0.5">
-                                          {Array.from({ length: activeRubricMaxLevel }, (_, i) => activeRubricMaxLevel - i).map((lvl) => {
-                                            const rubricObj = activeRubricLevels.find(r => r.level === lvl);
-                                            return (
-                                              <button
-                                                key={lvl}
-                                                type="button"
-                                                onClick={() => handleBatchSetRubricScoreForPage(activeKindergartenSubtopic, lvl)}
-                                                className="w-full text-left px-2 py-1.5 rounded-lg text-xs font-semibold hover:bg-amber-50 text-slate-700 hover:text-amber-900 flex items-center justify-between transition-colors cursor-pointer"
-                                              >
-                                                <div className="flex items-center gap-1.5">
-                                                  <span className={`w-4 h-4 rounded text-[10px] font-bold text-white flex items-center justify-center ${
-                                                    lvl === 3 ? 'bg-emerald-600' :
-                                                    lvl === 2 ? 'bg-sky-600' :
-                                                    lvl === 1 ? 'bg-amber-500' : 'bg-indigo-600'
-                                                  }`}>
-                                                    {lvl}
-                                                  </span>
-                                                  <span>{rubricObj?.label || `ระดับ ${lvl}`}</span>
-                                                </div>
-                                              </button>
-                                            );
-                                          })}
-                                        </div>
-                                      </div>
-                                    </>
-                                  )}
-                                </div>
-
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenEditKindergartenUnitModal(activeKindergartenSubtopic)}
-                                  className="px-2.5 py-1 text-[11px] font-bold text-amber-800 hover:text-amber-950 bg-amber-100 hover:bg-amber-200 rounded-lg flex items-center gap-1 cursor-pointer transition-colors shrink-0"
-                                  title="แก้ไขชื่อหน่วย มาตรฐานการเรียนรู้ และตัวชี้วัด"
-                                >
-                                  <Edit className="w-3 h-3" />
-                                  <span>แก้ไขมาตรฐาน/ตัวชี้วัด</span>
-                                </button>
-                              </div>
                             )}
                           </div>
-                        );
-                      })()}
+
+                          {/* เมื่อกดข้อสมรรถนะ ด้านหลังก็จะแสดงชื่อสมรรถนะนั้นๆ และมีปุ่มแก้ไข - ลบ */}
+                          {activeKindergartenSubtopic && (() => {
+                            const activeIdx = activeKindergartenSubtopicIndex;
+                            const compObj = activeIdx >= 0 ? selectedSubject?.kindergartenCompetencies?.[activeIdx] : undefined;
+                            const elemCount = compObj?.elements?.length || (selectedSubject?.assignmentItems || []).filter(it => it.unitNumber === activeIdx + 1).length || 0;
+                            const cleanedTitle = compObj?.title?.trim() || activeKindergartenSubtopic.replace(/^สมรรถนะ(\s*ที่)?\s*\d+\s*:?\s*/i, '').trim();
+
+                            return (
+                              <div className="flex items-center gap-2 px-2.5 py-1 bg-amber-50/90 text-amber-900 rounded-xl border border-amber-200/80 text-xs font-semibold animate-in fade-in max-w-full">
+                                <span className="font-bold text-amber-950 truncate max-w-[280px] sm:max-w-md" title={activeKindergartenSubtopic}>
+                                  สมรรถนะที่ {activeIdx + 1}{cleanedTitle ? `: ${cleanedTitle}` : ''}
+                                  {elemCount > 0 && (
+                                    <span className="text-[10px] ml-1.5 font-normal text-amber-700 bg-amber-100/70 px-1.5 py-0.5 rounded-md border border-amber-200/60">
+                                      {elemCount} ประเด็น
+                                    </span>
+                                  )}
+                                </span>
+
+                                {canManageKindergartenTopics && (
+                                  <div className="flex items-center gap-1 ml-1 border-l border-amber-200 pl-1.5 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenEditKindergartenUnitModal(activeKindergartenSubtopic)}
+                                      className="p-1 hover:bg-amber-200/80 text-amber-800 rounded-lg transition-all cursor-pointer"
+                                      title={`แก้ไขชื่อสมรรถนะ และองค์ประกอบ/ประเด็น`}
+                                    >
+                                      <Edit className="w-3.5 h-3.5" />
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteKindergartenSubtopic(activeKindergartenSubtopic)}
+                                      className="p-1 hover:bg-rose-100 text-rose-600 rounded-lg transition-all cursor-pointer"
+                                      title={`ลบสมรรถนะ "${activeKindergartenSubtopic}"`}
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     /* สำหรับ ป.1 - ม.6: หน่วยการเรียนรู้ 1, 2, 3 วงกลมเลข + ชื่อหน่วย + คะแนนเต็ม + ปุ่มแก้ไขและลบ */
@@ -3933,8 +4357,10 @@ export const Module2Grading: React.FC<Module2Props> = ({
                                 <span className="w-4 h-4 rounded bg-white/90 text-amber-900 font-mono text-[10px] font-black inline-flex items-center justify-center shadow-2xs">
                                   {pageUnitNum}
                                 </span>
-                                <span className="font-bold text-[11px] truncate max-w-[160px]" title={stName}>
-                                  หน้า: {stName}
+                                <span className="font-bold text-[11px] truncate max-w-[180px]" title={stName}>
+                                  {isSelectedKindergartenCompetencyOff
+                                    ? `ด้านความสามารถ: ${selectedSubject.name}`
+                                    : (stName.startsWith('สมรรถนะที่') ? stName : `สมรรถนะที่ ${pageUnitNum}: ${stName}`)}
                                 </span>
                               </div>
                             </th>
@@ -3943,11 +4369,11 @@ export const Module2Grading: React.FC<Module2Props> = ({
 
                         {/* Final 2 Columns Group Header */}
                         <th colSpan={2} className="py-1.5 px-2 text-center bg-emerald-100 text-emerald-950 border-b border-slate-300 font-bold text-[11px]">
-                          สรุปภาพรวมของหน้าทั้งหมด
+                          {isSelectedKindergartenCompetencyOff ? 'สรุปภาพรวมด้านความสามารถ' : 'สรุปภาพรวมทุกสมรรถนะ'}
                         </th>
                       </tr>
 
-                      {/* Lower Header Row: Columns per Page + Standard Quality + Final Overall */}
+                      {/* Lower Header Row: Columns per Competency (องค์ประกอบ/ประเด็น) + Summary + Final Overall */}
                       <tr>
                         {currentKindergartenSubtopics.map((stName, pIdx) => {
                           const pageUnitNum = pIdx + 1;
@@ -3959,30 +4385,35 @@ export const Module2Grading: React.FC<Module2Props> = ({
                           );
                           const cols = pageAssignments.length > 0
                             ? pageAssignments
-                            : [{ id: `asg-k-${pageUnitNum}-1`, name: stName, unitNumber: pageUnitNum, maxScore: activeRubricMaxLevel }];
+                            : [{ id: `asg-k-${pageUnitNum}-1`, name: `องค์ประกอบ/ประเด็น 1`, unitNumber: pageUnitNum, maxScore: activeRubricMaxLevel }];
 
                           return (
                             <React.Fragment key={`subhead-${pIdx}`}>
-                              {cols.map((asg) => (
+                              {cols.map((asg, cIdx) => (
                                 <th
                                   key={asg.id}
-                                  className="py-1 px-1 text-center border-r border-b border-slate-200 min-w-[45px] max-w-[65px] bg-white font-semibold text-slate-700 text-[10px]"
-                                  title={asg.name}
+                                  className="py-1 px-1 text-center border-r border-b border-slate-200 min-w-[60px] max-w-[90px] bg-white font-semibold text-slate-700 text-[10px]"
+                                  title={`องค์ประกอบ/ประเด็น ${cIdx + 1}: ${asg.name}`}
                                 >
-                                  <div className="truncate max-w-[65px] font-bold text-slate-800">
+                                  <div className="text-[9px] text-amber-700 font-bold">
+                                    องค์ประกอบ/ประเด็น {cIdx + 1}
+                                  </div>
+                                  <div className="truncate max-w-[85px] font-bold text-slate-800">
                                     {asg.name}
                                   </div>
                                 </th>
                               ))}
 
-                              {/* สรุปคุณภาพ (เขียนตามชื่อ มาตรฐานการเรียนรู้) */}
+                              {/* สรุปคุณภาพของสมรรถนะ / ด้านความสามารถ */}
                               <th
                                 className="py-1 px-1 text-center border-r border-b border-slate-300 min-w-[75px] max-w-[95px] bg-amber-50/80 text-amber-950 font-bold"
-                                title={pageDetail?.standard || 'มาตรฐานการเรียนรู้'}
+                                title={pageDetail?.standard || stName}
                               >
-                                <div className="text-[10px] font-black text-amber-900 leading-tight">สรุปคุณภาพ</div>
+                                <div className="text-[10px] font-black text-amber-900 leading-tight">
+                                  {isSelectedKindergartenCompetencyOff ? 'สรุปผล' : 'สรุปสมรรถนะ'}
+                                </div>
                                 <div className="text-[9px] font-semibold text-amber-800 truncate max-w-[90px]">
-                                  {pageDetail?.standard?.trim() ? `(${pageDetail.standard.trim()})` : '(มฐ.)'}
+                                  {isSelectedKindergartenCompetencyOff ? '(ด้านความสามารถ)' : `(สมรรถนะที่ ${pageUnitNum})`}
                                 </div>
                               </th>
                             </React.Fragment>
@@ -4579,83 +5010,86 @@ export const Module2Grading: React.FC<Module2Props> = ({
                 <table className="w-full text-left text-xs border-collapse">
                   <thead className="bg-slate-100/90 text-slate-700 font-semibold border-b border-slate-200">
                     <tr>
-                      <th className="py-3 px-2 w-10 text-center">เลขที่</th>
-                      <th className="py-3 px-2 w-16 text-center">รหัส</th>
-                      <th className="py-3 px-3 min-w-[140px]">ชื่อ - นามสกุล</th>
+                      <th className="py-2.5 px-1.5 w-9 min-w-[36px] text-center border-r border-slate-200/80">เลขที่</th>
+                      <th className="py-2.5 px-1.5 w-14 min-w-[50px] text-center border-r border-slate-200/80">รหัส</th>
+                      <th className="py-2.5 px-2 min-w-[110px] max-w-[140px] border-r border-slate-200/80">ชื่อ - นามสกุล</th>
 
-                      {/* Dynamic Kindergarten Columns for CURRENT Subtopic */}
-                      {displayedKindergartenAssignments.map((asg) => (
+                      {/* Dynamic Kindergarten Columns (องค์ประกอบ/ประเด็น) for CURRENT Competency */}
+                      {displayedKindergartenAssignments.map((asg, aIdx) => (
                         <th 
                           key={asg.id} 
-                          className="py-2.5 px-2 text-center bg-amber-50/50 border-l border-r border-slate-200/80 min-w-[140px] align-top group/head"
+                          className="py-1.5 px-1 text-center bg-amber-50/50 border-l border-r border-slate-200/80 min-w-[76px] max-w-[105px] align-top group/head pb-1"
                         >
-                          <div className="flex flex-col items-center justify-between min-h-[52px]">
-                            <div className="flex items-center justify-center gap-1.5 w-full px-1">
-                              <span 
-                                className="text-[12px] font-bold text-slate-800 leading-tight text-center break-words" 
-                                title={asg.name}
-                              >
-                                {asg.name}
-                              </span>
-                              {canManageKindergartenTopics && (
-                                <div className="flex items-center gap-0.5 shrink-0 ml-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setKindergartenColumnToEdit(asg);
-                                      setEditKindergartenColumnInput(asg.name);
-                                    }}
-                                    className="p-1 text-slate-400 hover:text-amber-800 hover:bg-amber-100/70 rounded transition-colors cursor-pointer"
-                                    title="เปลี่ยนชื่อช่องประเมิน"
-                                  >
-                                    <Edit className="w-3 h-3" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeleteKindergartenColumn(asg.id, asg.name)}
-                                    className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-100/80 rounded transition-colors cursor-pointer"
-                                    title={`ลบช่องประเมิน "${asg.name}"`}
-                                  >
-                                    <X className="w-3 h-3 stroke-[2]" />
-                                  </button>
-                                </div>
-                              )}
+                          <div className="flex flex-col items-center justify-between min-h-[58px] h-full gap-0.5">
+                            <span className="text-[9px] font-bold text-amber-800 bg-amber-100/90 px-1.5 py-0.2 rounded border border-amber-200/80 shrink-0">
+                              ประเด็น {aIdx + 1}
+                            </span>
+                            
+                            <span 
+                              className="text-[11px] font-bold text-slate-800 leading-tight text-center break-words line-clamp-2 px-0.5 my-auto" 
+                              title={asg.name}
+                            >
+                              {asg.name}
+                            </span>
+
+                            {canManageKindergartenTopics && (
+                              <div className="flex items-center justify-center gap-1 w-full pt-0.5 mt-auto border-t border-amber-200/60 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setKindergartenColumnToEdit(asg);
+                                    setEditKindergartenColumnInput(asg.name);
+                                  }}
+                                  className="p-0.5 text-slate-500 hover:text-amber-800 hover:bg-amber-100/80 rounded transition-colors cursor-pointer"
+                                  title="แก้ไขชื่อองค์ประกอบ/ประเด็น"
+                                >
+                                  <Edit className="w-3 h-3" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setKindergartenColumnToDelete({ id: asg.id, name: asg.name })}
+                                  className="p-0.5 text-slate-500 hover:text-rose-600 hover:bg-rose-100/80 rounded transition-colors cursor-pointer"
+                                  title={`ลบองค์ประกอบ/ประเด็น "${asg.name}"`}
+                                >
+                                  <X className="w-3 h-3 stroke-[2]" />
+                                </button>
+                              </div>
+                            )}
                           </div>
-                        </div>
-                      </th>
+                        </th>
                       ))}
 
-                      {/* ปุ่ม '+' ในตาราง สำหรับเพิ่มช่องประเมินในหน้านี้ (ไม่ใช่เพิ่มหน้าข้างบน) */}
+                      {/* ปุ่ม '+' ในตาราง สำหรับเพิ่มองค์ประกอบ/ประเด็นภายใต้สมรรถนะนี้ */}
                       {canManageKindergartenTopics && (
-                        <th className="py-2.5 px-1 text-center bg-amber-50/40 border-l border-r border-dashed border-amber-300 w-12 min-w-[48px] align-middle">
+                        <th className="py-2 px-1 text-center bg-amber-50/40 border-l border-r border-dashed border-amber-300 w-9 min-w-[36px] align-middle">
                           <button
                             type="button"
                             onClick={() => {
-                              setNewKindergartenColumnInput(`ช่องที่ ${displayedKindergartenAssignments.length + 1}`);
+                              setNewKindergartenColumnInput(`องค์ประกอบ/ประเด็น ${displayedKindergartenAssignments.length + 1}`);
                               setIsAddKindergartenColumnModalOpen(true);
                             }}
-                            className="w-7 h-7 mx-auto rounded-lg flex items-center justify-center bg-amber-500 hover:bg-amber-600 text-white shadow-2xs hover:scale-105 active:scale-95 cursor-pointer transition-all"
-                            title={`เพิ่มช่องตารางประเมินในหน้า "${activeKindergartenSubtopic}" (+)`}
+                            className="w-6 h-6 mx-auto rounded-lg flex items-center justify-center bg-amber-500 hover:bg-amber-600 text-white shadow-2xs hover:scale-105 active:scale-95 cursor-pointer transition-all"
+                            title={`เพิ่มองค์ประกอบ/ประเด็นใน "${activeKindergartenSubtopic}" (+)`}
                           >
-                            <Plus className="w-4 h-4 stroke-[2.5]" />
+                            <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
                           </button>
                         </th>
                       )}
 
                       {/* สรุปคะแนนเชิงปริมาณ */}
-                      <th className="py-2.5 px-2 text-center bg-amber-100/90 border-l border-amber-300 min-w-[90px] align-middle">
+                      <th className="py-2 px-1.5 text-center bg-amber-100/90 border-l border-amber-300 w-16 min-w-[58px] max-w-[68px] align-middle">
                         <div className="flex flex-col items-center justify-center">
-                          <span className="text-[12px] font-bold text-amber-950 leading-tight">
-                            สรุปคะแนนปริมาณ
+                          <span className="text-[11px] font-bold text-amber-950 leading-tight">
+                            สรุปปริมาณ
                           </span>
                         </div>
                       </th>
 
                       {/* สรุประดับคะแนนเชิงคุณภาพ */}
-                      <th className="py-2.5 px-3 text-center bg-amber-200/80 border-l border-amber-300 min-w-[110px] align-middle">
+                      <th className="py-2 px-1.5 text-center bg-amber-200/80 border-l border-amber-300 w-20 min-w-[70px] max-w-[85px] align-middle">
                         <div className="flex flex-col items-center justify-center">
-                          <span className="text-[12px] font-bold text-amber-950 leading-tight">
-                            สรุประดับคุณภาพ
+                          <span className="text-[11px] font-bold text-amber-950 leading-tight">
+                            สรุปคุณภาพ
                           </span>
                         </div>
                       </th>
@@ -4676,21 +5110,21 @@ export const Module2Grading: React.FC<Module2Props> = ({
 
                         return (
                           <tr key={student.id} className="hover:bg-slate-50/80 transition-colors">
-                            <td className="py-2.5 px-2 text-center">
-                              <span className="w-7 h-7 rounded-lg bg-slate-100 text-slate-700 font-mono font-bold text-xs inline-flex items-center justify-center tabular-nums">
+                            <td className="py-1.5 px-1 text-center border-r border-slate-100">
+                              <span className="w-6 h-6 rounded bg-slate-100 text-slate-700 font-mono font-bold text-[11px] inline-flex items-center justify-center tabular-nums">
                                 {student.rollNumber ?? (idx + 1)}
                               </span>
                             </td>
-                            <td className="py-2.5 px-2 text-center font-mono text-slate-400 text-xs">
+                            <td className="py-1.5 px-1 text-center font-mono text-slate-400 text-[11px] border-r border-slate-100">
                               {student.studentCode || '-'}
                             </td>
-                            <td className="py-2.5 px-3 font-medium text-slate-800">
-                              <div className="flex items-center gap-2">
-                                <div className="w-7 h-7 rounded-full overflow-hidden shrink-0 border border-slate-200 bg-slate-100 flex items-center justify-center">
+                            <td className="py-1.5 px-1.5 font-medium text-slate-800 border-r border-slate-100 max-w-[140px]">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <div className="w-6 h-6 rounded-full overflow-hidden shrink-0 border border-slate-200 bg-slate-100 flex items-center justify-center">
                                   {student.photoUrl ? (
                                     <img src={student.photoUrl} alt="" className="w-full h-full object-cover" />
                                   ) : (
-                                    <User className="w-3.5 h-3.5 text-slate-400" />
+                                    <User className="w-3 h-3 text-slate-400" />
                                   )}
                                 </div>
                                 <button
@@ -4698,10 +5132,11 @@ export const Module2Grading: React.FC<Module2Props> = ({
                                   onClick={() => {
                                     setMobileGradingStudentId(student.id);
                                   }}
-                                  className="text-left font-medium text-slate-800 hover:text-amber-700 hover:underline flex items-center gap-1 group cursor-pointer"
+                                  className="text-left font-medium text-slate-800 hover:text-amber-700 hover:underline flex items-center gap-1 group cursor-pointer truncate text-[11px]"
+                                  title={`${student.prefix}${student.firstName} ${student.lastName}`}
                                 >
-                                  <span>{student.prefix}{student.firstName} {student.lastName}</span>
-                                  <span className="opacity-0 group-hover:opacity-100 text-[10px] text-amber-600 transition-opacity">✏️</span>
+                                  <span className="truncate">{student.prefix}{student.firstName} {student.lastName}</span>
+                                  <span className="opacity-0 group-hover:opacity-100 text-[9px] text-amber-600 transition-opacity shrink-0">✏️</span>
                                 </button>
                               </div>
                             </td>
@@ -4717,7 +5152,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
                               return (
                                 <td 
                                   key={asg.id} 
-                                  className="relative py-2 px-1 text-center border-l border-r border-slate-100 align-middle bg-amber-50/10"
+                                  className="relative py-1 px-0.5 text-center border-l border-r border-slate-100 align-middle bg-amber-50/10"
                                 >
                                   {isPickerOpen && canGradeSubject && !isMemberLockedReadOnly && !isAdminReadOnly ? (
                                     <>
@@ -4725,7 +5160,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
                                         className="fixed inset-0 z-30 bg-transparent"
                                         onClick={() => setActiveScorePicker(null)}
                                       />
-                                      <div className="relative z-40 flex items-center justify-center gap-1.5 py-0.5 animate-in fade-in zoom-in-95">
+                                      <div className="relative z-40 flex items-center justify-center gap-1 py-0.5 animate-in fade-in zoom-in-95">
                                         {activeRubricLevels.map((rubric) => {
                                           const isSelected = scoreVal === rubric.level;
                                           return (
@@ -4738,7 +5173,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
                                                 setActiveScorePicker(null);
                                               }}
                                               title={`ระดับ ${rubric.level}: ${rubric.label}`}
-                                              className={`w-7 h-7 rounded-lg text-xs font-bold font-mono transition-all flex items-center justify-center cursor-pointer shadow-2xs active:scale-95 ${
+                                              className={`w-6 h-6 rounded text-[11px] font-bold font-mono transition-all flex items-center justify-center cursor-pointer shadow-2xs active:scale-95 ${
                                                 isSelected
                                                   ? 'bg-amber-600 text-white ring-2 ring-amber-300 scale-105 shadow-xs font-black'
                                                   : 'bg-amber-100 hover:bg-amber-500 hover:text-white text-amber-950 border border-amber-300 font-bold'
@@ -4764,7 +5199,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
                                             : { studentId: student.id, assignmentId: asg.id }
                                         );
                                       }}
-                                      className={`w-9 h-8 mx-auto rounded-lg text-xs font-mono font-bold transition-all flex items-center justify-center cursor-pointer shadow-2xs ${
+                                      className={`w-7 h-7 mx-auto rounded-lg text-[11px] font-mono font-bold transition-all flex items-center justify-center cursor-pointer shadow-2xs ${
                                         !canGradeSubject || isMemberLockedReadOnly || isAdminReadOnly
                                           ? 'cursor-default opacity-85'
                                           : 'hover:scale-105 active:scale-95'
@@ -4798,14 +5233,14 @@ export const Module2Grading: React.FC<Module2Props> = ({
 
                             {/* Empty TD for + column header */}
                             {canManageKindergartenTopics && (
-                              <td className="py-2 px-1 text-center border-l border-r border-dashed border-amber-200/60 bg-amber-50/10 align-middle"></td>
+                              <td className="py-1 px-0.5 text-center border-l border-r border-dashed border-amber-200/60 bg-amber-50/10 align-middle"></td>
                             )}
 
                             {/* 1. สรุปคะแนนเชิงปริมาณ (ตัวเลข 1, 2, 3...) */}
-                            <td className="py-2 px-2 text-center border-l border-slate-200 bg-amber-50/20 align-middle">
+                            <td className="py-1 px-1 text-center border-l border-slate-200 bg-amber-50/20 align-middle">
                               {pageSummary.score !== null ? (
                                 <div className="flex flex-col items-center justify-center">
-                                  <span className={`inline-flex items-center justify-center min-w-[32px] h-7 px-2 font-mono font-black text-xs rounded-lg shadow-2xs border ${
+                                  <span className={`inline-flex items-center justify-center min-w-[26px] h-6 px-1.5 font-mono font-black text-[11px] rounded shadow-2xs border ${
                                     pageSummary.score === 3 ? 'bg-emerald-100 text-emerald-900 border-emerald-300' :
                                     pageSummary.score === 2 ? 'bg-sky-100 text-sky-900 border-sky-300' :
                                     pageSummary.score === 1 ? 'bg-amber-100 text-amber-900 border-amber-300' :
@@ -4814,29 +5249,29 @@ export const Module2Grading: React.FC<Module2Props> = ({
                                     {pageSummary.score}
                                   </span>
                                   {pageSummary.average && displayedKindergartenAssignments.length > 1 && (
-                                    <span className="text-[10px] font-mono text-slate-500 mt-0.5">
+                                    <span className="text-[9px] font-mono text-slate-500 mt-0.5">
                                       เฉลี่ย {pageSummary.average}
                                     </span>
                                   )}
                                 </div>
                               ) : (
-                                <span className="text-slate-400 text-xs font-medium">-</span>
+                                <span className="text-slate-400 text-[11px] font-medium">-</span>
                               )}
                             </td>
 
                             {/* 2. สรุประดับคะแนนเชิงคุณภาพ (คำอธิบายคุณภาพตามที่ Admin กำหนดใน +วิชา) */}
-                            <td className="py-2 px-3 text-center border-l border-slate-200 bg-amber-50/40 align-middle">
+                            <td className="py-1 px-1.5 text-center border-l border-slate-200 bg-amber-50/40 align-middle">
                               {pageSummary.score !== null ? (
-                                <span className={`inline-block font-bold text-xs px-2.5 py-1 rounded-lg shadow-2xs border ${
-                                  pageSummary.score === 3 ? 'bg-emerald-100 text-emerald-900 border-emerald-300' :
-                                  pageSummary.score === 2 ? 'bg-sky-100 text-sky-900 border-sky-300' :
-                                  pageSummary.score === 1 ? 'bg-amber-100 text-amber-900 border-amber-300' :
-                                  'bg-indigo-100 text-indigo-900 border-indigo-300'
+                                <span className={`inline-block font-bold text-[10px] px-2 py-0.5 rounded shadow-2xs border ${
+                                  pageSummary.score === 3 ? 'bg-emerald-100 text-emerald-800 border-emerald-300' :
+                                  pageSummary.score === 2 ? 'bg-sky-100 text-sky-800 border-sky-300' :
+                                  pageSummary.score === 1 ? 'bg-amber-100 text-amber-800 border-amber-300' :
+                                  'bg-indigo-100 text-indigo-800 border-indigo-300'
                                 }`}>
                                   {pageSummary.label}
                                 </span>
                               ) : (
-                                <span className="text-slate-400 text-xs font-medium">ยังไม่ประเมิน</span>
+                                <span className="text-slate-400 text-[10px] font-medium">ยังไม่ประเมิน</span>
                               )}
                             </td>
                           </tr>
@@ -5475,7 +5910,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
                     .filter(s => s.gradeLevel === unregisteredGradeFilter && normalizeRoom(s.room) === normalizeRoom(unregisteredRoomFilter))
                     .map(sub => (
                       <div key={sub.id} className="py-3 px-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 hover:bg-slate-50 rounded-xl transition-colors">
-                        <div className="min-w-0">
+                        <div className="min-w-0 space-y-1">
                           <div className="text-xs font-bold text-slate-800 flex items-center gap-2 flex-wrap">
                             <span className="font-bold text-amber-800 bg-amber-100 px-2.5 py-0.5 rounded-md border border-amber-200 text-xs">
                               ชั้น {sub.gradeLevel} • ห้อง {normalizeRoom(sub.room)}
@@ -5485,14 +5920,19 @@ export const Module2Grading: React.FC<Module2Props> = ({
                                 กิจกรรม
                               </span>
                             )}
-                            <span>{sub.name}</span>
-                            <span className="font-mono text-slate-500 text-xs">
-                              ({sub.code})
+                            <span>
+                              {!sub.isActivity && isKindergartenGrade(sub.gradeLevel) ? `ด้านความสามารถ: ${sub.name}` : sub.name}
                             </span>
+                            {sub.code && (
+                              <span className="font-mono text-slate-500 text-xs">
+                                ({sub.code})
+                              </span>
+                            )}
                             <span className="text-[11px] text-slate-400">
                               • {sub.hoursPerWeek} ชม./สัปดาห์
                             </span>
                           </div>
+
                         </div>
 
                         <div className="shrink-0 flex items-center gap-1.5">
@@ -5766,48 +6206,153 @@ export const Module2Grading: React.FC<Module2Props> = ({
               }
 
 
-              return filtered.map((sub) => (
+              return filtered.map((sub, subIdx) => {
+                const isDragging = draggedSubjectId === sub.id;
+                const isDragOver = dragOverSubjectId === sub.id && draggedSubjectId !== sub.id;
+                return (
                 <div
                   key={sub.id}
-                  className="py-2.5 px-4 flex flex-col md:flex-row md:items-center justify-between gap-3 hover:bg-slate-50/80 transition-colors"
+                  data-subject-row-id={sub.id}
+                  draggable={user.role === 'admin'}
+                  onDragStart={(e) => {
+                    if (user.role !== 'admin') return;
+                    setDraggedSubjectId(sub.id);
+                    e.dataTransfer.effectAllowed = 'move';
+                    try {
+                      e.dataTransfer.setData('text/plain', sub.id);
+                    } catch {
+                      // ignore
+                    }
+                  }}
+                  onDragOver={(e) => {
+                    if (user.role !== 'admin' || !draggedSubjectId) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    if (dragOverSubjectId !== sub.id) {
+                      setDragOverSubjectId(sub.id);
+                    }
+                  }}
+                  onDragEnter={(e) => {
+                    if (user.role !== 'admin' || !draggedSubjectId) return;
+                    e.preventDefault();
+                    if (dragOverSubjectId !== sub.id) {
+                      setDragOverSubjectId(sub.id);
+                    }
+                  }}
+                  onDrop={(e) => {
+                    if (user.role !== 'admin') return;
+                    e.preventDefault();
+                    const sourceId = draggedSubjectId || e.dataTransfer.getData('text/plain');
+                    if (sourceId && sourceId !== sub.id) {
+                      handleReorderSubjects(sourceId, sub.id, filtered);
+                    }
+                    setDraggedSubjectId(null);
+                    setDragOverSubjectId(null);
+                  }}
+                  onDragEnd={() => {
+                    setDraggedSubjectId(null);
+                    setDragOverSubjectId(null);
+                  }}
+                  onTouchStart={() => {
+                    if (user.role !== 'admin') return;
+                    if (touchDragTimerRef.current) window.clearTimeout(touchDragTimerRef.current);
+                    touchDragTimerRef.current = window.setTimeout(() => {
+                      setDraggedSubjectId(sub.id);
+                    }, 220);
+                  }}
+                  onTouchMove={(e) => {
+                    if (user.role !== 'admin') return;
+                    if (!draggedSubjectId) {
+                      if (touchDragTimerRef.current) {
+                        window.clearTimeout(touchDragTimerRef.current);
+                        touchDragTimerRef.current = null;
+                      }
+                      return;
+                    }
+                    const touch = e.touches[0];
+                    if (!touch) return;
+                    const el = document.elementFromPoint(touch.clientX, touch.clientY);
+                    const rowEl = el?.closest('[data-subject-row-id]') as HTMLElement | null;
+                    const targetId = rowEl?.getAttribute('data-subject-row-id');
+                    if (targetId && targetId !== dragOverSubjectId) {
+                      setDragOverSubjectId(targetId);
+                    }
+                  }}
+                  onTouchEnd={() => {
+                    if (touchDragTimerRef.current) {
+                      window.clearTimeout(touchDragTimerRef.current);
+                      touchDragTimerRef.current = null;
+                    }
+                    if (user.role !== 'admin') return;
+                    if (draggedSubjectId && dragOverSubjectId && draggedSubjectId !== dragOverSubjectId) {
+                      handleReorderSubjects(draggedSubjectId, dragOverSubjectId, filtered);
+                    }
+                    setDraggedSubjectId(null);
+                    setDragOverSubjectId(null);
+                  }}
+                  className={`py-2.5 px-4 flex flex-col md:flex-row md:items-center justify-between gap-3 transition-all select-none ${
+                    user.role === 'admin' ? 'cursor-grab active:cursor-grabbing' : ''
+                  } ${
+                    isDragging
+                      ? 'bg-amber-50/90 opacity-60 ring-2 ring-amber-400 z-10'
+                      : isDragOver
+                      ? 'bg-indigo-50/90 border-t-2 border-indigo-500'
+                      : 'hover:bg-slate-50/80'
+                  }`}
+                  title={user.role === 'admin' ? 'กดค้างแล้วลากขึ้น-ลงเพื่อจัดลำดับรายวิชา' : undefined}
                 >
-                  {/* Left: Class badge, Code, Name, Hours/week, Semester, Ratio */}
-                  <div className="flex items-center gap-2 flex-wrap min-w-0">
-                    <span className="font-bold text-amber-900 bg-amber-100/90 border border-amber-200/80 px-2 py-0.5 rounded-lg text-xs shrink-0">
-                      ชั้น {sub.gradeLevel} • ห้อง {normalizeRoom(sub.room)}
-                    </span>
-                    {sub.isActivity && (
-                      <span className="font-bold text-emerald-800 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-md text-xs shrink-0">
-                        กิจกรรม
+                  {/* Left: Drag Handle + Order number + Class badge, Code, Name, Hours/week, Semester, Ratio */}
+                  <div className="min-w-0 space-y-1.5 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap min-w-0">
+                      {user.role === 'admin' && (
+                        <span
+                          className="inline-flex items-center gap-0.5 text-slate-400 hover:text-amber-700 px-1 py-0.5 rounded-md bg-slate-100/80 border border-slate-200/80 text-[11px] font-mono font-bold shrink-0 cursor-grab active:cursor-grabbing"
+                          title="กดค้างแล้วลากขึ้น-ลงเพื่อจัดลำดับ"
+                        >
+                          <GripVertical className="w-3.5 h-3.5 text-slate-400" />
+                          <span>{subIdx + 1}</span>
+                        </span>
+                      )}
+                      <span className="font-bold text-amber-900 bg-amber-100/90 border border-amber-200/80 px-2 py-0.5 rounded-lg text-xs shrink-0">
+                        ชั้น {sub.gradeLevel} • ห้อง {normalizeRoom(sub.room)}
                       </span>
-                    )}
-                    {sub.code && (
-                      <span className="font-mono font-bold text-slate-700 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-md text-xs shrink-0">
-                        {sub.code}
+                      {sub.isActivity && (
+                        <span className="font-bold text-emerald-800 bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-md text-xs shrink-0">
+                          กิจกรรม
+                        </span>
+                      )}
+                      {sub.code && (
+                        <span className="font-mono font-bold text-slate-700 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-md text-xs shrink-0">
+                          {sub.code}
+                        </span>
+                      )}
+                      <span className="font-bold text-slate-800 text-xs truncate max-w-xs md:max-w-md">
+                        {!sub.isActivity && isKindergartenGrade(sub.gradeLevel) ? `ด้านความสามารถ: ${sub.name}` : sub.name}
                       </span>
-                    )}
-                    <span className="font-bold text-slate-800 text-xs truncate max-w-xs md:max-w-md">
-                      {sub.name}
-                    </span>
-                    <span className="text-[11px] px-2 py-0.5 rounded-md font-semibold bg-amber-50/80 text-amber-800 border border-amber-200/70 shrink-0">
-                      {sub.hoursPerWeek} ชั่วโมง/สัปดาห์
-                    </span>
-                    <span className={`text-[11px] px-2 py-0.5 rounded-md font-bold shrink-0 ${
-                      sub.semester === '1'
-                        ? 'bg-sky-50 text-sky-700 border border-sky-200/80'
-                        : 'bg-indigo-50 text-indigo-700 border border-indigo-200/80'
-                    }`}>
-                      ภาค {sub.semester}
-                    </span>
-                    {sub.isActivity ? (
-                      <span className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200/80 px-2 py-0.5 rounded-md font-semibold shrink-0">
-                        เกณฑ์ประเมิน: ผ่าน / ไม่ผ่าน
+                      <span className="text-[11px] px-2 py-0.5 rounded-md font-semibold bg-amber-50/80 text-amber-800 border border-amber-200/70 shrink-0">
+                        {sub.hoursPerWeek} ชั่วโมง/สัปดาห์
                       </span>
-                    ) : (
-                      <span className="text-[11px] text-slate-600 font-mono shrink-0">
-                        คะแนนเต็ม {sub.totalScore} (ระหว่างภาค {sub.courseworkScore} : สอบ {sub.examScore})
+                      <span className={`text-[11px] px-2 py-0.5 rounded-md font-bold shrink-0 ${
+                        sub.semester === '1'
+                          ? 'bg-sky-50 text-sky-700 border border-sky-200/80'
+                          : 'bg-indigo-50 text-indigo-700 border border-indigo-200/80'
+                      }`}>
+                        ภาค {sub.semester}
                       </span>
-                    )}
+                      {sub.isActivity ? (
+                        <span className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200/80 px-2 py-0.5 rounded-md font-semibold shrink-0">
+                          เกณฑ์ประเมิน: ผ่าน / ไม่ผ่าน
+                        </span>
+                      ) : isKindergartenGrade(sub.gradeLevel) ? (
+                        <span className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200/80 px-2 py-0.5 rounded-md font-semibold shrink-0">
+                          หลักสูตรปฐมวัย พ.ศ. 2568 • {sub.hasKindergartenCompetency === false ? 'เฉพาะองค์ประกอบ/ประเด็น' : 'มีสมรรถนะ'} (เกณฑ์ {sub.rubricMaxLevel || 3} ระดับ)
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-slate-600 font-mono shrink-0">
+                          คะแนนเต็ม {sub.totalScore} (ระหว่างภาค {sub.courseworkScore} : สอบ {sub.examScore})
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   {/* Right: Teacher status & Action buttons with delete icon at far right */}
@@ -5859,7 +6404,8 @@ export const Module2Grading: React.FC<Module2Props> = ({
                     </div>
                   </div>
                 </div>
-              ));
+                );
+              });
             })()}
           </div>
         </div>
@@ -6066,8 +6612,8 @@ export const Module2Grading: React.FC<Module2Props> = ({
                             setModalRoom(rooms[0] || '1');
                           }
                           if (isKindergartenGrade(newGrade)) {
-                            if (kindergartenSubtopics.length === 0 || (kindergartenSubtopics.length === 1 && !kindergartenSubtopics[0])) {
-                              setKindergartenSubtopics(['']);
+                            if (kindergartenCompetencies.length === 0) {
+                              setKindergartenCompetencies([{ id: `comp-${Date.now()}-1`, title: '', elements: [''] }]);
                             }
                           }
                         }}
@@ -6094,69 +6640,288 @@ export const Module2Grading: React.FC<Module2Props> = ({
                   </div>
 
                   <div key="subject-name-field">
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">ชื่อรายวิชา *</label>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      {isKindergartenGrade(modalGradeLevel) ? 'ด้านความสามารถ *' : 'ชื่อรายวิชา *'}
+                    </label>
                     <input
                       type="text"
                       name="name"
                       required
-                      placeholder="เช่น พัฒนาการด้านร่างกาย หรือ ภาษาไทยพื้นฐาน 1"
-                      defaultValue={editingSubject?.name || ''}
+                      value={subjectNameInput}
+                      onChange={(e) => setSubjectNameInput(e.target.value)}
+                      placeholder={
+                        isKindergartenGrade(modalGradeLevel)
+                          ? 'ระบุชื่อด้านความสามารถ (เช่น การเคลื่อนไหวและสุขภาวะทางกาย, พัฒนาการด้านอารมณ์...)'
+                          : 'เช่น ภาษาไทยพื้นฐาน 1'
+                      }
                       className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500 font-medium"
                     />
                   </div>
 
-                  {/* สำหรับ อ.1, อ.2, อ.3 เท่านั้น: เพิ่มช่องหัวข้อย่อยด้านล่างชื่อวิชา มา 1 ช่องพร้อมเครื่องหมาย + เพื่อเพิ่มหัวข้อต่อ */}
+                  {/* สำหรับ อ.1, อ.2, อ.3 เท่านั้น: ปุ่ม ON/OFF ช่องสมรรถนะ + องค์ประกอบ/ประเด็น (หลักสูตรปฐมวัย พ.ศ. 2568) */}
                   {isKindergartenGrade(modalGradeLevel) && (
                     <div className="bg-amber-50/70 p-3.5 rounded-2xl border border-amber-200/90 space-y-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <div>
-                          <label className="block text-xs font-bold text-amber-950 flex items-center gap-1.5">
-                            <span>หัวข้อย่อย (สำหรับ {modalGradeLevel}) *</span>
-                          </label>
+                      {/* แถบหัวข้อพร้อมปุ่มสวิตช์ ON / OFF สมรรถนะ */}
+                      <div className="flex items-center justify-between gap-2 flex-wrap pb-2.5 border-b border-amber-200/80">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-bold text-amber-950">
+                            ช่องสมรรถนะ ({modalGradeLevel})
+                          </span>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => setKindergartenSubtopics([...kindergartenSubtopics, ''])}
-                          className="px-2.5 py-1 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-xl shadow-2xs flex items-center gap-1 cursor-pointer transition-all active:scale-95 shrink-0"
-                        >
-                          <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-                          <span>เพิ่มหัวข้อย่อย</span>
-                        </button>
+
+                        {/* ปุ่มสวิตช์ ON / OFF สมรรถนะ */}
+                        <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-amber-300 shadow-2xs shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!hasKindergartenCompetency) {
+                                setHasKindergartenCompetency(true);
+                                const hasAnyCompEls = kindergartenCompetencies.some(c =>
+                                  c.elements.some(e => e.trim())
+                                );
+                                if (!hasAnyCompEls && kindergartenDirectElements.some(e => e.trim())) {
+                                  setKindergartenCompetencies([
+                                    {
+                                      id: `comp-${Date.now()}-1`,
+                                      title: '',
+                                      elements: [...kindergartenDirectElements]
+                                    }
+                                  ]);
+                                }
+                              }
+                            }}
+                            className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                              hasKindergartenCompetency
+                                ? 'bg-emerald-600 text-white shadow-2xs'
+                                : 'text-slate-500 hover:text-slate-800'
+                            }`}
+                          >
+                            <span>ON</span>
+                            <span className="text-[10px] font-semibold opacity-90">(มีสมรรถนะ)</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (hasKindergartenCompetency) {
+                                setHasKindergartenCompetency(false);
+                                const hasDirect = kindergartenDirectElements.some(e => e.trim());
+                                if (!hasDirect) {
+                                  const fromComps = kindergartenCompetencies
+                                    .flatMap(c => c.elements)
+                                    .filter(e => e.trim());
+                                  if (fromComps.length > 0) {
+                                    setKindergartenDirectElements(fromComps);
+                                  }
+                                }
+                              }
+                            }}
+                            className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                              !hasKindergartenCompetency
+                                ? 'bg-rose-600 text-white shadow-2xs'
+                                : 'text-slate-500 hover:text-slate-800'
+                            }`}
+                          >
+                            <span>OFF</span>
+                            <span className="text-[10px] font-semibold opacity-90">(เฉพาะองค์ประกอบ/ประเด็น)</span>
+                          </button>
+                        </div>
                       </div>
 
-                      {/* รายการช่องกรอกหัวข้อย่อย */}
-                      <div className="space-y-2 pt-1 max-h-56 overflow-y-auto pr-1">
-                        {kindergartenSubtopics.map((st, sIdx) => (
-                          <div key={sIdx} className="flex items-center gap-2">
-                            <span className="w-6 h-6 rounded-lg bg-amber-200/90 text-amber-900 font-mono font-bold text-xs flex items-center justify-center shrink-0">
-                              {sIdx + 1}
+                      {!hasKindergartenCompetency ? (
+                        /* โหมด OFF: แสดงเฉพาะ องค์ประกอบ/ประเด็น ของด้านความสามารถ */
+                        <div className="bg-white p-3 rounded-xl border border-amber-200/90 shadow-2xs space-y-2.5">
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <div>
+                              <span className="text-xs font-bold text-amber-950">
+                                องค์ประกอบ/ประเด็น ของด้านความสามารถ{subjectNameInput.trim() ? ` "${subjectNameInput.trim()}"` : ''}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setKindergartenDirectElements([...kindergartenDirectElements, ''])
+                              }
+                              className="px-2.5 py-1 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-xl shadow-2xs flex items-center gap-1 cursor-pointer transition-all active:scale-95 shrink-0"
+                            >
+                              <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                              <span>เพิ่มองค์ประกอบ/ประเด็น</span>
+                            </button>
+                          </div>
+
+                          <div className="space-y-2 max-h-64 overflow-y-auto pr-1 pt-1">
+                            {(kindergartenDirectElements.length > 0 ? kindergartenDirectElements : ['']).map((elVal, eIdx) => (
+                              <div key={eIdx} className="flex items-center gap-2">
+                                <span className="px-2.5 py-1.5 rounded-lg bg-amber-100/90 text-amber-900 font-bold text-[11px] shrink-0 border border-amber-200/80 whitespace-nowrap">
+                                  องค์ประกอบ/ประเด็น {eIdx + 1}
+                                </span>
+                                <input
+                                  type="text"
+                                  value={elVal ?? ''}
+                                  onChange={(e) => {
+                                    const next = [...(kindergartenDirectElements.length > 0 ? kindergartenDirectElements : [''])];
+                                    next[eIdx] = e.target.value;
+                                    setKindergartenDirectElements(next);
+                                  }}
+                                  placeholder={`ระบุองค์ประกอบ/ประเด็น ${eIdx + 1} ของด้านความสามารถนี้...`}
+                                  className="flex-1 text-xs px-3 py-1.5 rounded-xl border border-slate-200 bg-white font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 shadow-2xs"
+                                />
+                                {kindergartenDirectElements.length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const next = kindergartenDirectElements.filter((_, idx) => idx !== eIdx);
+                                      setKindergartenDirectElements(next.length > 0 ? next : ['']);
+                                    }}
+                                    className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-all cursor-pointer shrink-0"
+                                    title={`ลบองค์ประกอบ/ประเด็น ${eIdx + 1}`}
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        /* โหมด ON: แสดงช่อง สมรรถนะ 1, 2... (ไม่บังคับพิมพ์) และ องค์ประกอบ/ประเด็น ย่อยใต้สมรรถนะ */
+                        <>
+                          <div className="flex items-center justify-between gap-2 flex-wrap">
+                            <span className="text-[11px] font-bold text-amber-900">
+                              รายการสมรรถนะ และองค์ประกอบ/ประเด็น ย่อย ({kindergartenCompetencies.length} สมรรถนะ)
                             </span>
-                            <input
-                              type="text"
-                              value={st ?? ''}
-                              onChange={(e) => {
-                                const next = [...kindergartenSubtopics];
-                                next[sIdx] = e.target.value;
-                                setKindergartenSubtopics(next);
-                              }}
-                              placeholder={`ระบุชื่อหัวข้อย่อยที่ ${sIdx + 1} (เช่น ด้านร่างกาย, ด้านอารมณ์, การทรงตัว...)`}
-                              className="flex-1 text-xs px-3 py-2 rounded-xl border border-slate-200 bg-white font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 shadow-2xs"
-                            />
-                            {kindergartenSubtopics.length > 1 && (
+                            <div className="flex items-center gap-1.5 shrink-0">
                               <button
                                 type="button"
-                                onClick={() => {
-                                  setKindergartenSubtopics(kindergartenSubtopics.filter((_, i) => i !== sIdx));
-                                }}
-                                className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-all cursor-pointer shrink-0"
-                                title="ลบหัวข้อย่อยนี้"
+                                onClick={() =>
+                                  setKindergartenCompetencies([
+                                    ...kindergartenCompetencies,
+                                    {
+                                      id: `comp-${Date.now()}-${kindergartenCompetencies.length + 1}`,
+                                      title: '',
+                                      elements: ['']
+                                    }
+                                  ])
+                                }
+                                className="px-2.5 py-1 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-xl shadow-2xs flex items-center gap-1 cursor-pointer transition-all active:scale-95 shrink-0"
                               >
-                                <Trash2 className="w-3.5 h-3.5" />
+                                <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                                <span>เพิ่มสมรรถนะ</span>
                               </button>
-                            )}
+                            </div>
                           </div>
-                        ))}
-                      </div>
+
+                          <div className="space-y-3 pt-1 max-h-80 overflow-y-auto pr-1">
+                            {kindergartenCompetencies.map((comp, cIdx) => (
+                              <div
+                                key={comp.id || cIdx}
+                                className="bg-white p-3 rounded-xl border border-amber-200/90 shadow-2xs space-y-2.5"
+                              >
+                                {/* ช่องสมรรถนะ (ไม่บังคับพิมพ์) */}
+                                <div className="space-y-1.5">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <label className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
+                                      <span className="w-5 h-5 rounded-md bg-amber-600 text-white font-mono text-[11px] font-bold flex items-center justify-center shrink-0">
+                                        {cIdx + 1}
+                                      </span>
+                                      <span>สมรรถนะ {cIdx + 1}</span>
+                                      <span className="text-[10px] font-normal text-slate-400">(ไม่บังคับพิมพ์)</span>
+                                    </label>
+                                    {kindergartenCompetencies.length > 1 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setKindergartenCompetencies(
+                                            kindergartenCompetencies.filter((_, i) => i !== cIdx)
+                                          );
+                                        }}
+                                        className="px-2 py-0.5 text-[11px] font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-all cursor-pointer flex items-center gap-1 shrink-0"
+                                        title={`ลบสมรรถนะ ${cIdx + 1}`}
+                                      >
+                                        <Trash2 className="w-3 h-3" />
+                                        <span>ลบสมรรถนะ</span>
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  <input
+                                    type="text"
+                                    value={comp.title ?? ''}
+                                    onChange={(e) => {
+                                      const next = [...kindergartenCompetencies];
+                                      next[cIdx] = { ...next[cIdx], title: e.target.value };
+                                      setKindergartenCompetencies(next);
+                                    }}
+                                    placeholder={`ระบุสมรรถนะ ${cIdx + 1} (ไม่บังคับพิมพ์)...`}
+                                    className="w-full text-xs px-3 py-2 rounded-xl border border-amber-200 bg-amber-50/30 font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                                  />
+                                </div>
+
+                                {/* องค์ประกอบ/ประเด็น ย่อยภายใต้สมรรถนะนี้ */}
+                                <div className="pl-3 sm:pl-4 border-l-2 border-amber-300 space-y-2 pt-1">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-[11px] font-bold text-amber-900">
+                                      องค์ประกอบย่อยของสมรรถนะ {cIdx + 1}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const next = [...kindergartenCompetencies];
+                                        next[cIdx] = {
+                                          ...next[cIdx],
+                                          elements: [...(next[cIdx].elements || ['']), '']
+                                        };
+                                        setKindergartenCompetencies(next);
+                                      }}
+                                      className="px-2 py-1 text-[11px] font-bold bg-amber-100 hover:bg-amber-200 text-amber-900 rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
+                                    >
+                                      <Plus className="w-3 h-3 stroke-[2.5]" />
+                                      <span>เพิ่มองค์ประกอบ/ประเด็น</span>
+                                    </button>
+                                  </div>
+
+                                  <div className="space-y-1.5">
+                                    {(comp.elements && comp.elements.length > 0 ? comp.elements : ['']).map((elVal, eIdx) => (
+                                      <div key={eIdx} className="flex items-center gap-2">
+                                        <span className="px-2 py-1.5 rounded-lg bg-amber-100/80 text-amber-900 font-bold text-[11px] shrink-0 border border-amber-200/80 whitespace-nowrap">
+                                          องค์ประกอบ/ประเด็น {eIdx + 1}
+                                        </span>
+                                        <input
+                                          type="text"
+                                          value={elVal ?? ''}
+                                          onChange={(e) => {
+                                            const next = [...kindergartenCompetencies];
+                                            const nextEls = [...(next[cIdx].elements || [''])];
+                                            nextEls[eIdx] = e.target.value;
+                                            next[cIdx] = { ...next[cIdx], elements: nextEls };
+                                            setKindergartenCompetencies(next);
+                                          }}
+                                          placeholder={`ระบุองค์ประกอบ/ประเด็น ${eIdx + 1} (เช่น สุขภาพอนามัย, การใช้กล้ามเนื้อมัดใหญ่...)`}
+                                          className="flex-1 text-xs px-3 py-1.5 rounded-xl border border-slate-200 bg-white font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500 shadow-2xs"
+                                        />
+                                        {(comp.elements?.length || 1) > 1 && (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              const next = [...kindergartenCompetencies];
+                                              const nextEls = (next[cIdx].elements || ['']).filter((_, idx) => idx !== eIdx);
+                                              next[cIdx] = { ...next[cIdx], elements: nextEls.length > 0 ? nextEls : [''] };
+                                              setKindergartenCompetencies(next);
+                                            }}
+                                            className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-all cursor-pointer shrink-0"
+                                            title={`ลบองค์ประกอบ/ประเด็น ${eIdx + 1}`}
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      )}
                     </div>
                   )}
 
@@ -6402,10 +7167,10 @@ export const Module2Grading: React.FC<Module2Props> = ({
         </div>
       )}
 
-      {/* MODAL: เพิ่มหน้าหน่วยการเรียนรู้สำหรับอนุบาล (อ.1 - อ.3) */}
+      {/* MODAL: เพิ่มสมรรถนะและองค์ประกอบ/ประเด็น สำหรับอนุบาล (อ.1 - อ.3) */}
       {isAddKindergartenSubtopicModalOpen && selectedSubject && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-in fade-in">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center font-bold">
@@ -6413,7 +7178,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-slate-800">
-                    เพิ่มหน้าหน่วยการเรียนรู้
+                    เพิ่มสมรรถนะใหม่ (หลักสูตรปฐมวัย 2568)
                   </h3>
                   <p className="text-xs text-slate-500">
                     วิชา {selectedSubject.name} ({selectedSubject.gradeLevel})
@@ -6427,6 +7192,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
                   setNewKindergartenSubtopicInput('');
                   setNewKindergartenStandardInput('');
                   setNewKindergartenIndicatorInput('');
+                  setNewKindergartenElementsInput(['']);
                 }}
                 className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg cursor-pointer"
               >
@@ -6440,50 +7206,75 @@ export const Module2Grading: React.FC<Module2Props> = ({
                 handleAddKindergartenSubtopicSubmit(
                   newKindergartenSubtopicInput,
                   newKindergartenStandardInput,
-                  newKindergartenIndicatorInput
+                  newKindergartenIndicatorInput,
+                  newKindergartenElementsInput
                 );
               }}
               className="space-y-3.5"
             >
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  ชื่อหน่วย <span className="text-rose-500">*</span>
+                  สมรรถนะ {currentKindergartenSubtopics.length + 1}{' '}
+                  <span className="text-[11px] font-normal text-slate-400">(ไม่บังคับพิมพ์)</span>
                 </label>
                 <input
                   type="text"
                   value={newKindergartenSubtopicInput}
                   onChange={(e) => setNewKindergartenSubtopicInput(e.target.value)}
-                  placeholder="เช่น หน่วยที่ 1 ตัวเรา, กิจกรรมประจำวัน..."
+                  placeholder="ระบุชื่อสมรรถนะ (ไม่บังคับพิมพ์)..."
                   autoFocus
-                  required
                   className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500 font-medium"
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  มาตรฐานการเรียนรู้
-                </label>
-                <textarea
-                  rows={2}
-                  value={newKindergartenStandardInput}
-                  onChange={(e) => setNewKindergartenStandardInput(e.target.value)}
-                  placeholder="เช่น มฐ. 1 ร่างกายเจริญเติบโตตามวัยและมีสุขนิสัยที่ดี..."
-                  className="w-full text-xs px-3.5 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500 font-medium resize-none"
-                />
-              </div>
+              <div className="bg-amber-50/70 p-3 rounded-xl border border-amber-200/80 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-amber-950">
+                    องค์ประกอบย่อยใต้สมรรถนะ
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setNewKindergartenElementsInput([...newKindergartenElementsInput, ''])}
+                    className="px-2.5 py-1 text-[11px] font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
+                  >
+                    <Plus className="w-3 h-3 stroke-[2.5]" />
+                    <span>เพิ่มองค์ประกอบ/ประเด็น</span>
+                  </button>
+                </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  ตัวชี้วัด
-                </label>
-                <textarea
-                  rows={2}
-                  value={newKindergartenIndicatorInput}
-                  onChange={(e) => setNewKindergartenIndicatorInput(e.target.value)}
-                  placeholder="เช่น 1.1 มีน้ำหนักและส่วนสูงตามเกณฑ์, 1.2 สุขภาพอนามัยดี..."
-                  className="w-full text-xs px-3.5 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500 font-medium resize-none"
-                />
+                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                  {newKindergartenElementsInput.map((el, eIdx) => (
+                    <div key={eIdx} className="flex items-center gap-2">
+                      <span className="px-2 py-1.5 rounded-lg bg-white text-amber-900 font-bold text-[11px] shrink-0 border border-amber-200 whitespace-nowrap">
+                        องค์ประกอบ/ประเด็น {eIdx + 1}
+                      </span>
+                      <input
+                        type="text"
+                        value={el}
+                        onChange={(e) => {
+                          const next = [...newKindergartenElementsInput];
+                          next[eIdx] = e.target.value;
+                          setNewKindergartenElementsInput(next);
+                        }}
+                        placeholder={`ระบุองค์ประกอบ/ประเด็น ${eIdx + 1}...`}
+                        className="flex-1 text-xs px-3 py-1.5 rounded-xl border border-slate-200 bg-white font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      />
+                      {newKindergartenElementsInput.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setNewKindergartenElementsInput(
+                              newKindergartenElementsInput.filter((_, i) => i !== eIdx)
+                            )
+                          }
+                          className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
 
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
@@ -6494,6 +7285,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
                     setNewKindergartenSubtopicInput('');
                     setNewKindergartenStandardInput('');
                     setNewKindergartenIndicatorInput('');
+                    setNewKindergartenElementsInput(['']);
                   }}
                   className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
                 >
@@ -6501,11 +7293,10 @@ export const Module2Grading: React.FC<Module2Props> = ({
                 </button>
                 <button
                   type="submit"
-                  disabled={!newKindergartenSubtopicInput.trim()}
-                  className="px-5 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                  className="px-5 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>เพิ่มหน้า</span>
+                  <span>เพิ่มสมรรถนะ</span>
                 </button>
               </div>
             </form>
@@ -6513,7 +7304,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
         </div>
       )}
 
-      {/* MODAL: แก้ไขข้อมูลหน่วยการเรียนรู้สำหรับอนุบาล (ชื่อหน่วย, มาตรฐาน, ตัวชี้วัด) */}
+      {/* MODAL: แก้ไขข้อมูลสมรรถนะสำหรับอนุบาล */}
       {subtopicToRename && selectedSubject && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-in fade-in">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
@@ -6524,7 +7315,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-slate-800">
-                    แก้ไขข้อมูลหน่วยการเรียนรู้
+                    แก้ไขข้อมูลสมรรถนะ
                   </h3>
                   <p className="text-xs text-slate-500">
                     วิชา {selectedSubject.name} ({selectedSubject.gradeLevel})
@@ -6559,41 +7350,40 @@ export const Module2Grading: React.FC<Module2Props> = ({
             >
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  ชื่อหน่วย <span className="text-rose-500">*</span>
+                  ชื่อสมรรถนะ <span className="text-[11px] font-normal text-slate-400">(ไม่บังคับพิมพ์)</span>
                 </label>
                 <input
                   type="text"
                   value={renameSubtopicInput}
                   onChange={(e) => setRenameSubtopicInput(e.target.value)}
-                  placeholder="ระบุชื่อหน่วยใหม่..."
+                  placeholder="ระบุชื่อสมรรถนะ (ไม่บังคับพิมพ์)..."
                   autoFocus
-                  required
                   className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500 font-medium"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  มาตรฐานการเรียนรู้
+                  คำอธิบายสมรรถนะ / มาตรฐานคุณลักษณะที่พึงประสงค์
                 </label>
                 <textarea
                   rows={2}
                   value={renameStandardInput}
                   onChange={(e) => setRenameStandardInput(e.target.value)}
-                  placeholder="ระบุมาตรฐานการเรียนรู้..."
+                  placeholder="ระบุคำอธิบายสมรรถนะตามหลักสูตรปฐมวัย พ.ศ. 2568..."
                   className="w-full text-xs px-3.5 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500 font-medium resize-none"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  ตัวชี้วัด
+                  หมายเหตุ / ตัวชี้วัดเพิ่มเติม
                 </label>
                 <textarea
                   rows={2}
                   value={renameIndicatorInput}
                   onChange={(e) => setRenameIndicatorInput(e.target.value)}
-                  placeholder="ระบุตัวชี้วัด..."
+                  placeholder="ระบุรายละเอียดเพิ่มเติม..."
                   className="w-full text-xs px-3.5 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500 font-medium resize-none"
                 />
               </div>
@@ -6614,7 +7404,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
                   className="px-3.5 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 border border-rose-200 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 active:scale-95"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  <span>ลบหน้านี้</span>
+                  <span>ลบสมรรถนะนี้</span>
                 </button>
 
                 <div className="flex items-center gap-2">
@@ -6632,8 +7422,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
                   </button>
                   <button
                     type="submit"
-                    disabled={!renameSubtopicInput.trim()}
-                    className="px-5 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                    className="px-5 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
                   >
                     <Save className="w-4 h-4" />
                     <span>บันทึกการแก้ไข</span>
@@ -6645,7 +7434,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
         </div>
       )}
 
-      {/* MODAL: ยืนยันการลบหน้าหน่วยสำหรับอนุบาล (อ.1 - อ.3) */}
+      {/* MODAL: ยืนยันการลบสมรรถนะสำหรับอนุบาล (อ.1 - อ.3) */}
       {subtopicToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-in fade-in">
           <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 space-y-4 animate-in zoom-in-95">
@@ -6655,7 +7444,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
               </div>
               <div className="min-w-0 flex-1">
                 <h3 className="text-sm font-bold text-slate-800 truncate">
-                  ยืนยันการลบหน้าชื่อหน่วย
+                  ยืนยันการลบสมรรถนะ
                 </h3>
                 <p className="text-xs text-rose-600 font-semibold truncate">
                   {subtopicToDelete}
@@ -6665,10 +7454,10 @@ export const Module2Grading: React.FC<Module2Props> = ({
 
             <div className="p-3 bg-rose-50/80 rounded-xl border border-rose-200/80 text-xs text-rose-900 space-y-1.5">
               <p className="font-semibold">
-                คุณแน่ใจหรือไม่ว่าต้องการลบหน้า "{subtopicToDelete}"?
+                คุณแน่ใจหรือไม่ว่าต้องการลบ "{subtopicToDelete}"?
               </p>
               <p className="text-[11px] text-rose-700 leading-relaxed">
-                ⚠️ ข้อมูลช่องการประเมินและคะแนนพัฒนาการในหน้านี้ทั้งหมดจะถูกลบออกจากระบบ
+                ⚠️ องค์ประกอบ/ประเด็น และคะแนนพัฒนาการภายใต้สมรรถนะนี้จะถูกลบออกจากระบบ
               </p>
             </div>
 
@@ -6699,7 +7488,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
 
       {/* (สรุปผลการประเมินปฐมวัย อ.1 - อ.3 แสดงเป็นตารางเรียงลำดับโดยตรงบนหน้าเว็บ ไม่ใช้ Pop-up ตามข้อกำหนด) */}
 
-      {/* MODAL: เพิ่มช่องตารางประเมินในหน้าย่อยปัจจุบันสำหรับอนุบาล */}
+      {/* MODAL: เพิ่มองค์ประกอบ/ประเด็น ภายใต้สมรรถนะปัจจุบันสำหรับอนุบาล */}
       {isAddKindergartenColumnModalOpen && selectedSubject && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-in fade-in">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
@@ -6710,10 +7499,10 @@ export const Module2Grading: React.FC<Module2Props> = ({
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-slate-800">
-                    เพิ่มช่องตารางประเมินในหน้านี้
+                    เพิ่มองค์ประกอบ/ประเด็น {displayedKindergartenAssignments.length + 1}
                   </h3>
                   <p className="text-xs text-amber-900 font-semibold">
-                    หน้า: {activeKindergartenSubtopic}
+                    ภายใต้: {activeKindergartenSubtopic}
                   </p>
                 </div>
               </div>
@@ -6738,13 +7527,13 @@ export const Module2Grading: React.FC<Module2Props> = ({
             >
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  ชื่อช่องตารางประเมิน / ตัวชี้วัด *
+                  องค์ประกอบ/ประเด็น {displayedKindergartenAssignments.length + 1} *
                 </label>
                 <input
                   type="text"
                   value={newKindergartenColumnInput}
                   onChange={(e) => setNewKindergartenColumnInput(e.target.value)}
-                  placeholder="เช่น กล้ามเนิ้อมัดใหญ่, การเคลื่อนไหว หรือ ช่องที่ 2..."
+                  placeholder={`เช่น กล้ามเนื้อมัดใหญ่, การเคลื่อนไหว หรือ องค์ประกอบ/ประเด็น ${displayedKindergartenAssignments.length + 1}...`}
                   autoFocus
                   required
                   className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500 font-medium"
@@ -6768,7 +7557,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
                   className="px-5 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
                 >
                   <Plus className="w-4 h-4 stroke-[2.5]" />
-                  <span>เพิ่มช่องตาราง</span>
+                  <span>เพิ่มองค์ประกอบ/ประเด็น</span>
                 </button>
               </div>
             </form>
@@ -6776,7 +7565,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
         </div>
       )}
 
-      {/* MODAL: เปลี่ยนชื่อช่องตารางประเมินในอนุบาล */}
+      {/* MODAL: แก้ไขชื่อองค์ประกอบ/ประเด็นในอนุบาล */}
       {kindergartenColumnToEdit && selectedSubject && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-in fade-in">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
@@ -6787,10 +7576,10 @@ export const Module2Grading: React.FC<Module2Props> = ({
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-slate-800">
-                    เปลี่ยนชื่อช่องตารางประเมิน
+                    แก้ไขชื่อองค์ประกอบ/ประเด็น
                   </h3>
                   <p className="text-xs text-slate-500">
-                    หน้า: {activeKindergartenSubtopic}
+                    ภายใต้: {activeKindergartenSubtopic}
                   </p>
                 </div>
               </div>
@@ -6815,13 +7604,13 @@ export const Module2Grading: React.FC<Module2Props> = ({
             >
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  ชื่อช่องตารางประเมินใหม่ *
+                  ชื่อองค์ประกอบ/ประเด็น *
                 </label>
                 <input
                   type="text"
                   value={editKindergartenColumnInput}
                   onChange={(e) => setEditKindergartenColumnInput(e.target.value)}
-                  placeholder="ระบุชื่อช่องตารางใหม่..."
+                  placeholder="ระบุชื่อองค์ประกอบ/ประเด็น..."
                   autoFocus
                   required
                   className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-amber-500 font-medium"
@@ -8439,86 +9228,143 @@ export const Module2Grading: React.FC<Module2Props> = ({
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-bold text-slate-700">
-                      หัวข้อย่อยและระดับพัฒนาการ ({currentKindergartenSubtopics.length} หัวข้อ)
+                      {isSelectedKindergartenCompetencyOff
+                        ? `องค์ประกอบ/ประเด็น ของด้านความสามารถ (${displayedKindergartenAssignments.length} ประเด็น)`
+                        : `สมรรถนะและองค์ประกอบ/ประเด็น (${currentKindergartenSubtopics.length} สมรรถนะ)`}
                     </span>
                     {canGradeSubject && !isAdminReadOnly && !isMemberLockedReadOnly && (
-                      <button
-                        type="button"
-                        onClick={() => setIsAddKindergartenSubtopicModalOpen(true)}
-                        className="text-xs font-bold text-amber-700 hover:text-amber-800 flex items-center gap-1 cursor-pointer"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>เพิ่มหัวข้อ</span>
-                      </button>
+                      isSelectedKindergartenCompetencyOff ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNewKindergartenColumnInput(`องค์ประกอบ/ประเด็น ${displayedKindergartenAssignments.length + 1}`);
+                            setIsAddKindergartenColumnModalOpen(true);
+                          }}
+                          className="text-xs font-bold text-amber-700 hover:text-amber-800 flex items-center gap-1 cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>เพิ่มองค์ประกอบ/ประเด็น</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setNewKindergartenSubtopicInput('');
+                            setNewKindergartenStandardInput('');
+                            setNewKindergartenIndicatorInput('');
+                            setNewKindergartenElementsInput(['']);
+                            setIsAddKindergartenSubtopicModalOpen(true);
+                          }}
+                          className="text-xs font-bold text-amber-700 hover:text-amber-800 flex items-center gap-1 cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>เพิ่มสมรรถนะ</span>
+                        </button>
+                      )
                     )}
                   </div>
 
                   {currentKindergartenSubtopics.map((st, sIdx) => {
-                    const asg = getKindergartenAssignmentForSubtopic(st, sIdx);
-                    const row = scoreRows[currentGradingStudent.id];
-                    const currentScore = row?.assignmentScores?.[asg.id];
-                    const currentLevelObj = activeRubricLevels.find(l => l.level === currentScore);
+                    const unitNum = sIdx + 1;
+                    const unitAssignments = (selectedSubject?.assignmentItems || []).filter(
+                      it => it.unitNumber === unitNum || it.name === st
+                    );
+                    const cols =
+                      unitAssignments.length > 0
+                        ? unitAssignments
+                        : [getKindergartenAssignmentForSubtopic(st, sIdx)];
+                    const compSummary = getStudentSubtopicSummary(currentGradingStudent.id, cols);
 
                     return (
-                      <div key={asg.id} className="p-3 bg-white rounded-2xl border border-slate-200 shadow-2xs space-y-2.5">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <span className="w-6 h-6 rounded-lg bg-amber-100 text-amber-800 font-bold text-xs flex items-center justify-center shrink-0">
-                              {sIdx + 1}
+                      <div key={`m-comp-${sIdx}`} className="p-3 bg-amber-50/50 rounded-2xl border border-amber-200/90 shadow-2xs space-y-2.5">
+                        <div className="flex items-center justify-between gap-2 pb-1.5 border-b border-amber-200/70">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="w-6 h-6 rounded-lg bg-amber-600 text-white font-bold text-xs flex items-center justify-center shrink-0">
+                              {unitNum}
                             </span>
-                            <span className="font-bold text-xs text-slate-800 leading-snug">
-                              {st}
+                            <span className="font-bold text-xs text-amber-950 leading-snug truncate">
+                              {isSelectedKindergartenCompetencyOff
+                                ? `ด้านความสามารถ: ${selectedSubject?.name}`
+                                : (st.startsWith('สมรรถนะที่') ? st : `สมรรถนะที่ ${unitNum}: ${st}`)}
                             </span>
                           </div>
-                          {currentLevelObj ? (
-                            <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
-                              currentScore === 3 ? 'bg-emerald-100 text-emerald-800' :
-                              currentScore === 2 ? 'bg-sky-100 text-sky-800' :
-                              currentScore === 1 ? 'bg-amber-100 text-amber-800' :
-                              'bg-indigo-100 text-indigo-800'
-                            }`}>
-                              ระดับ {currentScore}: {currentLevelObj.label}
-                            </span>
-                          ) : (
-                            <span className="text-[11px] text-slate-400 font-medium shrink-0">
-                              ยังไม่ประเมิน
+                          {compSummary.score !== null && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white text-amber-900 border border-amber-200 shrink-0">
+                              สรุป: {compSummary.label} ({compSummary.score})
                             </span>
                           )}
                         </div>
 
-                        {/* Large, touch-friendly Rubric buttons: 1, 2, 3... */}
-                        {canGradeSubject && !isAdminReadOnly && !isMemberLockedReadOnly ? (
-                          <div className={`grid gap-1.5 pt-0.5 ${activeRubricLevels.length <= 3 ? 'grid-cols-3' : activeRubricLevels.length === 4 ? 'grid-cols-4' : 'grid-cols-5'}`}>
-                            {activeRubricLevels.map((rubric) => {
-                              const isSelected = currentScore === rubric.level;
-                              return (
-                                <button
-                                  key={rubric.level}
-                                  type="button"
-                                  onClick={() => handleSetRubricScore(currentGradingStudent.id, asg.id, rubric.level)}
-                                  className={`p-2 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-0.5 active:scale-95 ${
-                                    isSelected
-                                      ? rubric.level === 3
-                                        ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs ring-2 ring-emerald-300'
-                                        : rubric.level === 2
-                                        ? 'bg-sky-600 text-white border-sky-700 shadow-xs ring-2 ring-sky-300'
-                                        : rubric.level === 1
-                                        ? 'bg-amber-500 text-white border-amber-600 shadow-xs ring-2 ring-amber-300'
-                                        : 'bg-indigo-600 text-white border-indigo-700 shadow-xs ring-2 ring-indigo-300'
-                                      : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
-                                  }`}
-                                >
-                                  <span className="font-mono font-bold text-sm">
-                                    ระดับ {rubric.level}
-                                  </span>
-                                  <span className={`text-[10px] leading-tight font-medium ${isSelected ? 'text-white/95' : 'text-slate-500'}`}>
-                                    {rubric.label}
-                                  </span>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        ) : null}
+                        <div className="space-y-2.5">
+                          {cols.map((asg, eIdx) => {
+                            const row = scoreRows[currentGradingStudent.id];
+                            const currentScore = row?.assignmentScores?.[asg.id];
+                            const currentLevelObj = activeRubricLevels.find(l => l.level === currentScore);
+
+                            return (
+                              <div key={asg.id} className="p-2.5 bg-white rounded-xl border border-slate-200 shadow-2xs space-y-2">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 font-bold text-[10px] shrink-0">
+                                      องค์ประกอบ/ประเด็น {eIdx + 1}
+                                    </span>
+                                    <span className="font-bold text-xs text-slate-800 leading-snug">
+                                      {asg.name}
+                                    </span>
+                                  </div>
+                                  {currentLevelObj ? (
+                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                                      currentScore === 3 ? 'bg-emerald-100 text-emerald-800' :
+                                      currentScore === 2 ? 'bg-sky-100 text-sky-800' :
+                                      currentScore === 1 ? 'bg-amber-100 text-amber-800' :
+                                      'bg-indigo-100 text-indigo-800'
+                                    }`}>
+                                      ระดับ {currentScore}: {currentLevelObj.label}
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] text-slate-400 font-medium shrink-0">
+                                      ยังไม่ประเมิน
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Large, touch-friendly Rubric buttons: 1, 2, 3... */}
+                                {canGradeSubject && !isAdminReadOnly && !isMemberLockedReadOnly ? (
+                                  <div className={`grid gap-1.5 pt-0.5 ${activeRubricLevels.length <= 3 ? 'grid-cols-3' : activeRubricLevels.length === 4 ? 'grid-cols-4' : 'grid-cols-5'}`}>
+                                    {activeRubricLevels.map((rubric) => {
+                                      const isSelected = currentScore === rubric.level;
+                                      return (
+                                        <button
+                                          key={rubric.level}
+                                          type="button"
+                                          onClick={() => handleSetRubricScore(currentGradingStudent.id, asg.id, rubric.level)}
+                                          className={`p-2 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-0.5 active:scale-95 ${
+                                            isSelected
+                                              ? rubric.level === 3
+                                                ? 'bg-emerald-600 text-white border-emerald-700 shadow-xs ring-2 ring-emerald-300'
+                                                : rubric.level === 2
+                                                ? 'bg-sky-600 text-white border-sky-700 shadow-xs ring-2 ring-sky-300'
+                                                : rubric.level === 1
+                                                ? 'bg-amber-500 text-white border-amber-600 shadow-xs ring-2 ring-amber-300'
+                                                : 'bg-indigo-600 text-white border-indigo-700 shadow-xs ring-2 ring-indigo-300'
+                                              : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                                          }`}
+                                        >
+                                          <span className="font-mono font-bold text-sm">
+                                            ระดับ {rubric.level}
+                                          </span>
+                                          <span className={`text-[10px] leading-tight font-medium ${isSelected ? 'text-white/95' : 'text-slate-500'}`}>
+                                            {rubric.label}
+                                          </span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                ) : null}
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     );
                   })}
@@ -9135,6 +9981,77 @@ export const Module2Grading: React.FC<Module2Props> = ({
                 </form>
               );
             })()}
+          </div>
+        </div>
+      )}
+
+      {/* Modal ยืนยันการลบองค์ประกอบ/ประเด็น */}
+      {kindergartenColumnToDelete && (
+        <div className="fixed inset-0 z-[80] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-100 scale-in-95 transition-transform duration-200 text-center">
+            <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-3">
+              <Trash2 className="w-6 h-6 stroke-[2]" />
+            </div>
+            <h3 className="font-bold text-slate-800 text-base mb-1">
+              ยืนยันการลบองค์ประกอบ/ประเด็น
+            </h3>
+            <p className="text-xs text-slate-600 mb-5 leading-relaxed">
+              คุณแน่ใจหรือว่าต้องการลบองค์ประกอบ/ประเด็น <strong className="text-rose-700 font-bold">&quot;{kindergartenColumnToDelete.name}&quot;</strong> ? <br/>
+              ข้อมูลคะแนนในช่องนี้จะถูกลบออก
+            </p>
+            <div className="flex items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => setKindergartenColumnToDelete(null)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all cursor-pointer flex-1"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  handleDeleteKindergartenColumn(kindergartenColumnToDelete.id, kindergartenColumnToDelete.name);
+                  setKindergartenColumnToDelete(null);
+                }}
+                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition-all cursor-pointer active:scale-95 flex-1"
+              >
+                ยืนยันการลบ
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal ยืนยันการลบสมรรถนะ */}
+      {subtopicToDelete && (
+        <div className="fixed inset-0 z-[80] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-100 scale-in-95 transition-transform duration-200 text-center">
+            <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-3">
+              <Trash2 className="w-6 h-6 stroke-[2]" />
+            </div>
+            <h3 className="font-bold text-slate-800 text-base mb-1">
+              ยืนยันการลบสมรรถนะ
+            </h3>
+            <p className="text-xs text-slate-600 mb-5 leading-relaxed">
+              คุณแน่ใจหรือว่าต้องการลบ <strong className="text-rose-700 font-bold">&quot;{subtopicToDelete}&quot;</strong> ? <br/>
+              องค์ประกอบ/ประเด็นและคะแนนทั้งหมดภายใต้สมรรถนะนี้จะถูกลบออก
+            </p>
+            <div className="flex items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => setSubtopicToDelete(null)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all cursor-pointer flex-1"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                onClick={() => confirmDeleteKindergartenSubtopic(subtopicToDelete)}
+                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition-all cursor-pointer active:scale-95 flex-1"
+              >
+                ยืนยันการลบ
+              </button>
+            </div>
           </div>
         </div>
       )}

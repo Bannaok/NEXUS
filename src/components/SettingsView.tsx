@@ -64,35 +64,109 @@ export const SettingsView: React.FC<SettingsProps> = ({
     const stripped = (user.fullName || '').trim().replace(/^(นางสาว|นาย|นาง|ดร\.|ครู|ว่าที่\s*ร\.ต\.|ว่าที่ร้อยตรี)\s*/u, '');
     return stripped.split(/\s+/).slice(1).join(' ').trim();
   });
-  const [userGradeLevel, setUserGradeLevel] = useState<string>(
-    (user.assignedGrade as string) || 'ป.1'
-  );
-  const [userRoom, setUserRoom] = useState<string>(() => {
+  const [userHomeroomClasses, setUserHomeroomClasses] = useState<Array<{ gradeLevel: string; room: string }>>(() => {
     const foundMem = members.find(m => m.id === user.id || m.username.toLowerCase() === user.username.toLowerCase());
-    const rawRoom = user.assignedRoom || foundMem?.room || '1';
-    return rawRoom.toString().trim().replace(/^ห้อง\s*/, '') || '1';
+    const rawClasses =
+      (user.assignedClasses && user.assignedClasses.length > 0 ? user.assignedClasses : undefined) ||
+      (foundMem?.assignedClasses && foundMem.assignedClasses.length > 0 ? foundMem.assignedClasses : undefined);
+    if (rawClasses && rawClasses.length > 0) {
+      return rawClasses.map(c => ({
+        gradeLevel: (c.gradeLevel as string) || 'ป.1',
+        room: (c.room || '1').toString().trim().replace(/^ห้อง\s*/, '') || '1'
+      }));
+    }
+    const rawGrade = (user.assignedGrade as string) || (foundMem?.gradeLevel as string) || 'ป.1';
+    const rawRoom = (user.assignedRoom || foundMem?.room || '1').toString().trim().replace(/^ห้อง\s*/, '') || '1';
+    if (rawGrade.includes(',')) {
+      return rawGrade
+        .split(',')
+        .map(g => g.trim())
+        .filter(Boolean)
+        .map(g => ({ gradeLevel: g, room: rawRoom }));
+    }
+    return [{ gradeLevel: rawGrade, room: rawRoom }];
   });
 
-  // Dynamically detect rooms from students for the selected grade (and any grade with multiple rooms)
+  // Dynamically detect rooms from students for any selected grade
   const allStudentsList = students && students.length > 0 ? students : StorageService.getStudents();
-  const availableRoomsForSelectedGrade = React.useMemo(() => {
+  const getAvailableRoomsForGrade = (targetGrade: string, currentRoom?: string): string[] => {
     const rooms = new Set<string>(['1']);
     allStudentsList
-      .filter(s => (s.gradeLevel || '').trim() === userGradeLevel)
+      .filter(s => (s.gradeLevel || '').trim() === targetGrade)
       .forEach(s => {
         const r = (s.room || '1').toString().trim().replace(/^ห้อง\s*/, '') || '1';
         if (r) rooms.add(r);
       });
-    // Also check if any member is already assigned to a room in this grade
     members
-      .filter(m => (m.gradeLevel || '').trim() === userGradeLevel && m.room)
+      .filter(m => {
+        if ((m.gradeLevel || '').trim() === targetGrade && m.room) return true;
+        if (m.assignedClasses?.some(c => (c.gradeLevel || '').trim() === targetGrade && c.room)) return true;
+        return false;
+      })
       .forEach(m => {
-        const r = (m.room || '1').toString().trim().replace(/^ห้อง\s*/, '') || '1';
-        if (r) rooms.add(r);
+        if ((m.gradeLevel || '').trim() === targetGrade && m.room) {
+          const r = (m.room || '1').toString().trim().replace(/^ห้อง\s*/, '') || '1';
+          if (r) rooms.add(r);
+        }
+        m.assignedClasses?.forEach(c => {
+          if ((c.gradeLevel || '').trim() === targetGrade && c.room) {
+            const r = (c.room || '1').toString().trim().replace(/^ห้อง\s*/, '') || '1';
+            if (r) rooms.add(r);
+          }
+        });
       });
-    if (userRoom) rooms.add(userRoom);
+    if (currentRoom) rooms.add(currentRoom);
     return Array.from(rooms).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-  }, [allStudentsList, members, userGradeLevel, userRoom]);
+  };
+
+  const ALL_GRADE_OPTIONS = [
+    { value: 'อ.1', label: 'ชั้นอนุบาล 1 (อ.1)' },
+    { value: 'อ.2', label: 'ชั้นอนุบาล 2 (อ.2)' },
+    { value: 'อ.3', label: 'ชั้นอนุบาล 3 (อ.3)' },
+    { value: 'ป.1', label: 'ชั้นประถมศึกษาปีที่ 1 (ป.1)' },
+    { value: 'ป.2', label: 'ชั้นประถมศึกษาปีที่ 2 (ป.2)' },
+    { value: 'ป.3', label: 'ชั้นประถมศึกษาปีที่ 3 (ป.3)' },
+    { value: 'ป.4', label: 'ชั้นประถมศึกษาปีที่ 4 (ป.4)' },
+    { value: 'ป.5', label: 'ชั้นประถมศึกษาปีที่ 5 (ป.5)' },
+    { value: 'ป.6', label: 'ชั้นประถมศึกษาปีที่ 6 (ป.6)' },
+    { value: 'ม.1', label: 'ชั้นมัธยมศึกษาปีที่ 1 (ม.1)' },
+    { value: 'ม.2', label: 'ชั้นมัธยมศึกษาปีที่ 2 (ม.2)' },
+    { value: 'ม.3', label: 'ชั้นมัธยมศึกษาปีที่ 3 (ม.3)' },
+    { value: 'ม.4', label: 'ชั้นมัธยมศึกษาปีที่ 4 (ม.4)' },
+    { value: 'ม.5', label: 'ชั้นมัธยมศึกษาปีที่ 5 (ม.5)' },
+    { value: 'ม.6', label: 'ชั้นมัธยมศึกษาปีที่ 6 (ม.6)' }
+  ];
+
+  const handleAddHomeroomClassSlot = () => {
+    const usedGrades = new Set(userHomeroomClasses.map(c => c.gradeLevel));
+    const nextDefault = ALL_GRADE_OPTIONS.find(g => !usedGrades.has(g.value))?.value || 'ป.1';
+    setUserHomeroomClasses(prev => [...prev, { gradeLevel: nextDefault, room: '1' }]);
+  };
+
+  const handleRemoveHomeroomClassSlot = (index: number) => {
+    setUserHomeroomClasses(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleUpdateHomeroomGrade = (index: number, nextGrade: string) => {
+    if (index === 0 && nextGrade === 'ไม่ได้เป็นครูประจำชั้น') {
+      setUserHomeroomClasses([{ gradeLevel: 'ไม่ได้เป็นครูประจำชั้น', room: '1' }]);
+      return;
+    }
+    setUserHomeroomClasses(prev =>
+      prev.map((item, i) => {
+        if (i !== index) return item;
+        const nextRooms = getAvailableRoomsForGrade(nextGrade);
+        const validRoom = nextRooms.includes(item.room) ? item.room : '1';
+        return { gradeLevel: nextGrade, room: validRoom };
+      })
+    );
+  };
+
+  const handleUpdateHomeroomRoom = (index: number, nextRoom: string) => {
+    setUserHomeroomClasses(prev =>
+      prev.map((item, i) => (i === index ? { ...item, room: nextRoom } : item))
+    );
+  };
 
   const [userLearningGroup, setUserLearningGroup] = useState<string>(
     user.learningGroup || 'กลุ่มสาระการเรียนรู้ภาษาไทย'
@@ -234,8 +308,28 @@ export const SettingsView: React.FC<SettingsProps> = ({
     const cleanLast = userLastName.trim();
     const full = `${userPrefix.trim()}${cleanFirst}${cleanLast ? ` ${cleanLast}` : ''}`.trim();
 
-    const normalizedRoom = (userRoom || '1').toString().trim().replace(/^ห้อง\s*/, '') || '1';
-    const isHomeroom = userGradeLevel !== 'ไม่ได้เป็นครูประจำชั้น';
+    const isHomeroom =
+      userHomeroomClasses.length > 0 &&
+      userHomeroomClasses[0].gradeLevel !== 'ไม่ได้เป็นครูประจำชั้น';
+
+    const seenClassKeys = new Set<string>();
+    const normalizedClasses = isHomeroom
+      ? userHomeroomClasses
+          .filter(c => c.gradeLevel && c.gradeLevel !== 'ไม่ได้เป็นครูประจำชั้น')
+          .map(c => ({
+            gradeLevel: c.gradeLevel.trim(),
+            room: (c.room || '1').toString().trim().replace(/^ห้อง\s*/, '') || '1'
+          }))
+          .filter(c => {
+            const key = `${c.gradeLevel}_${c.room}`;
+            if (seenClassKeys.has(key)) return false;
+            seenClassKeys.add(key);
+            return true;
+          })
+      : [];
+
+    const primaryGrade = normalizedClasses[0]?.gradeLevel;
+    const primaryRoom = normalizedClasses[0]?.room;
 
     const updatedUser: UserSession = {
       ...user,
@@ -244,8 +338,9 @@ export const SettingsView: React.FC<SettingsProps> = ({
       lastName: cleanLast,
       fullName: full || user.fullName,
       phone: userPhone,
-      assignedGrade: isHomeroom ? userGradeLevel : undefined,
-      assignedRoom: isHomeroom ? normalizedRoom : undefined,
+      assignedGrade: isHomeroom ? primaryGrade : undefined,
+      assignedRoom: isHomeroom ? primaryRoom : undefined,
+      assignedClasses: isHomeroom ? normalizedClasses : [],
       learningGroup: userLearningGroup,
       avatarUrl: userAvatarUrl
     };
@@ -266,8 +361,9 @@ export const SettingsView: React.FC<SettingsProps> = ({
         lastName: userLastName,
         fullName: full || foundMem.fullName,
         phone: userPhone,
-        gradeLevel: (isHomeroom ? userGradeLevel : undefined) as GradeLevel,
-        room: isHomeroom ? normalizedRoom : undefined,
+        gradeLevel: (isHomeroom ? primaryGrade : undefined) as GradeLevel,
+        room: isHomeroom ? primaryRoom : undefined,
+        assignedClasses: isHomeroom ? normalizedClasses : [],
         learningGroup: userLearningGroup,
         avatarUrl: userAvatarUrl
       });
@@ -288,19 +384,24 @@ export const SettingsView: React.FC<SettingsProps> = ({
           prefix: userPrefix || matchedP.prefix,
           firstName: userFirstName || matchedP.firstName,
           lastName: userLastName || matchedP.lastName,
-          advisorGrade: isHomeroom ? (userGradeLevel as GradeLevel) : '',
-          advisorRoom: isHomeroom ? normalizedRoom : undefined
+          advisorGrade: isHomeroom ? normalizedClasses.map(c => c.gradeLevel).join(', ') : '',
+          advisorRoom: isHomeroom ? primaryRoom : undefined,
+          advisorClasses: isHomeroom ? normalizedClasses : []
         });
       }
     } catch {
       // ignore sync errors
     }
 
+    const classesSummaryText = normalizedClasses
+      .map(c => `${c.gradeLevel} ห้อง ${c.room}`)
+      .join(', ');
+
     onShowToast(
       'success',
       'บันทึกข้อมูลส่วนตัวสำเร็จ 🎉',
       isHomeroom
-        ? `อัปเดตข้อมูลครูประจำชั้น ${userGradeLevel} ห้อง ${normalizedRoom} เรียบร้อยแล้ว`
+        ? `อัปเดตข้อมูลครูประจำชั้น (${classesSummaryText}) เรียบร้อยแล้ว`
         : 'อัปเดตข้อมูลส่วนตัว เบอร์โทรติดต่อ และรูปโปรไฟล์เรียบร้อยแล้ว'
     );
   };
@@ -544,86 +645,103 @@ export const SettingsView: React.FC<SettingsProps> = ({
                 </div>
 
                 {/* 3. Grade & Learning Group */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      ครูประจำชั้นระดับชั้น *
-                    </label>
-                    <select
-                      value={userGradeLevel}
-                      onChange={(e) => {
-                        const nextGrade = e.target.value;
-                        setUserGradeLevel(nextGrade);
-                        // Check if current room exists in the newly selected grade; if not, default to '1'
-                        const nextRooms = new Set<string>(['1']);
-                        allStudentsList
-                          .filter(s => (s.gradeLevel || '').trim() === nextGrade)
-                          .forEach(s => {
-                            const r = (s.room || '1').toString().trim().replace(/^ห้อง\s*/, '') || '1';
-                            if (r) nextRooms.add(r);
-                          });
-                        if (!nextRooms.has(userRoom)) {
-                          setUserRoom('1');
-                        }
-                      }}
-                      className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 font-semibold bg-white cursor-pointer"
-                    >
-                      <option value="อ.1">ชั้นอนุบาล 1 (อ.1)</option>
-                      <option value="อ.2">ชั้นอนุบาล 2 (อ.2)</option>
-                      <option value="อ.3">ชั้นอนุบาล 3 (อ.3)</option>
-                      <option value="ป.1">ชั้นประถมศึกษาปีที่ 1 (ป.1)</option>
-                      <option value="ป.2">ชั้นประถมศึกษาปีที่ 2 (ป.2)</option>
-                      <option value="ป.3">ชั้นประถมศึกษาปีที่ 3 (ป.3)</option>
-                      <option value="ป.4">ชั้นประถมศึกษาปีที่ 4 (ป.4)</option>
-                      <option value="ป.5">ชั้นประถมศึกษาปีที่ 5 (ป.5)</option>
-                      <option value="ป.6">ชั้นประถมศึกษาปีที่ 6 (ป.6)</option>
-                      <option value="ม.1">ชั้นมัธยมศึกษาปีที่ 1 (ม.1)</option>
-                      <option value="ม.2">ชั้นมัธยมศึกษาปีที่ 2 (ม.2)</option>
-                      <option value="ม.3">ชั้นมัธยมศึกษาปีที่ 3 (ม.3)</option>
-                      <option value="ม.4">ชั้นมัธยมศึกษาปีที่ 4 (ม.4)</option>
-                      <option value="ม.5">ชั้นมัธยมศึกษาปีที่ 5 (ม.5)</option>
-                      <option value="ม.6">ชั้นมัธยมศึกษาปีที่ 6 (ม.6)</option>
-                      <option value="ไม่ได้เป็นครูประจำชั้น">ไม่ได้เป็นครูประจำชั้น</option>
-                    </select>
-
-                    {userGradeLevel !== 'ไม่ได้เป็นครูประจำชั้น' && (
-                      <div className="pt-1">
-                        <label className="block text-[11px] font-bold text-indigo-700 mb-1.5">
-                          เลือกห้องประจำชั้น ({userGradeLevel}) *
-                        </label>
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          {availableRoomsForSelectedGrade.map(rm => {
-                            const isSelected = userRoom === rm;
-                            const countInRoom = allStudentsList.filter(
-                              s =>
-                                (s.gradeLevel || '').trim() === userGradeLevel &&
-                                ((s.room || '1').toString().trim().replace(/^ห้อง\s*/, '') || '1') === rm
-                            ).length;
-                            return (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
+                  <div className="space-y-3">
+                    {userHomeroomClasses.map((clsItem, idx) => {
+                      const roomsForThisGrade = getAvailableRoomsForGrade(clsItem.gradeLevel, clsItem.room);
+                      const isFirst = idx === 0;
+                      const isNotHomeroom = clsItem.gradeLevel === 'ไม่ได้เป็นครูประจำชั้น';
+                      return (
+                        <div
+                          key={idx}
+                          className={
+                            isFirst
+                              ? 'space-y-2'
+                              : 'p-3 bg-indigo-50/40 rounded-xl border border-indigo-200/80 space-y-2 relative'
+                          }
+                        >
+                          <div className="flex items-center justify-between gap-2 mb-1">
+                            <label className="block text-xs font-semibold text-slate-700">
+                              {isFirst ? 'ครูประจำชั้นระดับชั้น *' : `ครูประจำชั้นระดับชั้นที่ ${idx + 1} *`}
+                            </label>
+                            {isFirst && !isNotHomeroom && (
                               <button
-                                key={rm}
                                 type="button"
-                                onClick={() => setUserRoom(rm)}
-                                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border flex items-center gap-1.5 ${
-                                  isSelected
-                                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
-                                    : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/50'
-                                }`}
+                                onClick={handleAddHomeroomClassSlot}
+                                className="w-6 h-6 rounded-lg bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white flex items-center justify-center shadow-2xs transition-all cursor-pointer shrink-0"
+                                title="เพิ่มช่องครูประจำชั้นอีกชั้น"
                               >
-                                <span>ห้อง {rm}</span>
-                                <span
-                                  className={`text-[10px] px-1.5 py-0.5 rounded-md font-semibold ${
-                                    isSelected ? 'bg-indigo-500 text-indigo-100' : 'bg-slate-100 text-slate-500'
-                                  }`}
-                                >
-                                  {countInRoom} คน
-                                </span>
+                                <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
                               </button>
-                            );
-                          })}
+                            )}
+                            {!isFirst && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveHomeroomClassSlot(idx)}
+                                className="w-5 h-5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+                                title="ลบชั้นประจำชั้นนี้"
+                              >
+                                <X className="w-3 h-3 stroke-[2.5]" />
+                              </button>
+                            )}
+                          </div>
+
+                          <select
+                            value={clsItem.gradeLevel}
+                            onChange={(e) => handleUpdateHomeroomGrade(idx, e.target.value)}
+                            className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 font-semibold bg-white cursor-pointer"
+                          >
+                            {ALL_GRADE_OPTIONS.map(opt => (
+                              <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
+                            {isFirst && (
+                              <option value="ไม่ได้เป็นครูประจำชั้น">ไม่ได้เป็นครูประจำชั้น</option>
+                            )}
+                          </select>
+
+                          {!isNotHomeroom && (
+                            <div className="pt-0.5">
+                              <label className="block text-[11px] font-bold text-indigo-700 mb-1.5">
+                                เลือกห้องประจำชั้น ({clsItem.gradeLevel}) *
+                              </label>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                {roomsForThisGrade.map(rm => {
+                                  const isSelected = clsItem.room === rm;
+                                  const countInRoom = allStudentsList.filter(
+                                    s =>
+                                      (s.gradeLevel || '').trim() === clsItem.gradeLevel &&
+                                      ((s.room || '1').toString().trim().replace(/^ห้อง\s*/, '') || '1') === rm
+                                  ).length;
+                                  return (
+                                    <button
+                                      key={rm}
+                                      type="button"
+                                      onClick={() => handleUpdateHomeroomRoom(idx, rm)}
+                                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border flex items-center gap-1.5 ${
+                                        isSelected
+                                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                                          : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/50'
+                                      }`}
+                                    >
+                                      <span>ห้อง {rm}</span>
+                                      <span
+                                        className={`text-[10px] px-1.5 py-0.5 rounded-md font-semibold ${
+                                          isSelected ? 'bg-indigo-500 text-indigo-100' : 'bg-slate-100 text-slate-500'
+                                        }`}
+                                      >
+                                        {countInRoom} คน
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    )}
+                      );
+                    })}
                   </div>
 
                   <div>
@@ -644,6 +762,7 @@ export const SettingsView: React.FC<SettingsProps> = ({
                       <option value="กลุ่มสาระการเรียนรู้การงานอาชีพ">กลุ่มสาระการเรียนรู้การงานอาชีพ</option>
                       <option value="กลุ่มสาระการเรียนรู้ภาษาต่างประเทศ">กลุ่มสาระการเรียนรู้ภาษาต่างประเทศ</option>
                       <option value="งานบริหารวิชาการ / ธุรการโรงเรียน">งานบริหารวิชาการ / ธุรการโรงเรียน</option>
+                      <option value="อื่นๆ">อื่นๆ</option>
                     </select>
                   </div>
                 </div>

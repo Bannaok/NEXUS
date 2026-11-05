@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { 
   Student, 
   Personnel, 
@@ -469,6 +469,147 @@ export const Module7Reports: React.FC<Module7Props> = ({
     return 'ผู้อำนวยการโรงเรียนบ้านนาออก';
   }, [directorPersonnel]);
 
+  // Editable Signatures State (Allows directly editing the name in parentheses and position below it on preview)
+  const [signAdvisorName, setSignAdvisorName] = useState<string>('');
+  const [signAdvisorPosition, setSignAdvisorPosition] = useState<string>('ครูประจำชั้น');
+  const [signAcademicHeadName, setSignAcademicHeadName] = useState<string>('');
+  const [signAcademicHeadPosition, setSignAcademicHeadPosition] = useState<string>('หัวหน้าฝ่ายวิชาการ');
+  const [signDirectorName, setSignDirectorName] = useState<string>('');
+  const [signDirectorPosition, setSignDirectorPosition] = useState<string>('');
+
+  useEffect(() => {
+    setSignAdvisorName(
+      selectedAdvisor
+        ? `${selectedAdvisor.prefix || ''}${selectedAdvisor.firstName || ''} ${selectedAdvisor.lastName || ''}`.trim()
+        : '................................................'
+    );
+  }, [selectedAdvisor]);
+
+  useEffect(() => {
+    setSignAcademicHeadName(
+      selectedAcademicHead
+        ? `${selectedAcademicHead.prefix || ''}${selectedAcademicHead.firstName || ''} ${selectedAcademicHead.lastName || ''}`.trim()
+        : '................................................'
+    );
+  }, [selectedAcademicHead]);
+
+  useEffect(() => {
+    setSignDirectorName(directorDisplayName || '................................................');
+  }, [directorDisplayName]);
+
+  useEffect(() => {
+    setSignDirectorPosition(directorPosition || 'ผู้อำนวยการโรงเรียนบ้านนาออก');
+  }, [directorPosition]);
+
+  const renderEditableSignatures = (marginTop: string = '2.1cm', compact: boolean = false) => (
+    <div
+      className={`grid grid-cols-3 gap-2 text-center ${compact ? 'text-[11px]' : 'text-[11.5px]'} text-black`}
+      style={{ marginTop }}
+    >
+      {/* Advisor */}
+      <div className="space-y-1 text-center">
+        <p className="text-black text-center">ลงชื่อ ..................................................</p>
+        <div className="space-y-1 text-center">
+          <div className="flex items-center justify-center font-normal text-black text-[11px] leading-tight">
+            <span className="select-none font-normal">(</span>
+            <input
+              type="text"
+              value={signAdvisorName}
+              onChange={(e) => setSignAdvisorName(e.target.value)}
+              onFocus={(e) => {
+                if (/^\.+$/.test(e.target.value.trim())) {
+                  e.target.select();
+                }
+              }}
+              placeholder="................................................"
+              className="bg-transparent text-center border-b border-transparent hover:border-slate-400 focus:border-indigo-600 focus:bg-indigo-50/40 focus:outline-none px-1 py-0 text-black text-[11px] leading-tight min-w-[140px] max-w-[200px] transition-colors cursor-text print:border-none print:bg-transparent"
+              title="คลิกเพื่อแก้ไขชื่อ"
+            />
+            <span className="select-none font-normal">)</span>
+          </div>
+          <div className="w-full text-center">
+            <input
+              type="text"
+              value={signAdvisorPosition}
+              onChange={(e) => setSignAdvisorPosition(e.target.value)}
+              placeholder="ตำแหน่ง"
+              className={`bg-transparent text-center border-b border-transparent hover:border-slate-400 focus:border-indigo-600 focus:bg-indigo-50/40 focus:outline-none px-1 py-0 leading-tight ${compact ? 'text-[10px]' : 'text-[10.5px]'} text-black w-full mx-auto block transition-colors cursor-text print:border-none print:bg-transparent`}
+              title="คลิกเพื่อแก้ไขตำแหน่ง"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Academic Head */}
+      <div className="space-y-1 text-center">
+        <p className="text-black text-center">ลงชื่อ ..................................................</p>
+        <div className="space-y-1 text-center">
+          <div className="flex items-center justify-center font-normal text-black text-[11px] leading-tight">
+            <span className="select-none font-normal">(</span>
+            <input
+              type="text"
+              value={signAcademicHeadName}
+              onChange={(e) => setSignAcademicHeadName(e.target.value)}
+              onFocus={(e) => {
+                if (/^\.+$/.test(e.target.value.trim())) {
+                  e.target.select();
+                }
+              }}
+              placeholder="................................................"
+              className="bg-transparent text-center border-b border-transparent hover:border-slate-400 focus:border-indigo-600 focus:bg-indigo-50/40 focus:outline-none px-1 py-0 text-black text-[11px] leading-tight min-w-[140px] max-w-[200px] transition-colors cursor-text print:border-none print:bg-transparent"
+              title="คลิกเพื่อแก้ไขชื่อ"
+            />
+            <span className="select-none font-normal">)</span>
+          </div>
+          <div className="w-full text-center">
+            <input
+              type="text"
+              value={signAcademicHeadPosition}
+              onChange={(e) => setSignAcademicHeadPosition(e.target.value)}
+              placeholder="ตำแหน่ง"
+              className={`bg-transparent text-center border-b border-transparent hover:border-slate-400 focus:border-indigo-600 focus:bg-indigo-50/40 focus:outline-none px-1 py-0 leading-tight ${compact ? 'text-[10px]' : 'text-[10.5px]'} text-black w-full mx-auto block transition-colors cursor-text print:border-none print:bg-transparent`}
+              title="คลิกเพื่อแก้ไขตำแหน่ง"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Director */}
+      <div className="space-y-1 text-center">
+        <p className="text-black text-center">ลงชื่อ ..................................................</p>
+        <div className="space-y-1 text-center">
+          <div className="flex items-center justify-center font-normal text-black text-[11px] leading-tight">
+            <span className="select-none font-normal">(</span>
+            <input
+              type="text"
+              value={signDirectorName}
+              onChange={(e) => setSignDirectorName(e.target.value)}
+              onFocus={(e) => {
+                if (/^\.+$/.test(e.target.value.trim())) {
+                  e.target.select();
+                }
+              }}
+              placeholder="................................................"
+              className="bg-transparent text-center border-b border-transparent hover:border-slate-400 focus:border-indigo-600 focus:bg-indigo-50/40 focus:outline-none px-1 py-0 text-black text-[11px] leading-tight min-w-[140px] max-w-[200px] transition-colors cursor-text print:border-none print:bg-transparent"
+              title="คลิกเพื่อแก้ไขชื่อ"
+            />
+            <span className="select-none font-normal">)</span>
+          </div>
+          <div className="w-full text-center">
+            <input
+              type="text"
+              value={signDirectorPosition}
+              onChange={(e) => setSignDirectorPosition(e.target.value)}
+              placeholder="ตำแหน่ง"
+              className={`bg-transparent text-center border-b border-transparent hover:border-slate-400 focus:border-indigo-600 focus:bg-indigo-50/40 focus:outline-none px-1 py-0 leading-tight ${compact ? 'text-[10px]' : 'text-[10.5px]'} text-black w-full mx-auto block transition-colors cursor-text print:border-none print:bg-transparent`}
+              title="คลิกเพื่อแก้ไขตำแหน่ง"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
   // Helper to extract unique subject teacher names for a 5-subject chunk
   const getSubjectTeacherName = (chunk: Subject[], personnelList: Personnel[], defaultAdvisor: Personnel | null): string => {
     const teacherNamesSet = new Set<string>();
@@ -625,7 +766,48 @@ export const Module7Reports: React.FC<Module7Props> = ({
     );
     const resultList = registered.length > 0 ? registered : list;
 
+    const isKinder = ['อ.1', 'อ.2', 'อ.3'].includes(assessmentPopupGrade) || assessmentPopupGrade.startsWith('อ.');
+
     return [...resultList].sort((a, b) => {
+      const hasSortA = typeof a.sortOrder === 'number' && !isNaN(a.sortOrder);
+      const hasSortB = typeof b.sortOrder === 'number' && !isNaN(b.sortOrder);
+      if (hasSortA && hasSortB && a.sortOrder !== b.sortOrder) {
+        return (a.sortOrder as number) - (b.sortOrder as number);
+      }
+      if (hasSortA !== hasSortB) {
+        return hasSortA ? -1 : 1;
+      }
+      if (isKinder) {
+        const aHasComp = a.hasKindergartenCompetency !== false;
+        const bHasComp = b.hasKindergartenCompetency !== false;
+        if (aHasComp !== bHasComp) {
+          return aHasComp ? 1 : -1;
+        }
+        const codeA = (a.code || '').trim();
+        const codeB = (b.code || '').trim();
+        if (codeA && codeB && codeA !== codeB) {
+          return codeA.localeCompare(codeB, 'th');
+        }
+        // Preserve original curriculum/creation order when subject code is not used
+        return resultList.indexOf(a) - resultList.indexOf(b);
+      }
+      const getPrimaryDefaultOrder = (sub: Subject): number => {
+        const name = (sub.name || '').trim();
+        const code = (sub.code || '').trim();
+        if (name === 'ภาษาไทย' || code.startsWith('ท1')) return 1;
+        if (name === 'คณิตศาสตร์' || code.startsWith('ค1')) return 2;
+        if (name === 'สังคมศึกษา' || code.startsWith('ส1')) return 3;
+        if (name === 'สุขศึกษาและพลศึกษา' || code.startsWith('พ1')) return 4;
+        if (name === 'ศิลปะ' || code.startsWith('ศ1')) return 5;
+        if (name === 'การงานอาชีพ' || code.startsWith('ง1')) return 6;
+        if (name === 'ภาษาต่างประเทศ' || code.startsWith('อ1')) return 7;
+        if (name === 'วิทยาศาสตร์และเทคโนโลยี' || code.startsWith('ว1')) return 8;
+        if (name === 'ประวัติศาสตร์' || code.startsWith('ป1')) return 9;
+        return 99;
+      };
+      const ordA = getPrimaryDefaultOrder(a);
+      const ordB = getPrimaryDefaultOrder(b);
+      if (ordA !== ordB) return ordA - ordB;
       const codeA = a.code || '';
       const codeB = b.code || '';
       const cmp = codeA.localeCompare(codeB, 'th');
@@ -719,6 +901,14 @@ export const Module7Reports: React.FC<Module7Props> = ({
     });
 
     return Array.from(dedupMap.values()).sort((a, b) => {
+      const hasSortA = typeof a.sortOrder === 'number' && !isNaN(a.sortOrder);
+      const hasSortB = typeof b.sortOrder === 'number' && !isNaN(b.sortOrder);
+      if (hasSortA && hasSortB && a.sortOrder !== b.sortOrder) {
+        return (a.sortOrder as number) - (b.sortOrder as number);
+      }
+      if (hasSortA !== hasSortB) {
+        return hasSortA ? -1 : 1;
+      }
       const codeA = a.code || '';
       const codeB = b.code || '';
       const cmp = codeA.localeCompare(codeB, 'th');
@@ -727,15 +917,302 @@ export const Module7Reports: React.FC<Module7Props> = ({
     });
   }, [effectiveSubjects, effectiveGrades, assessmentGradeStudents, assessmentPopupGrade, selectedSemester, selectedYear, selectedRoom]);
 
-  // Chunk subjects into sets of 5 (5 วิชา ต่อ 1 แผ่น A4 แนวตั้ง)
+  const isAssessmentKindergarten = assessmentPopupGrade
+    ? ['อ.1', 'อ.2', 'อ.3'].includes(assessmentPopupGrade) || assessmentPopupGrade.startsWith('อ.')
+    : false;
+
+  const doesKindergartenSubjectHaveCompetency = (subject: Subject): boolean => {
+    if (subject.hasKindergartenCompetency === false) return false;
+    if (subject.hasKindergartenCompetency === true) return true;
+    const comps = subject.kindergartenCompetencies || [];
+    if (comps.length > 1) return true;
+    if (comps.length === 1 && Boolean(comps[0]?.title?.trim())) return true;
+    const items = subject.assignmentItems || [];
+    if (new Set(items.map(it => it.unitNumber || 1)).size > 1) return true;
+    const subtopics = subject.subtopics || [];
+    if (subtopics.length > 1 || subtopics.some(st => (st || '').includes('สมรรถนะ'))) return true;
+    if ((subject.name || '').includes('สุขภาวะ')) return true;
+    if (subtopics.length === 1 && !subtopics[0].includes('สมรรถนะ') && !comps[0]?.title?.trim()) return false;
+    return true;
+  };
+
+  const getKindergartenSubjectElements = (subject: Subject): {
+    id: string;
+    name: string;
+    unitNumber: number;
+    competencyLabel: string;
+  }[] => {
+    const hasComp = doesKindergartenSubjectHaveCompetency(subject);
+    const comps = subject.kindergartenCompetencies || [];
+    const subtopics = subject.subtopics || [];
+    const items = subject.assignmentItems || [];
+
+    const getCompLabel = (unitNum: number): string => {
+      if (!hasComp) return '';
+      const compObj = comps[unitNum - 1];
+      if (compObj && compObj.title && compObj.title.trim()) {
+        const cleanT = compObj.title.trim().replace(/^สมรรถนะ(\s*ที่)?\s*\d+\s*:?\s*/i, '').trim();
+        return cleanT ? `${unitNum}: ${cleanT}` : `${unitNum}`;
+      }
+      const subStr = subtopics[unitNum - 1];
+      if (subStr && subStr.trim()) {
+        const cleanT = subStr.trim().replace(/^สมรรถนะ(\s*ที่)?\s*\d+\s*:?\s*/i, '').trim();
+        return cleanT ? `${unitNum}: ${cleanT}` : `${unitNum}`;
+      }
+      return `${unitNum}`;
+    };
+
+    if (items.length > 0) {
+      return items.map((it, idx) => {
+        const uNum = it.unitNumber || 1;
+        return {
+          id: it.id,
+          name: it.name || `องค์ประกอบ/ประเด็น ${idx + 1}`,
+          unitNumber: uNum,
+          competencyLabel: getCompLabel(uNum)
+        };
+      });
+    }
+
+    if (comps.length > 0) {
+      const result: { id: string; name: string; unitNumber: number; competencyLabel: string }[] = [];
+      comps.forEach((c, cIdx) => {
+        const uNum = cIdx + 1;
+        const els = c.elements && c.elements.length > 0 ? c.elements : ['องค์ประกอบ/ประเด็น 1'];
+        els.forEach((elName, eIdx) => {
+          result.push({
+            id: `asg-k-${uNum}-${eIdx + 1}`,
+            name: elName || `องค์ประกอบ/ประเด็น ${eIdx + 1}`,
+            unitNumber: uNum,
+            competencyLabel: getCompLabel(uNum)
+          });
+        });
+      });
+      if (result.length > 0) return result;
+    }
+
+    return [
+      {
+        id: 'asg-k-1-1',
+        name: 'องค์ประกอบ/ประเด็น 1',
+        unitNumber: 1,
+        competencyLabel: hasComp ? 'สมรรถนะ 1' : ''
+      }
+    ];
+  };
+
+  const getKindergartenRubricLabel = (subject: Subject, level: number | null): string => {
+    if (level === null || isNaN(level) || level <= 0) return '-';
+    const rubrics =
+      subject.rubricLevels && subject.rubricLevels.length > 0
+        ? subject.rubricLevels
+        : [
+            { level: 1, label: 'ควรเสริม' },
+            { level: 2, label: 'ได้บางครั้ง' },
+            { level: 3, label: 'ปฏิบัติได้' }
+          ];
+    const found = rubrics.find(r => r.level === level);
+    if (found) return found.label;
+    if (level >= 3) return 'ปฏิบัติได้';
+    if (level === 2) return 'ได้บางครั้ง';
+    return 'ควรเสริม';
+  };
+
+  const getStudentKindergartenEval = (studentId: string, subject: Subject, targetSem: string = selectedSemester) => {
+    const codeUpper = (subject.code || '').trim().toUpperCase();
+    const nameClean = (subject.name || '').trim();
+
+    let rec = effectiveGrades.find(g =>
+      g.studentId === studentId &&
+      g.subjectId === subject.id &&
+      isGradeRecordForSemAndYear(g, targetSem, selectedYear) &&
+      hasRecordedScoreValue(g)
+    );
+    if (!rec) {
+      rec = effectiveGrades.find(g =>
+        g.studentId === studentId &&
+        ((codeUpper !== '' && (g.subjectCode || '').trim().toUpperCase() === codeUpper) ||
+          (nameClean !== '' && (g.subjectName || '').trim() === nameClean)) &&
+        isGradeRecordForSemAndYear(g, targetSem, selectedYear) &&
+        hasRecordedScoreValue(g)
+      );
+    }
+
+    const elements = getKindergartenSubjectElements(subject);
+    const asgScores = rec?.assignmentScores || {};
+    const maxRubric = subject.rubricMaxLevel || (subject.rubricLevels?.length) || 3;
+
+    const elementResults = elements.map((el, idx) => {
+      let val = asgScores[el.id];
+      if (val === undefined) {
+        // Fallback match by index if IDs were regenerated
+        const asgKeys = Object.keys(asgScores);
+        if (asgKeys.length === elements.length && typeof asgScores[asgKeys[idx]] === 'number') {
+          val = asgScores[asgKeys[idx]];
+        }
+      }
+      const numVal = typeof val === 'number' && !isNaN(val) && val > 0 ? val : null;
+      return {
+        ...el,
+        score: numVal,
+        displayScore: numVal !== null ? String(numVal) : '-',
+        label: getKindergartenRubricLabel(subject, numVal)
+      };
+    });
+
+    const validScores = elementResults
+      .map(e => e.score)
+      .filter((v): v is number => v !== null && v > 0);
+
+    let overallLevel: number | null = null;
+    if (validScores.length > 0) {
+      const avg = validScores.reduce((a, b) => a + b, 0) / validScores.length;
+      overallLevel = Math.min(maxRubric, Math.max(1, Math.round(avg)));
+    } else if (rec && typeof rec.totalScore === 'number' && rec.totalScore > 0 && rec.totalScore <= maxRubric) {
+      overallLevel = Math.round(rec.totalScore);
+    } else if (rec && typeof rec.courseworkScore === 'number' && rec.courseworkScore > 0 && rec.courseworkScore <= maxRubric) {
+      overallLevel = Math.round(rec.courseworkScore);
+    }
+
+    const overallLabel = getKindergartenRubricLabel(subject, overallLevel);
+
+    return {
+      elements: elementResults,
+      overallLevel,
+      overallDisplay: overallLevel !== null ? String(overallLevel) : '-',
+      overallLabel
+    };
+  };
+
+  const getKindergartenSubjectCompetencyGroups = (subject: Subject): {
+    unitNumber: number;
+    competencyTitle: string;
+    elements: {
+      id: string;
+      name: string;
+      unitNumber: number;
+      elementIndexInComp: number;
+      elementNumberOverall: number;
+    }[];
+  }[] => {
+    const hasComp = doesKindergartenSubjectHaveCompetency(subject);
+    const comps = subject.kindergartenCompetencies || [];
+    const subtopics = subject.subtopics || [];
+    const items = subject.assignmentItems || [];
+
+    // Distinct units
+    let unitNumbers: number[] = [];
+    if (!hasComp) {
+      unitNumbers = [1];
+    } else if (items.length > 0) {
+      unitNumbers = Array.from(new Set(items.map(it => it.unitNumber || 1))).sort((a, b) => a - b);
+    } else if (comps.length > 0) {
+      unitNumbers = comps.map((_, idx) => idx + 1);
+    } else if (subtopics.length > 0) {
+      unitNumbers = subtopics.map((_, idx) => idx + 1);
+    } else {
+      unitNumbers = [1];
+    }
+
+    let overallCounter = 0;
+    return unitNumbers.map(uNum => {
+      const compObj = comps[uNum - 1];
+      const rawTitle = compObj?.title?.trim() || subtopics[uNum - 1]?.trim() || '';
+      const cleanTitle = rawTitle.replace(/^สมรรถนะ(\s*ที่)?\s*\d+\s*:?\s*/i, '').trim();
+      const compLabel = hasComp
+        ? (cleanTitle ? `${uNum}: ${cleanTitle}` : `${uNum}`)
+        : '';
+
+      let compItems = !hasComp ? items : items.filter(it => (it.unitNumber || 1) === uNum);
+      if (compItems.length === 0 && compObj && compObj.elements && compObj.elements.length > 0) {
+        compItems = compObj.elements.map((elName, eIdx) => ({
+          id: `asg-k-${uNum}-${eIdx + 1}`,
+          name: elName || `ประเด็น ${eIdx + 1}`,
+          unitNumber: uNum,
+          maxScore: 3
+        }));
+      }
+      if (compItems.length === 0) {
+        compItems = [{
+          id: `asg-k-${uNum}-1`,
+          name: `ประเด็น 1`,
+          unitNumber: uNum,
+          maxScore: 3
+        }];
+      }
+
+      const elements = compItems.map((it, eIdx) => {
+        overallCounter++;
+        return {
+          id: it.id,
+          name: it.name,
+          unitNumber: uNum,
+          elementIndexInComp: eIdx + 1,
+          elementNumberOverall: overallCounter
+        };
+      });
+
+      return {
+        unitNumber: uNum,
+        competencyTitle: compLabel,
+        elements
+      };
+    });
+  };
+
+  // Chunk subjects into sets of 5 (or for Kindergarten: combine element-only aspects together, and place each competency aspect on its own single page)
   const assessmentSubjectChunks = useMemo(() => {
     if (assessmentGradeSubjects.length === 0) return [];
-    const chunks: Subject[][] = [];
-    for (let i = 0; i < assessmentGradeSubjects.length; i += 5) {
-      chunks.push(assessmentGradeSubjects.slice(i, i + 5));
+    if (!isAssessmentKindergarten) {
+      const perPage = reportOrientation === 'landscape' ? 7 : 5;
+      const chunks: Subject[][] = [];
+      for (let i = 0; i < assessmentGradeSubjects.length; i += perPage) {
+        chunks.push(assessmentGradeSubjects.slice(i, i + perPage));
+      }
+      return chunks;
     }
+
+    // Kindergarten subject grouping following Admin's exact sortOrder:
+    // When in landscape (297mm), more columns fit per sheet
+    const maxCols = reportOrientation === 'landscape' ? 16 : 10;
+    const maxAspects = reportOrientation === 'landscape' ? 3 : 2;
+    const chunks: Subject[][] = [];
+    let currentElementsOnlyChunk: Subject[] = [];
+    let currentElementsOnlyCols = 0;
+
+    assessmentGradeSubjects.forEach(subj => {
+      const compGroups = getKindergartenSubjectCompetencyGroups(subj);
+      const totalEls = compGroups.reduce((acc, g) => acc + g.elements.length, 0);
+      const subjCols = totalEls + 2; // elements + ระดับ + ผล
+
+      if (doesKindergartenSubjectHaveCompetency(subj)) {
+        if (currentElementsOnlyChunk.length > 0) {
+          chunks.push(currentElementsOnlyChunk);
+          currentElementsOnlyChunk = [];
+          currentElementsOnlyCols = 0;
+        }
+        chunks.push([subj]);
+      } else {
+        if (
+          currentElementsOnlyChunk.length > 0 &&
+          (currentElementsOnlyChunk.length >= maxAspects || currentElementsOnlyCols + subjCols > maxCols)
+        ) {
+          chunks.push(currentElementsOnlyChunk);
+          currentElementsOnlyChunk = [subj];
+          currentElementsOnlyCols = subjCols;
+        } else {
+          currentElementsOnlyChunk.push(subj);
+          currentElementsOnlyCols += subjCols;
+        }
+      }
+    });
+
+    if (currentElementsOnlyChunk.length > 0) {
+      chunks.push(currentElementsOnlyChunk);
+    }
+
     return chunks;
-  }, [assessmentGradeSubjects]);
+  }, [assessmentGradeSubjects, isAssessmentKindergarten, reportOrientation]);
 
   // Active chunks to display in popup
   const activeAssessmentChunks = useMemo(() => {
@@ -838,7 +1315,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
     ? ['ป.1', 'ป.2', 'ป.3', 'ป.4', 'ป.5', 'ป.6'].includes(assessmentPopupGrade)
     : false;
   const canShowGradeButton = assessmentPopupGrade 
-    ? (isAssessmentPrimary ? selectedSemester === '2' : true)
+    ? (isAssessmentKindergarten ? true : isAssessmentPrimary ? selectedSemester === '2' : true)
     : false;
 
   // Subjects for Grade view: For ป.1-ป.6, combine subjects across Semester 1 and Semester 2 of selectedYear
@@ -877,20 +1354,53 @@ export const Module7Reports: React.FC<Module7Props> = ({
       } else {
         const existingHasTeacher = Boolean(existing.teacherId || existing.teacherName);
         const currentHasTeacher = Boolean(s.teacherId || s.teacherName);
+        const mergedSortOrder =
+          s.semester === selectedSemester && typeof s.sortOrder === 'number'
+            ? s.sortOrder
+            : typeof existing.sortOrder === 'number'
+            ? existing.sortOrder
+            : s.sortOrder;
         if ((!existingHasTeacher && currentHasTeacher) || (s.semester === '2' && currentHasTeacher)) {
-          dedupMap.set(key, s);
+          dedupMap.set(key, { ...s, sortOrder: mergedSortOrder });
+        } else if (mergedSortOrder !== undefined && existing.sortOrder !== mergedSortOrder) {
+          dedupMap.set(key, { ...existing, sortOrder: mergedSortOrder });
         }
       }
     });
 
     return Array.from(dedupMap.values()).sort((a, b) => {
+      const hasSortA = typeof a.sortOrder === 'number' && !isNaN(a.sortOrder);
+      const hasSortB = typeof b.sortOrder === 'number' && !isNaN(b.sortOrder);
+      if (hasSortA && hasSortB && a.sortOrder !== b.sortOrder) {
+        return (a.sortOrder as number) - (b.sortOrder as number);
+      }
+      if (hasSortA !== hasSortB) {
+        return hasSortA ? -1 : 1;
+      }
+      const getPrimaryDefaultOrder = (sub: Subject): number => {
+        const name = (sub.name || '').trim();
+        const code = (sub.code || '').trim();
+        if (name === 'ภาษาไทย' || code.startsWith('ท1')) return 1;
+        if (name === 'คณิตศาสตร์' || code.startsWith('ค1')) return 2;
+        if (name === 'สังคมศึกษา' || code.startsWith('ส1')) return 3;
+        if (name === 'สุขศึกษาและพลศึกษา' || code.startsWith('พ1')) return 4;
+        if (name === 'ศิลปะ' || code.startsWith('ศ1')) return 5;
+        if (name === 'การงานอาชีพ' || code.startsWith('ง1')) return 6;
+        if (name === 'ภาษาต่างประเทศ' || code.startsWith('อ1')) return 7;
+        if (name === 'วิทยาศาสตร์และเทคโนโลยี' || code.startsWith('ว1')) return 8;
+        if (name === 'ประวัติศาสตร์' || code.startsWith('ป1')) return 9;
+        return 99;
+      };
+      const ordA = getPrimaryDefaultOrder(a);
+      const ordB = getPrimaryDefaultOrder(b);
+      if (ordA !== ordB) return ordA - ordB;
       const codeA = a.code || '';
       const codeB = b.code || '';
       const cmp = codeA.localeCompare(codeB, 'th');
       if (cmp !== 0) return cmp;
       return (a.name || '').localeCompare(b.name || '', 'th');
     });
-  }, [effectiveSubjects, assessmentPopupGrade, isAssessmentP1ToP6, selectedYear, assessmentGradeSubjects, selectedRoom]);
+  }, [effectiveSubjects, assessmentPopupGrade, isAssessmentP1ToP6, selectedYear, selectedSemester, assessmentGradeSubjects, selectedRoom]);
 
   const extractRecordNumericScore = (rec?: GradeRecord): number | null => {
     if (!rec) return null;
@@ -1316,7 +1826,8 @@ export const Module7Reports: React.FC<Module7Props> = ({
             box-shadow: none !important;
             border: 1px solid #94a3b8 !important;
             border-radius: 0 !important;
-            padding: 5mm 10mm 5mm 20mm !important;
+            padding-top: 5mm !important;
+            padding-bottom: 5mm !important;
             margin: 0 auto 0 auto !important;
             width: 100% !important;
             max-width: 210mm !important;
@@ -1328,6 +1839,14 @@ export const Module7Reports: React.FC<Module7Props> = ({
           .a4-page-limit-line {
             display: none !important;
           }
+        }
+        .vertical-text-header {
+          writing-mode: vertical-rl;
+          transform: rotate(180deg);
+          white-space: nowrap;
+          text-align: center;
+          margin: 0 auto;
+          line-height: 1;
         }
       `}</style>
 
@@ -2194,7 +2713,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
                       style={{ 
                         width: reportOrientation === 'landscape' ? '297mm' : '210mm',
                         maxWidth: reportOrientation === 'landscape' ? '297mm' : '210mm',
-                        paddingLeft: '20mm',
+                        paddingLeft: ['อ.1', 'อ.2', 'อ.3'].includes(attendancePopupGrade) ? '13mm' : '20mm',
                         paddingRight: '10mm'
                       }}
                     >
@@ -2445,31 +2964,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
                       </div>
 
                       {/* Signatures */}
-                      <div className="grid grid-cols-3 gap-2 text-center text-[11.5px] text-black" style={{ marginTop: '2.1cm' }}>
-                        <div className="space-y-1">
-                          <p className="text-black">ลงชื่อ ..................................................</p>
-                          <p className="font-normal text-black">
-                            ({selectedAdvisor ? `${selectedAdvisor.prefix || ''}${selectedAdvisor.firstName || ''} ${selectedAdvisor.lastName || ''}`.trim() : '................................................'})
-                          </p>
-                          <p className="text-black text-[10.5px]">ครูประจำชั้น</p>
-                        </div>
-
-                        <div className="space-y-1">
-                          <p className="text-black">ลงชื่อ ..................................................</p>
-                          <p className="font-normal text-black">
-                            ({selectedAcademicHead ? `${selectedAcademicHead.prefix}${selectedAcademicHead.firstName} ${selectedAcademicHead.lastName}` : '................................................'})
-                          </p>
-                          <p className="text-black text-[10.5px]">หัวหน้าฝ่ายวิชาการ</p>
-                        </div>
-
-                        <div className="space-y-1">
-                          <p className="text-black">ลงชื่อ ..................................................</p>
-                          <p className="font-normal text-black">
-                            ({directorDisplayName})
-                          </p>
-                          <p className="text-black text-[10.5px]">{directorPosition}</p>
-                        </div>
-                      </div>
+                      {renderEditableSignatures('2.1cm')}
 
                       {/* Visual A4 Page Boundary Line Indicator (On screen only) */}
                       <div className="a4-page-limit-line mt-6 pt-2 border-t-2 border-dashed border-purple-400 text-center text-[10px] font-bold text-purple-700 no-print flex items-center justify-center gap-2 bg-purple-50/60 py-1 rounded">
@@ -2538,6 +3033,10 @@ export const Module7Reports: React.FC<Module7Props> = ({
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto a4-modal-overlay">
           {/* Dynamic Print CSS for Portrait / Landscape */}
           <style dangerouslySetInnerHTML={{ __html: `
+            .a4-portrait-paper, .a4-landscape-paper,
+            .a4-portrait-paper *, .a4-landscape-paper * {
+              color: black !important;
+            }
             @media print {
               @page {
                 size: A4 ${reportOrientation} !important;
@@ -2546,11 +3045,31 @@ export const Module7Reports: React.FC<Module7Props> = ({
               body {
                 background: white !important;
                 color: black !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              .no-print {
+                display: none !important;
+              }
+              .a4-portrait-paper, .a4-landscape-paper {
+                box-shadow: none !important;
+                border: 1px solid #1e293b !important;
+                border-radius: 0 !important;
+                margin: 0 auto !important;
+                width: ${reportOrientation === 'landscape' ? '297mm' : '210mm'} !important;
+                max-width: ${reportOrientation === 'landscape' ? '297mm' : '210mm'} !important;
+                min-width: ${reportOrientation === 'landscape' ? '297mm' : '210mm'} !important;
+                min-height: ${reportOrientation === 'landscape' ? '210mm' : '297mm'} !important;
+                page-break-after: always !important;
+                break-after: page !important;
+              }
+              .a4-page-limit-line {
+                display: none !important;
               }
             }
           ` }} />
 
-          <div className={`bg-slate-100 rounded-2xl w-full ${reportOrientation === 'landscape' ? 'max-w-[1240px]' : 'max-w-[980px]'} max-h-[96vh] flex flex-col shadow-2xl border border-slate-300 animate-in fade-in zoom-in-95 duration-150 my-auto a4-modal-content`}>
+          <div className={`bg-slate-100 rounded-2xl w-full ${reportOrientation === 'landscape' ? 'max-w-[1340px] w-[96vw]' : 'max-w-[980px]'} max-h-[96vh] flex flex-col shadow-2xl border border-slate-300 animate-in fade-in zoom-in-95 duration-150 my-auto a4-modal-content`}>
             
             {/* Modal Header Controls (No-Print) */}
             <div className="px-4 py-3 bg-white border-b border-slate-200 rounded-t-2xl flex flex-wrap items-center justify-between gap-3 shrink-0 no-print">
@@ -2572,7 +3091,9 @@ export const Module7Reports: React.FC<Module7Props> = ({
                         ? 'พรีวิวผลการประเมินกิจกรรม (ผ่าน/ไม่ผ่าน)'
                         : assessmentViewMode === 'grade' && canShowGradeButton 
                         ? 'พรีวิวระดับผลการเรียน (เกรดทุกรายวิชา)' 
-                        : `พรีวิว A4 ${reportOrientation === 'landscape' ? 'แนวนอน' : 'แนวตั้ง'} (5 วิชา/แผ่น)`}
+                        : isAssessmentKindergarten
+                        ? `พรีวิว A4 ${reportOrientation === 'landscape' ? 'แนวนอน' : 'แนวตั้ง'} (${assessmentSubjectChunks.length} แผ่น)`
+                        : `พรีวิว A4 ${reportOrientation === 'landscape' ? 'แนวนอน' : 'แนวตั้ง'} (${reportOrientation === 'landscape' ? '7' : '5'} วิชา/แผ่น)`}
                     </span>
                   </h3>
                   <p className="text-[11px] text-slate-500">
@@ -2653,7 +3174,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
                       }`}
                     >
                       <Award className="w-3.5 h-3.5" />
-                      <span>เกรด</span>
+                      <span>{isAssessmentKindergarten ? 'สรุปทุกด้าน' : 'เกรด'}</span>
                     </button>
                   )}
 
@@ -2721,8 +3242,8 @@ export const Module7Reports: React.FC<Module7Props> = ({
 
 
 
-            {/* Modal Body: Interactive A4 Portrait Paper Preview Scroll Container */}
-            <div ref={assessmentContainerRef} className="p-4 sm:p-6 overflow-y-auto space-y-8 bg-slate-200/70 flex-1">
+            {/* Modal Body: Interactive A4 Paper Preview Scroll Container */}
+            <div ref={assessmentContainerRef} className="p-4 sm:p-6 overflow-auto space-y-8 bg-slate-200/70 flex-1">
               
 
 
@@ -2758,8 +3279,10 @@ export const Module7Reports: React.FC<Module7Props> = ({
                     style={{
                       width: reportOrientation === 'landscape' ? '297mm' : '210mm',
                       maxWidth: reportOrientation === 'landscape' ? '297mm' : '210mm',
-                      paddingLeft: '20mm',
+                      minWidth: reportOrientation === 'landscape' ? '297mm' : '210mm',
+                      paddingLeft: isAssessmentKindergarten ? (reportOrientation === 'landscape' ? '15mm' : '13mm') : (reportOrientation === 'landscape' ? '15mm' : '20mm'),
                       paddingRight: '10mm',
+                      boxSizing: 'border-box',
                     }}
                   >
                     {/* A4 Sheet Header */}
@@ -2777,29 +3300,29 @@ export const Module7Reports: React.FC<Module7Props> = ({
                           </div>
                         )}
                       </div>
-                      <h1 className="text-base font-bold text-black tracking-tight">
+                      <h1 className="text-base sm:text-lg font-bold text-black tracking-tight">
                         แบบรายงานผลการประเมินกิจกรรมพัฒนาผู้เรียน
                       </h1>
-                      <div className="text-xs font-semibold text-black mt-0.5">
+                      <div className="text-xs sm:text-sm font-semibold text-black mt-0.5">
                         โรงเรียน{schoolInfo.schoolName ? schoolInfo.schoolName.replace(/^โรงเรียน\s*/, '') : '...................................................'} {schoolInfo.affiliation ? `สังกัด${schoolInfo.affiliation}` : ''}
                       </div>
-                      <div className="text-xs font-bold text-black mt-0.5">
+                      <div className="text-xs sm:text-sm font-bold text-black mt-0.5">
                         ปีการศึกษา {selectedYear}&nbsp;&nbsp;&nbsp;&nbsp;ภาคเรียนที่ {selectedSemester}&nbsp;&nbsp;&nbsp;&nbsp;{getGradeCleanName(assessmentPopupGrade)}{getRoomsForGrade(assessmentPopupGrade).length > 1 || normalizeRoom(selectedRoom) !== '1' ? ` ห้อง ${normalizeRoom(selectedRoom)}` : ''}
                       </div>
                     </div>
 
                     {/* Activities Pass/Fail Table (แสดงเป็นสีขาว-ดำเพื่อความเป็นทางการ) */}
                     <div className="border border-slate-800 bg-white">
-                      <table className="w-full text-left text-[11px] border-collapse bg-white">
+                      <table className="w-full text-left text-[13px] border-collapse bg-white">
                         <thead>
                           <tr className="bg-white text-black font-bold border-b border-slate-800 text-center leading-normal">
-                            <th className="py-2 px-1 border-r border-slate-800 w-8 shrink-0 font-mono text-[10px] align-middle text-black">
+                            <th className="py-2 px-1 border-r border-slate-800 w-8 shrink-0 font-mono text-[12px] align-middle text-black">
                               ที่
                             </th>
-                            <th className="py-2 px-1 border-r border-slate-800 w-20 shrink-0 font-mono text-[10px] align-middle text-black">
+                            <th className="py-2 px-1 border-r border-slate-800 w-20 shrink-0 font-mono text-[12px] align-middle text-black">
                               รหัสประจำตัว
                             </th>
-                            <th className="py-2 px-2 border-r border-slate-800 w-40 shrink-0 text-center text-[11px] align-middle text-black">
+                            <th className="py-2 px-2 border-r border-slate-800 w-44 shrink-0 text-center text-[13px] align-middle text-black">
                               ชื่อ - นามสกุล
                             </th>
                             {assessmentGradeActivities.map((act) => (
@@ -2807,13 +3330,13 @@ export const Module7Reports: React.FC<Module7Props> = ({
                                 key={act.id}
                                 className="py-1.5 px-1.5 border-r border-slate-800 text-center bg-white text-black font-bold align-middle"
                               >
-                                <div className="font-bold text-[10.5px] leading-snug mx-auto text-black">
+                                <div className="font-bold text-[12.5px] leading-snug mx-auto text-black">
                                   {act.code ? `${act.code} ` : ''}{act.name}
                                 </div>
                               </th>
                             ))}
-                            <th className="py-1.5 px-1.5 text-center bg-white text-black font-bold align-middle w-20 shrink-0">
-                              <div className="font-bold text-[10.5px] leading-snug mx-auto text-black">
+                            <th className="py-1.5 px-1.5 text-center bg-white text-black font-bold align-middle w-24 shrink-0">
+                              <div className="font-bold text-[12.5px] leading-snug mx-auto text-black">
                                 สรุปผลกิจกรรม
                               </div>
                             </th>
@@ -2834,7 +3357,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
                               return (
                                 <td 
                                   key={act.id}
-                                  className="py-1.5 px-1 border-r border-b border-slate-800 text-center font-bold text-[10.5px] align-middle bg-white text-black"
+                                  className="py-1.5 px-1 border-r border-b border-slate-800 text-center font-bold text-[12.5px] align-middle bg-white text-black"
                                 >
                                   <span className="font-bold text-black leading-normal">
                                     {res}
@@ -2853,17 +3376,17 @@ export const Module7Reports: React.FC<Module7Props> = ({
 
                             return (
                               <tr key={s.id} className="bg-white leading-normal">
-                                <td className="py-1.5 px-0.5 border-r border-b border-slate-800 text-center font-mono tabular-nums text-black text-[10px] align-middle">
+                                <td className="py-1.5 px-0.5 border-r border-b border-slate-800 text-center font-mono tabular-nums text-black text-[12px] align-middle">
                                   {s.rollNumber || sIdx + 1}
                                 </td>
-                                <td className="py-1.5 px-1 border-r border-b border-slate-800 text-center font-mono tabular-nums text-black text-[10px] align-middle">
+                                <td className="py-1.5 px-1 border-r border-b border-slate-800 text-center font-mono tabular-nums text-black text-[12px] align-middle">
                                   {s.studentCode || '-'}
                                 </td>
-                                <td className="py-1.5 px-2 border-r border-b border-slate-800 font-medium text-black whitespace-nowrap text-[11px] align-middle">
+                                <td className="py-1.5 px-2 border-r border-b border-slate-800 font-medium text-black whitespace-nowrap text-[13px] align-middle">
                                   {s.prefix}{s.firstName} {s.lastName}
                                 </td>
                                 {actCols}
-                                <td className="py-1.5 px-1 border-b border-slate-800 text-center font-bold text-[10.5px] align-middle bg-white text-black">
+                                <td className="py-1.5 px-1 border-b border-slate-800 text-center font-bold text-[12.5px] align-middle bg-white text-black">
                                   {summaryResult}
                                 </td>
                               </tr>
@@ -2921,31 +3444,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
                     </div>
 
                     {/* Signatures */}
-                    <div className="grid grid-cols-3 gap-2 text-center text-[11.5px] text-black" style={{ marginTop: '2.1cm' }}>
-                      <div className="space-y-1">
-                        <p className="text-black">ลงชื่อ ..................................................</p>
-                        <p className="font-normal text-black">
-                          ({selectedAdvisor ? `${selectedAdvisor.prefix || ''}${selectedAdvisor.firstName || ''} ${selectedAdvisor.lastName || ''}`.trim() : '................................................'})
-                        </p>
-                        <p className="text-black text-[10.5px]">ครูประจำชั้น</p>
-                      </div>
-
-                      <div className="space-y-1">
-                        <p className="text-black">ลงชื่อ ..................................................</p>
-                        <p className="font-normal text-black">
-                          ({selectedAcademicHead ? `${selectedAcademicHead.prefix || ''}${selectedAcademicHead.firstName || ''} ${selectedAcademicHead.lastName || ''}`.trim() : '................................................'})
-                        </p>
-                        <p className="text-black text-[10.5px]">หัวหน้าฝ่ายวิชาการ</p>
-                      </div>
-
-                      <div className="space-y-1">
-                        <p className="text-black">ลงชื่อ ..................................................</p>
-                        <p className="font-normal text-black">
-                          ({directorDisplayName})
-                        </p>
-                        <p className="text-black text-[10.5px]">{directorPosition}</p>
-                      </div>
-                    </div>
+                    {renderEditableSignatures('2.1cm')}
 
                     {/* Visual A4 Page Boundary Line Indicator (On screen only) */}
                     <div className="a4-page-limit-line mt-6 pt-2 border-t-2 border-dashed border-indigo-400 text-center text-[10px] font-bold text-indigo-700 no-print flex items-center justify-center gap-2 bg-indigo-50/60 py-1 rounded">
@@ -2965,23 +3464,179 @@ export const Module7Reports: React.FC<Module7Props> = ({
                   </p>
                 </div>
               ) : assessmentViewMode === 'grade' && canShowGradeButton ? (
+                isAssessmentKindergarten ? (
+                  (() => {
+                    const maxAspectsPerPage = reportOrientation === 'landscape' ? 6 : 4;
+                    const kGradeChunks: Subject[][] = [];
+                    for (let i = 0; i < assessmentGradeModeSubjects.length; i += maxAspectsPerPage) {
+                      kGradeChunks.push(assessmentGradeModeSubjects.slice(i, i + maxAspectsPerPage));
+                    }
+                    if (kGradeChunks.length === 0) kGradeChunks.push([]);
+
+                    return kGradeChunks.map((kSubjChunk, kPageIdx) => (
+                      <div
+                        key={`k-grade-summary-page-${kPageIdx}`}
+                        className={`${
+                          reportOrientation === 'landscape'
+                            ? 'a4-landscape-paper min-h-[210mm]'
+                            : 'a4-portrait-paper min-h-[297mm]'
+                        } bg-white border border-slate-300 shadow-xl rounded-sm py-3 sm:py-4 mx-auto text-slate-900 relative transition-all`}
+                        style={{
+                          width: reportOrientation === 'landscape' ? '297mm' : '210mm',
+                          maxWidth: reportOrientation === 'landscape' ? '297mm' : '210mm',
+                          minWidth: reportOrientation === 'landscape' ? '297mm' : '210mm',
+                          paddingTop: '1cm',
+                          paddingLeft: '13mm',
+                          paddingRight: '8mm',
+                          boxSizing: 'border-box',
+                        }}
+                      >
+                        {/* A4 Sheet Header */}
+                        <div className="mb-2.5 text-center">
+                          <div className="flex justify-center mb-1.5">
+                            {schoolInfo.logoUrl ? (
+                              <img
+                                src={schoolInfo.logoUrl}
+                                alt="School Logo"
+                                className="w-20 h-20 sm:w-24 sm:h-24 object-contain mx-auto"
+                              />
+                            ) : (
+                              <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-indigo-50 border border-indigo-200 flex items-center justify-center text-4xl mx-auto">
+                                🏫
+                              </div>
+                            )}
+                          </div>
+                          <h1 className="text-sm sm:text-base font-bold text-black tracking-tight">
+                            แบบรายงานสรุปผลการประเมินพัฒนาการตามด้านความสามารถ
+                          </h1>
+                          <div className="text-xs font-semibold text-black mt-0.5">
+                            โรงเรียน{schoolInfo.schoolName ? schoolInfo.schoolName.replace(/^โรงเรียน\s*/, '') : '...................................................'} {schoolInfo.affiliation ? `สังกัด${schoolInfo.affiliation}` : ''}
+                          </div>
+                          <div className="text-xs font-bold text-black mt-0.5">
+                            ปีการศึกษา {selectedYear}&nbsp;&nbsp;&nbsp;&nbsp;ภาคเรียนที่ {selectedSemester}&nbsp;&nbsp;&nbsp;&nbsp;{getGradeCleanName(assessmentPopupGrade)}{getRoomsForGrade(assessmentPopupGrade).length > 1 || normalizeRoom(selectedRoom) !== '1' ? ` ห้อง ${normalizeRoom(selectedRoom)}` : ''}
+                          </div>
+                        </div>
+
+                        <div className="border border-black bg-white w-full max-w-full overflow-hidden">
+                          <table className="w-full max-w-full table-fixed text-left text-[10px] border-collapse bg-white text-black">
+                            <colgroup>
+                              <col style={{ width: '6mm' }} />
+                              <col style={{ width: '11mm' }} />
+                              <col style={{ width: '32mm' }} />
+                              {kSubjChunk.map((subj) => (
+                                <React.Fragment key={`col-sum-${subj.id}`}>
+                                  <col style={{ width: '6.5mm' }} />
+                                  <col />
+                                </React.Fragment>
+                              ))}
+                            </colgroup>
+                            <thead>
+                              <tr className="bg-white text-black font-bold border-b border-black text-center leading-tight">
+                                <th rowSpan={2} className="py-1 px-0.5 border-r border-b border-black font-mono text-[9.5px] align-middle bg-white text-black">
+                                  ที่
+                                </th>
+                                <th rowSpan={2} className="py-1 px-0.5 border-r border-b border-black font-mono text-[9.5px] align-middle bg-white text-black">
+                                  รหัส
+                                </th>
+                                <th rowSpan={2} className="py-1 px-1 border-r border-b border-black text-center text-[10px] align-middle bg-white text-black">
+                                  ชื่อ - นามสกุล
+                                </th>
+                                {kSubjChunk.map((subj, subjIdx) => {
+                                  const isLastSubj = subjIdx === kSubjChunk.length - 1;
+                                  return (
+                                    <th
+                                      key={subj.id}
+                                      colSpan={2}
+                                      className={`py-1 px-0.5 ${isLastSubj ? '' : 'border-r'} border-b border-black text-center bg-white text-black font-bold align-middle`}
+                                    >
+                                      <div className="font-bold text-[9px] leading-tight whitespace-normal break-words mx-auto text-black">
+                                        {subj.code ? `${subj.code} ` : ''}{subj.name}
+                                      </div>
+                                    </th>
+                                  );
+                                })}
+                              </tr>
+                              <tr className="bg-white text-black font-bold text-[8.5px] leading-tight text-center">
+                                {kSubjChunk.map((subj, subjIdx) => {
+                                  const isLastSubj = subjIdx === kSubjChunk.length - 1;
+                                  return (
+                                    <React.Fragment key={subj.id}>
+                                      <th className="py-1 px-0.5 border-r border-b border-black text-center bg-white text-black font-semibold align-middle">
+                                        <div className="vertical-text-header" data-vertical-label="ระดับ" data-vertical-color="#000000">
+                                          ระดับ
+                                        </div>
+                                      </th>
+                                      <th className={`py-1 px-0.5 ${isLastSubj ? '' : 'border-r'} border-b border-black text-center bg-white text-black font-bold align-middle`}>
+                                        ผล
+                                      </th>
+                                    </React.Fragment>
+                                  );
+                                })}
+                              </tr>
+                            </thead>
+                            <tbody className="bg-white text-black">
+                              {assessmentGradeStudents.map((s, sIdx) => (
+                                <tr key={s.id} className="bg-white leading-snug">
+                                  <td className="py-0.5 px-0.5 border-r border-b border-black text-center font-mono tabular-nums bg-white text-black text-[9.5px] align-middle">
+                                    {s.rollNumber || sIdx + 1}
+                                  </td>
+                                  <td className="py-0.5 px-0.5 border-r border-b border-black text-center font-mono tabular-nums bg-white text-black text-[9.5px] align-middle">
+                                    {s.studentCode || '-'}
+                                  </td>
+                                  <td className="py-0.5 px-1 border-r border-b border-black font-medium bg-white text-black truncate text-[9.5px] align-middle">
+                                    {s.prefix}{s.firstName} {s.lastName}
+                                  </td>
+                                  {kSubjChunk.map((subj, subjIdx) => {
+                                    const isLastSubj = subjIdx === kSubjChunk.length - 1;
+                                    const kEval = getStudentKindergartenEval(s.id, subj);
+                                    return (
+                                      <React.Fragment key={subj.id}>
+                                        <td className="py-0.5 px-0.5 border-r border-b border-black text-center font-mono font-bold text-[9.5px] bg-white text-black align-middle">
+                                          {kEval.overallDisplay}
+                                        </td>
+                                        <td className={`py-0.5 px-0.5 ${isLastSubj ? '' : 'border-r'} border-b border-black text-center font-bold text-[8.5px] bg-white text-black align-middle whitespace-nowrap`}>
+                                          {kEval.overallLabel}
+                                        </td>
+                                      </React.Fragment>
+                                    );
+                                  })}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* Signatures */}
+                        {renderEditableSignatures('2.1cm')}
+
+                        {/* Visual A4 Page Boundary Line Indicator (On screen only) */}
+                        <div className="a4-page-limit-line mt-6 pt-2 border-t-2 border-dashed border-indigo-400 text-center text-[10px] font-bold text-indigo-700 no-print flex items-center justify-center gap-2 bg-indigo-50/60 py-1 rounded">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600" />
+                          <span>--- สิ้นสุดความยาวกระดาษ A4 รายงานสรุปผลการประเมินพัฒนาการ {kGradeChunks.length > 1 ? `แผ่นที่ ${kPageIdx + 1}/${kGradeChunks.length}` : ''} ---</span>
+                        </div>
+                      </div>
+                    ));
+                  })()
+                ) : (
                 /* GRADE VIEW: ALL SUBJECTS IN A SINGLE TABLE WITH CALCULATED 1, 1.5, 2, 2.5, 3, 3.5, 4 */
                 <div 
                   className={`${
                     reportOrientation === 'landscape'
                       ? 'a4-landscape-paper min-h-[210mm]'
                       : 'a4-portrait-paper min-h-[297mm]'
-                  } bg-white border border-slate-300 shadow-xl rounded-sm py-4 sm:py-5 mx-auto text-slate-900 relative transition-all`}
+                  } bg-white border border-slate-300 shadow-xl rounded-sm py-3 sm:py-4 mx-auto text-slate-900 relative transition-all`}
                   style={{
                     width: reportOrientation === 'landscape' ? '297mm' : '210mm',
                     maxWidth: reportOrientation === 'landscape' ? '297mm' : '210mm',
+                    minWidth: reportOrientation === 'landscape' ? '297mm' : '210mm',
                     paddingLeft: '20mm',
                     paddingRight: '10mm',
+                    boxSizing: 'border-box',
                   }}
                 >
                   {/* A4 Sheet Header */}
-                  <div className="mb-3 text-center">
-                    <div className="flex justify-center mb-2">
+                  <div className="mb-2.5 text-center">
+                    <div className="flex justify-center mb-1.5">
                       {schoolInfo.logoUrl ? (
                         <img 
                           src={schoolInfo.logoUrl} 
@@ -2989,12 +3644,12 @@ export const Module7Reports: React.FC<Module7Props> = ({
                           className="w-20 h-20 sm:w-24 sm:h-24 object-contain mx-auto" 
                         />
                       ) : (
-                        <div className="w-16 h-16 rounded-2xl bg-indigo-50 border border-indigo-200 flex items-center justify-center text-2xl mx-auto">
+                        <div className="w-14 h-14 rounded-2xl bg-indigo-50 border border-indigo-200 flex items-center justify-center text-2xl mx-auto">
                           🏫
                         </div>
                       )}
                     </div>
-                    <h1 className="text-base font-bold text-black tracking-tight">
+                    <h1 className="text-sm sm:text-base font-bold text-black tracking-tight">
                       แบบรายงานระดับผลการเรียน (เกรด)
                     </h1>
                     <div className="text-xs font-semibold text-black mt-0.5">
@@ -3010,7 +3665,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
                   </div>
 
                   {/* All Subjects Table (แสดงเป็นสีขาว-ดำเพื่อความเป็นทางการ) */}
-                  <div className="border border-slate-800 bg-white">
+                  <div className="border border-slate-800 bg-white w-full max-w-full overflow-hidden">
                     <table className="w-full text-left text-[11px] border-collapse bg-white">
                       <thead>
                         <tr className="bg-white text-black font-bold border-b border-slate-800 text-center leading-normal">
@@ -3136,31 +3791,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
                   </div>
 
                   {/* Signatures */}
-                  <div className="grid grid-cols-3 gap-2 text-center text-[11.5px] text-black" style={{ marginTop: '2.1cm' }}>
-                    <div className="space-y-1">
-                      <p className="text-black">ลงชื่อ ..................................................</p>
-                      <p className="font-normal text-black">
-                        ({selectedAdvisor ? `${selectedAdvisor.prefix || ''}${selectedAdvisor.firstName || ''} ${selectedAdvisor.lastName || ''}`.trim() : '................................................'})
-                      </p>
-                      <p className="text-black text-[10.5px]">ครูประจำชั้น</p>
-                    </div>
-
-                    <div className="space-y-1">
-                      <p className="text-black">ลงชื่อ ..................................................</p>
-                      <p className="font-normal text-black">
-                        ({selectedAcademicHead ? `${selectedAcademicHead.prefix || ''}${selectedAcademicHead.firstName || ''} ${selectedAcademicHead.lastName || ''}`.trim() : '................................................'})
-                      </p>
-                      <p className="text-black text-[10.5px]">หัวหน้าฝ่ายวิชาการ</p>
-                    </div>
-
-                    <div className="space-y-1">
-                      <p className="text-black">ลงชื่อ ..................................................</p>
-                      <p className="font-normal text-black">
-                        ({directorDisplayName})
-                      </p>
-                      <p className="text-black text-[10.5px]">{directorPosition}</p>
-                    </div>
-                  </div>
+                  {renderEditableSignatures('2.1cm')}
 
                   {/* Visual A4 Page Boundary Line Indicator (On screen only) */}
                   <div className="a4-page-limit-line mt-6 pt-2 border-t-2 border-dashed border-indigo-400 text-center text-[10px] font-bold text-indigo-700 no-print flex items-center justify-center gap-2 bg-indigo-50/60 py-1 rounded">
@@ -3168,8 +3799,10 @@ export const Module7Reports: React.FC<Module7Props> = ({
                     <span>--- สิ้นสุดความยาวกระดาษ A4 รายงานระดับผลการเรียน (เกรด) ---</span>
                   </div>
                 </div>
+                )
               ) : (
                 assessmentSubjectChunks.map((chunk, chunkIdx) => {
+                  const isMultiKinder = isAssessmentKindergarten && chunk.length > 1;
                   return (
                     <div 
                       key={chunkIdx}
@@ -3177,17 +3810,20 @@ export const Module7Reports: React.FC<Module7Props> = ({
                         reportOrientation === 'landscape'
                           ? 'a4-landscape-paper min-h-[210mm]'
                           : 'a4-portrait-paper min-h-[297mm]'
-                      } bg-white border border-slate-300 shadow-xl rounded-sm py-4 sm:py-5 mx-auto text-slate-900 relative transition-all`}
+                      } bg-white border border-slate-300 shadow-xl rounded-sm py-3 sm:py-3.5 mx-auto text-slate-900 relative transition-all`}
                       style={{
                         width: reportOrientation === 'landscape' ? '297mm' : '210mm',
                         maxWidth: reportOrientation === 'landscape' ? '297mm' : '210mm',
-                        paddingLeft: '20mm',
-                        paddingRight: '10mm',
+                        minWidth: reportOrientation === 'landscape' ? '297mm' : '210mm',
+                        paddingTop: isAssessmentKindergarten ? '1cm' : undefined,
+                        paddingLeft: isAssessmentKindergarten ? (reportOrientation === 'landscape' ? '15mm' : '13mm') : (reportOrientation === 'landscape' ? '15mm' : '20mm'),
+                        paddingRight: isAssessmentKindergarten ? (reportOrientation === 'landscape' ? '10mm' : '8mm') : '10mm',
+                        boxSizing: 'border-box',
                       }}
                     >
                       {/* A4 Sheet Header */}
-                      <div className="mb-3 text-center">
-                        <div className="flex justify-center mb-2">
+                      <div className="mb-2.5 text-center">
+                        <div className="flex justify-center mb-1.5">
                           {schoolInfo.logoUrl ? (
                             <img 
                               src={schoolInfo.logoUrl} 
@@ -3195,44 +3831,198 @@ export const Module7Reports: React.FC<Module7Props> = ({
                               className="w-20 h-20 sm:w-24 sm:h-24 object-contain mx-auto" 
                             />
                           ) : (
-                            <div className="w-16 h-16 rounded-2xl bg-indigo-50 border border-indigo-200 flex items-center justify-center text-2xl mx-auto">
+                            <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-indigo-50 border border-indigo-200 flex items-center justify-center text-4xl mx-auto">
                               🏫
                             </div>
                           )}
                         </div>
                         {/* Line 1: แบบรายงานผลการเรียนและการประเมินผลการเรียน */}
-                        <h1 className="text-base font-bold text-black tracking-tight">
-                          แบบรายงานผลการเรียนและคะแนนการวัดผล
+                        <h1 className="text-base sm:text-lg font-bold text-black tracking-tight">
+                          {isAssessmentKindergarten
+                            ? 'แบบรายงานผลการประเมินพัฒนาการตามด้านความสามารถ'
+                            : 'แบบรายงานผลการเรียนและคะแนนการวัดผล'}
                         </h1>
 
                         {/* Line 2: ชื่อโรงเรียน และสังกัดสำนักงาน */}
-                        <div className="text-xs font-semibold text-black mt-0.5">
+                        <div className="text-xs sm:text-sm font-semibold text-black mt-0.5">
                           โรงเรียน{schoolInfo.schoolName ? schoolInfo.schoolName.replace(/^โรงเรียน\s*/, '') : '...................................................'} {schoolInfo.affiliation ? `สังกัด${schoolInfo.affiliation}` : ''}
                         </div>
 
                         {/* Line 3: เดือน, ปีการศึกษา, ภาคเรียน, ชั้น */}
-                        <div className="text-xs font-bold text-black mt-0.5">
+                        <div className="text-xs sm:text-sm font-bold text-black mt-0.5">
                           ปีการศึกษา {selectedYear}&nbsp;&nbsp;&nbsp;&nbsp;ภาคเรียนที่ {selectedSemester}&nbsp;&nbsp;&nbsp;&nbsp;{getGradeCleanName(assessmentPopupGrade)}{getRoomsForGrade(assessmentPopupGrade).length > 1 || normalizeRoom(selectedRoom) !== '1' ? ` ห้อง ${normalizeRoom(selectedRoom)}` : ''}
                         </div>
                       </div>
 
-                      {/* Compact A4 Portrait Matrix Table showing 5 Subjects per Sheet (แสดงเป็นสีขาว-ดำเพื่อความเป็นทางการ) */}
-                      <div className="border border-slate-800 bg-white">
-                        <table className="w-full text-left text-[11px] border-collapse bg-white">
+                      {/* Compact A4 Matrix Table */}
+                      <div className={`border ${isAssessmentKindergarten ? 'border-black' : 'border-slate-800'} bg-white w-full max-w-full overflow-hidden`}>
+                        {isAssessmentKindergarten ? (
+                          <table className="w-full max-w-full table-fixed text-left text-[12px] border-collapse bg-white text-black">
+                            <colgroup>
+                              <col style={{ width: reportOrientation === 'landscape' ? '8mm' : '7mm' }} />
+                              <col style={{ width: reportOrientation === 'landscape' ? '14mm' : '12mm' }} />
+                              <col style={{ width: reportOrientation === 'landscape' ? (chunk.length >= 3 ? '34mm' : '38mm') : (chunk.length >= 3 ? '28mm' : chunk.length === 2 ? '32mm' : '36mm') }} />
+                              {chunk.map((subj) => {
+                                const compGroups = getKindergartenSubjectCompetencyGroups(subj);
+                                const totalEls = compGroups.reduce((acc, g) => acc + g.elements.length, 0);
+                                return (
+                                  <React.Fragment key={`col-grp-${subj.id}`}>
+                                    {Array.from({ length: totalEls }).map((_, elIdx) => (
+                                      <col key={`col-el-${subj.id}-${elIdx}`} />
+                                    ))}
+                                    <col style={{ width: reportOrientation === 'landscape' ? (chunk.length >= 3 ? '7.5mm' : '8.5mm') : (chunk.length >= 3 ? '6mm' : chunk.length === 2 ? '7mm' : '8mm') }} />
+                                    <col style={{ width: reportOrientation === 'landscape' ? (chunk.length >= 3 ? '13mm' : '15mm') : (chunk.length >= 3 ? '11.5mm' : chunk.length === 2 ? '13mm' : '14.5mm') }} />
+                                  </React.Fragment>
+                                );
+                              })}
+                            </colgroup>
+                            <thead>
+                              {/* Row 1: Aspect Header (ด้านความสามารถ) */}
+                              <tr className="text-black font-bold leading-tight bg-white">
+                                <th rowSpan={3} className="py-1 px-0.5 bg-white border-r border-b border-black text-center font-mono text-[11.5px] align-middle text-black">
+                                  ที่
+                                </th>
+                                <th rowSpan={3} className="py-1 px-0.5 bg-white border-r border-b border-black text-center font-mono text-[11.5px] align-middle text-black">
+                                  รหัส
+                                </th>
+                                <th rowSpan={3} className="py-1 px-1 bg-white border-r border-b border-black text-center text-[12px] align-middle text-black">
+                                  ชื่อ - นามสกุล
+                                </th>
+
+                                {chunk.map((subj, cIdx) => {
+                                  const isLastSubj = cIdx === chunk.length - 1;
+                                  const compGroups = getKindergartenSubjectCompetencyGroups(subj);
+                                  const totalEls = compGroups.reduce((acc, g) => acc + g.elements.length, 0);
+                                  const colCount = totalEls + 2; // elements + ระดับ + ผลประเมิน
+                                  return (
+                                    <th
+                                      key={subj.id}
+                                      colSpan={colCount}
+                                      className={`py-1 px-0.5 ${isLastSubj ? '' : 'border-r'} border-b border-black text-center bg-white text-black font-bold align-middle`}
+                                    >
+                                      <div className={`font-bold ${isMultiKinder ? 'text-[11px]' : 'text-[12px]'} leading-tight whitespace-normal break-words mx-auto text-black`}>
+                                        {isMultiKinder ? '' : 'ด้านความสามารถ: '}{subj.code ? `${subj.code} ` : ''}{subj.name}
+                                      </div>
+                                    </th>
+                                  );
+                                })}
+                              </tr>
+
+                              {/* Row 2: Competency Columns (column1 สมรรถนะ 1 ยาวเลยตามที่มีองค์ประกอบ, column2 สมรรถนะ 2...) */}
+                              <tr className="text-black font-bold text-[10.5px] leading-tight bg-white">
+                                {chunk.map((subj, cIdx) => {
+                                  const isLastSubj = cIdx === chunk.length - 1;
+                                  const compGroups = getKindergartenSubjectCompetencyGroups(subj);
+                                  const hasComp = doesKindergartenSubjectHaveCompetency(subj);
+
+                                  return (
+                                    <React.Fragment key={`comp-row-${subj.id}`}>
+                                      {compGroups.map((cg, gIdx) => {
+                                        return (
+                                          <th
+                                            key={`cg-${subj.id}-${gIdx}`}
+                                            colSpan={cg.elements.length}
+                                            className="py-0.5 px-0.5 border-r border-b border-black text-center bg-white text-black font-bold align-middle"
+                                            title={cg.competencyTitle}
+                                          >
+                                            <div className="leading-tight text-black whitespace-normal break-words mx-auto text-[10.5px]">
+                                              {hasComp ? (cg.competencyTitle || `${cg.unitNumber}`) : 'องค์ประกอบ'}
+                                            </div>
+                                          </th>
+                                        );
+                                      })}
+
+                                      <th rowSpan={2} className="py-1 px-0.5 border-r border-b border-black text-center bg-white text-black font-bold align-middle text-[10.5px]">
+                                        <div className="vertical-text-header" data-vertical-label="ระดับ" data-vertical-color="#000000">
+                                          ระดับ
+                                        </div>
+                                      </th>
+                                      <th rowSpan={2} className={`py-1 px-0.5 ${isLastSubj ? '' : 'border-r'} border-b border-black text-center bg-white text-black font-bold align-middle text-[10.5px]`}>
+                                        ผล
+                                      </th>
+                                    </React.Fragment>
+                                  );
+                                })}
+                              </tr>
+
+                              {/* Row 3: Numbered Elements ONLY (องค์ประกอบไม่ต้องมีตัวหนังสือ แค่บอกตัวเลขตามข้อพอ) */}
+                              <tr className="text-black font-bold text-[10.5px] leading-tight bg-white">
+                                {chunk.map((subj) => {
+                                  const compGroups = getKindergartenSubjectCompetencyGroups(subj);
+                                  return (
+                                    <React.Fragment key={`el-num-row-${subj.id}`}>
+                                      {compGroups.map((cg) =>
+                                        cg.elements.map((el) => (
+                                          <th
+                                            key={el.id}
+                                            className="py-0.5 px-0 border-r border-b border-black text-center font-mono text-[10.5px] bg-white text-black font-bold align-middle"
+                                            title={`ข้อที่ ${el.elementNumberOverall}: ${el.name}`}
+                                          >
+                                            {el.elementNumberOverall}
+                                          </th>
+                                        ))
+                                      )}
+                                    </React.Fragment>
+                                  );
+                                })}
+                              </tr>
+                            </thead>
+
+                            <tbody className="bg-white text-black">
+                              {assessmentGradeStudents.map((s, sIdx) => (
+                                <tr key={s.id} className="bg-white leading-snug">
+                                  <td className="py-0.5 px-0.5 border-r border-b border-black text-center font-mono tabular-nums bg-white text-black text-[11.5px] align-middle">
+                                    {s.rollNumber || sIdx + 1}
+                                  </td>
+                                  <td className="py-0.5 px-0.5 border-r border-b border-black text-center font-mono tabular-nums bg-white text-black text-[11.5px] align-middle">
+                                    {s.studentCode || '-'}
+                                  </td>
+                                  <td className="py-0.5 px-1 border-r border-b border-black font-medium bg-white text-black truncate text-[11.5px] align-middle">
+                                    {s.prefix}{s.firstName} {s.lastName}
+                                  </td>
+
+                                  {chunk.map((subj, cIdx) => {
+                                    const isLastSubj = cIdx === chunk.length - 1;
+                                    const kEval = getStudentKindergartenEval(s.id, subj);
+                                    return (
+                                      <React.Fragment key={subj.id}>
+                                        {kEval.elements.map((elRes, eIdx) => (
+                                          <td
+                                            key={elRes.id || eIdx}
+                                            className="py-0.5 px-0 border-r border-b border-black text-center font-mono text-[11.5px] tabular-nums bg-white text-black align-middle"
+                                          >
+                                            {elRes.displayScore}
+                                          </td>
+                                        ))}
+                                        <td className="py-0.5 px-0 border-r border-b border-black text-center font-mono text-[11.5px] tabular-nums font-bold bg-white text-black align-middle">
+                                          {kEval.overallDisplay}
+                                        </td>
+                                        <td className={`py-0.5 px-0.5 ${isLastSubj ? '' : 'border-r'} border-b border-black text-center text-[10px] font-bold bg-white text-black align-middle whitespace-nowrap overflow-hidden`}>
+                                          {kEval.overallLabel}
+                                        </td>
+                                      </React.Fragment>
+                                    );
+                                  })}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        ) : (
+                        <table className="w-full text-left text-[13px] border-collapse bg-white">
                           <thead>
                             {/* Row 1: Fixed Headers and 5 Subject Group Headers */}
                             <tr className="text-black font-bold leading-normal bg-white">
-                              <th rowSpan={2} className="py-1.5 px-1 bg-white border-r border-b border-slate-800 text-center w-6 shrink-0 font-mono text-[10px] align-middle text-black">
+                              <th rowSpan={2} className="py-1.5 px-1 bg-white border-r border-b border-slate-800 text-center w-7 shrink-0 font-mono text-[12px] align-middle text-black">
                                 ที่
                               </th>
-                              <th rowSpan={2} className="py-1.5 px-1 bg-white border-r border-b border-slate-800 text-center w-16 shrink-0 font-mono text-[10px] align-middle text-black">
+                              <th rowSpan={2} className="py-1.5 px-1 bg-white border-r border-b border-slate-800 text-center w-18 shrink-0 font-mono text-[12px] align-middle text-black">
                                 รหัสประจำตัว
                               </th>
-                              <th rowSpan={2} className="py-1.5 px-2 bg-white border-r border-b border-slate-800 text-center w-36 shrink-0 text-[11px] align-middle text-black">
+                              <th rowSpan={2} className="py-1.5 px-2 bg-white border-r border-b border-slate-800 text-center w-40 shrink-0 text-[13px] align-middle text-black">
                                 ชื่อ - นามสกุล
                               </th>
 
-                              {/* Up to 5 Subjects */}
+                              {/* Up to 5-7 Subjects */}
                               {chunk.map((subj, cIdx) => {
                                 const isLastSubj = cIdx === chunk.length - 1;
                                 return (
@@ -3241,7 +4031,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
                                     colSpan={3} 
                                     className={`py-1.5 px-1 ${isLastSubj ? '' : 'border-r'} border-b border-slate-800 text-center bg-white text-black font-bold align-middle`}
                                   >
-                                    <div className="font-bold text-[10.5px] leading-snug mx-auto text-black">
+                                    <div className="font-bold text-[12.5px] leading-snug mx-auto text-black">
                                       {subj.code ? `${subj.code} ` : ''}{subj.name}
                                     </div>
                                   </th>
@@ -3250,7 +4040,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
                             </tr>
 
                             {/* Row 2: Sub-columns for each subject (ระหว่างภาค, สอบ, รวม) */}
-                            <tr className="text-black font-bold text-[9px] leading-normal bg-white">
+                            <tr className="text-black font-bold text-[11px] leading-normal bg-white">
                               {chunk.map((subj, cIdx) => {
                                 const isLastSubj = cIdx === chunk.length - 1;
                                 return (
@@ -3274,13 +4064,13 @@ export const Module7Reports: React.FC<Module7Props> = ({
                             {assessmentGradeStudents.map((s, sIdx) => {
                               return (
                                 <tr key={s.id} className="bg-white leading-normal">
-                                  <td className="py-1.5 px-0.5 border-r border-b border-slate-800 text-center font-mono tabular-nums text-black text-[10px] align-middle">
+                                  <td className="py-1.5 px-0.5 border-r border-b border-slate-800 text-center font-mono tabular-nums text-black text-[12px] align-middle">
                                     {s.rollNumber || sIdx + 1}
                                   </td>
-                                  <td className="py-1.5 px-1 border-r border-b border-slate-800 text-center font-mono tabular-nums text-black text-[10px] align-middle">
+                                  <td className="py-1.5 px-1 border-r border-b border-slate-800 text-center font-mono tabular-nums text-black text-[12px] align-middle">
                                     {s.studentCode || '-'}
                                   </td>
-                                  <td className="py-1.5 px-2 border-r border-b border-slate-800 font-medium text-black whitespace-nowrap text-[11px] align-middle">
+                                  <td className="py-1.5 px-2 border-r border-b border-slate-800 font-medium text-black whitespace-nowrap text-[13px] align-middle">
                                     {s.prefix}{s.firstName} {s.lastName}
                                   </td>
 
@@ -3290,13 +4080,13 @@ export const Module7Reports: React.FC<Module7Props> = ({
                                     const scores = getStudentScores(s.id, subj);
                                     return (
                                       <React.Fragment key={subj.id}>
-                                        <td className="py-1.5 px-0.5 border-r border-b border-slate-800 text-center font-mono text-[10px] tabular-nums text-black align-middle">
+                                        <td className="py-1.5 px-0.5 border-r border-b border-slate-800 text-center font-mono text-[12px] tabular-nums text-black align-middle">
                                           {scores.coursework}
                                         </td>
-                                        <td className="py-1.5 px-0.5 border-r border-b border-slate-800 text-center font-mono text-[10px] tabular-nums text-black align-middle">
+                                        <td className="py-1.5 px-0.5 border-r border-b border-slate-800 text-center font-mono text-[12px] tabular-nums text-black align-middle">
                                           {scores.exam}
                                         </td>
-                                        <td className={`py-1.5 px-0.5 ${isLastSubj ? '' : 'border-r'} border-b border-slate-800 text-center font-mono text-[10px] tabular-nums font-bold bg-white text-black align-middle`}>
+                                        <td className={`py-1.5 px-0.5 ${isLastSubj ? '' : 'border-r'} border-b border-slate-800 text-center font-mono text-[12px] tabular-nums font-bold bg-white text-black align-middle`}>
                                           {scores.total}
                                         </td>
                                       </React.Fragment>
@@ -3307,39 +4097,16 @@ export const Module7Reports: React.FC<Module7Props> = ({
                             })}
                           </tbody>
                         </table>
+                        )}
                       </div>
 
                       {/* Signatures */}
-                      <div className="grid grid-cols-3 gap-2 text-center text-[11.5px] text-black" style={{ marginTop: '2.1cm' }}>
-                        <div className="space-y-1">
-                          <p className="text-black">ลงชื่อ ..................................................</p>
-                          <p className="font-normal text-black">
-                            ({selectedAdvisor ? `${selectedAdvisor.prefix || ''}${selectedAdvisor.firstName || ''} ${selectedAdvisor.lastName || ''}`.trim() : '................................................'})
-                          </p>
-                          <p className="text-black text-[10.5px]">ครูประจำชั้น</p>
-                        </div>
-
-                        <div className="space-y-1">
-                          <p className="text-black">ลงชื่อ ..................................................</p>
-                          <p className="font-normal text-black">
-                            ({selectedAcademicHead ? `${selectedAcademicHead.prefix}${selectedAcademicHead.firstName} ${selectedAcademicHead.lastName}` : '................................................'})
-                          </p>
-                          <p className="text-black text-[10.5px]">หัวหน้าฝ่ายวิชาการ</p>
-                        </div>
-
-                        <div className="space-y-1">
-                          <p className="text-black">ลงชื่อ ..................................................</p>
-                          <p className="font-normal text-black">
-                            ({directorDisplayName})
-                          </p>
-                          <p className="text-black text-[10.5px]">{directorPosition}</p>
-                        </div>
-                      </div>
+                      {renderEditableSignatures(isAssessmentKindergarten ? '1.2cm' : '2.1cm', isAssessmentKindergarten)}
 
                       {/* Visual A4 Page Boundary Line Indicator (On screen only) */}
-                      <div className="a4-page-limit-line mt-6 pt-2 border-t-2 border-dashed border-indigo-400 text-center text-[10px] font-bold text-indigo-700 no-print flex items-center justify-center gap-2 bg-indigo-50/60 py-1 rounded">
+                      <div className="a4-page-limit-line mt-4 pt-1.5 border-t-2 border-dashed border-indigo-400 text-center text-[10px] font-bold text-indigo-700 no-print flex items-center justify-center gap-2 bg-indigo-50/60 py-1 rounded">
                         <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600" />
-                        <span>--- สิ้นสุดความยาวกระดาษ A4 หน้าที่ {chunkIdx + 1} (297 mm) ---</span>
+                        <span>--- สิ้นสุดความยาวกระดาษ A4 หน้าที่ {chunkIdx + 1} ({reportOrientation === 'landscape' ? '210 mm แนวนอน' : '297 mm แนวตั้ง'}) ---</span>
                       </div>
                     </div>
                   );
@@ -3351,7 +4118,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
             {/* Modal Footer (No-Print) */}
             <div className="px-4 py-3 bg-white border-t border-slate-200 rounded-b-2xl flex items-center justify-between gap-3 shrink-0 no-print">
               <span className="text-xs text-slate-500">
-                พร้อมสำหรับการดาวน์โหลดเอกสาร PDF (ขนาด A4 {reportOrientation === 'landscape' ? 'แนวนอน' : 'แนวตั้ง'} 5 วิชาต่อแผ่น)
+                พร้อมสำหรับการดาวน์โหลดเอกสาร PDF (ขนาด A4 {reportOrientation === 'landscape' ? 'แนวนอน' : 'แนวตั้ง'}{isAssessmentKindergarten ? '' : reportOrientation === 'landscape' ? ' 7 วิชาต่อแผ่น' : ' 5 วิชาต่อแผ่น'})
               </span>
               <div className="flex items-center gap-2">
                 <button
@@ -3616,7 +4383,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
                       style={{ 
                         width: reportOrientation === 'landscape' ? '297mm' : '210mm',
                         maxWidth: reportOrientation === 'landscape' ? '297mm' : '210mm',
-                        paddingLeft: '20mm',
+                        paddingLeft: ['อ.1', 'อ.2', 'อ.3'].includes(targetGrade) ? '13mm' : '20mm',
                         paddingRight: '10mm'
                       }}
                     >
@@ -3745,31 +4512,7 @@ export const Module7Reports: React.FC<Module7Props> = ({
                       </div>
 
                       {/* Official Signatures Section (Matching Attendance standard) */}
-                      <div className="grid grid-cols-3 gap-2 text-center text-[11.5px] text-black" style={{ marginTop: '2.1cm' }}>
-                        <div className="space-y-1">
-                          <p className="text-black">ลงชื่อ ..................................................</p>
-                          <p className="font-normal text-black">
-                            ({selectedAdvisor ? `${selectedAdvisor.prefix || ''}${selectedAdvisor.firstName || ''} ${selectedAdvisor.lastName || ''}`.trim() : '................................................'})
-                          </p>
-                          <p className="text-black text-[10.5px]">ครูประจำชั้น</p>
-                        </div>
-
-                        <div className="space-y-1">
-                          <p className="text-black">ลงชื่อ ..................................................</p>
-                          <p className="font-normal text-black">
-                            ({selectedAcademicHead ? `${selectedAcademicHead.prefix || ''}${selectedAcademicHead.firstName || ''} ${selectedAcademicHead.lastName || ''}`.trim() : '................................................'})
-                          </p>
-                          <p className="text-black text-[10.5px]">หัวหน้าฝ่ายวิชาการ</p>
-                        </div>
-
-                        <div className="space-y-1">
-                          <p className="text-black">ลงชื่อ ..................................................</p>
-                          <p className="font-normal text-black">
-                            ({directorDisplayName})
-                          </p>
-                          <p className="text-black text-[10.5px]">{directorPosition}</p>
-                        </div>
-                      </div>
+                      {renderEditableSignatures('2.1cm')}
 
                       {/* Visual Page Break line indicator for screen */}
                       <div className="a4-page-limit-line mt-6 pt-2 border-t-2 border-dashed border-sky-400 text-center text-[10px] font-bold text-sky-700 no-print flex items-center justify-center gap-2 bg-sky-50/60 py-1 rounded">

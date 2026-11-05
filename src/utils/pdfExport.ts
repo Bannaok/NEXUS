@@ -209,8 +209,8 @@ const buildSanitizedDocumentCss = (): string => {
     }
     .a4-portrait-paper, .a4-landscape-paper, .a4-pp6-page {
       box-sizing: border-box !important;
-      padding-left: 20mm !important;
-      padding-right: 10mm !important;
+      padding-left: 20mm;
+      padding-right: 10mm;
       font-family: 'Sarabun', 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif !important;
       font-variant-numeric: tabular-nums !important;
       font-feature-settings: "tnum" 1, "zero" 0 !important;
@@ -426,6 +426,9 @@ export const exportSheetsToPdf = async ({
     ).map((inp) => ({
       value: inp.value,
       placeholder: inp.getAttribute('placeholder') || '',
+      offsetWidth: inp.offsetWidth,
+      inlineStyle: inp.getAttribute('style') || '',
+      isTransparentPlaceholder: inp.classList.contains('placeholder:text-transparent'),
     }));
 
     // Build O(1) ancestor set so html2canvas skips all sibling pages and background UI
@@ -501,18 +504,21 @@ export const exportSheetsToPdf = async ({
           clonedSheet.style.flexDirection = 'column';
           clonedSheet.style.justifyContent = 'space-between';
         } else {
-          clonedSheet.style.paddingLeft = '20mm';
-          clonedSheet.style.paddingRight = '10mm';
+          clonedSheet.style.paddingLeft = origSheet.style.paddingLeft || '20mm';
+          clonedSheet.style.paddingRight = origSheet.style.paddingRight || '10mm';
         }
         clonedSheet.style.boxShadow = 'none';
         clonedSheet.style.borderRadius = '0';
         clonedSheet.style.border = 'none';
+        clonedSheet.style.overflow = 'visible';
+        clonedSheet.style.overflowX = 'visible';
+        clonedSheet.style.overflowY = 'visible';
         clonedSheet.style.width = `${standardA4WidthPx}px`;
         clonedSheet.style.maxWidth = `${standardA4WidthPx}px`;
         clonedSheet.style.minWidth = `${standardA4WidthPx}px`;
-        clonedSheet.style.height = `${standardA4HeightPx}px`;
+        clonedSheet.style.height = 'auto';
         clonedSheet.style.minHeight = `${standardA4HeightPx}px`;
-        clonedSheet.style.maxHeight = `${standardA4HeightPx}px`;
+        clonedSheet.style.maxHeight = 'none';
 
         // 4. Remove any remaining page-limit lines or no-print elements inside clonedSheet
         const ignored = Array.from(
@@ -636,18 +642,25 @@ export const exportSheetsToPdf = async ({
           }
         }
 
-        // Convert vertical rotated labels ([data-vertical-label], .-rotate-90) into crisp 4x DPI images
-        // so html2canvas never scrambles rotated Thai text glyphs (e.g. วันเสาร์ / วันอาทิตย์)
+        // Convert vertical rotated labels ([data-vertical-label], .-rotate-90, .vertical-text-header) into crisp 4x DPI images
+        // so html2canvas never scrambles rotated Thai text glyphs (e.g. วันเสาร์ / วันอาทิตย์ / ระดับ)
         const verticalLabels = Array.from(
-          clonedSheet.querySelectorAll<HTMLElement>('[data-vertical-label], .-rotate-90')
+          clonedSheet.querySelectorAll<HTMLElement>(
+            '[data-vertical-label], .-rotate-90, .vertical-text-header'
+          )
         );
         for (const vEl of verticalLabels) {
           const labelText = (vEl.getAttribute('data-vertical-label') || vEl.textContent || '').trim();
           if (!labelText) continue;
 
           const vComputed = clonedDoc.defaultView?.getComputedStyle(vEl);
-          const fontSizePx = parseFloat(vComputed?.fontSize || '9') || 9;
-          const fontColor = vComputed?.color || '#be123c';
+          const fontSizePx = parseFloat(vComputed?.fontSize || '8.5') || 8.5;
+          const rawColor = vComputed?.color;
+          const fontColor =
+            vEl.getAttribute('data-vertical-color') ||
+            (rawColor && rawColor !== 'transparent' && rawColor !== 'rgba(0, 0, 0, 0)'
+              ? rawColor
+              : '#000000');
           const fontWeight = vComputed?.fontWeight || '700';
           const dpr = 4;
 
@@ -679,6 +692,8 @@ export const exportSheetsToPdf = async ({
             vImg.style.maxWidth = 'none';
             vImg.style.display = 'block';
             vImg.style.margin = '0 auto';
+            vImg.style.transform = 'none';
+            vImg.style.writingMode = 'horizontal-tb';
             vEl.replaceWith(vImg);
           }
         }
@@ -701,29 +716,70 @@ export const exportSheetsToPdf = async ({
           ta.replaceWith(div);
         }
 
-        // 6b. Replace <input type="text"> elements in clonedSheet with clean text spans for razor-sharp PDF rendering
+        // 6b. Replace <input type="text"> elements in clonedSheet with clean text elements for razor-sharp PDF rendering
         const clonedInputs = Array.from(
           clonedSheet.querySelectorAll<HTMLInputElement>('input[type="text"], input:not([type])')
         );
         for (let iIdx = 0; iIdx < clonedInputs.length; iIdx++) {
           const inp = clonedInputs[iIdx];
           const info = liveInputValues[iIdx];
-          const isBlockInput = inp.classList.contains('w-full') || inp.classList.contains('block');
-          const span = clonedDoc.createElement('span');
-          span.className = inp.className
-            .replace(/\bw-full\b/g, '')
-            .replace(/\bblock\b/g, '');
-          span.style.display = isBlockInput ? 'block' : 'inline';
-          span.style.textAlign = 'center';
-          span.style.color = '#000000';
-          span.style.backgroundColor = 'transparent';
-          span.style.border = 'none';
-          span.style.outline = 'none';
-          span.style.padding = '0';
-          span.style.margin = '0';
-          span.style.whiteSpace = 'nowrap';
-          span.textContent = info && info.value.trim() ? info.value.trim() : (info?.placeholder || '');
-          inp.replaceWith(span);
+          const isBlockInput =
+            inp.classList.contains('w-full') ||
+            inp.classList.contains('block') ||
+            inp.classList.contains('mx-auto');
+          const resolvedText =
+            info && info.value.trim()
+              ? info.value.trim()
+              : info?.isTransparentPlaceholder
+                ? ''
+                : info?.placeholder || '';
+
+          if (isBlockInput) {
+            const div = clonedDoc.createElement('div');
+            div.className = inp.className
+              .replace(/\bw-full\b/g, '')
+              .replace(/\bblock\b/g, '')
+              .replace(/\bm-0\b/g, '')
+              .replace(/\bmax-w-(?:\[[^\]]+\]|\S+)/g, '');
+            div.style.display = 'block';
+            div.style.width = '100%';
+            div.style.maxWidth = '100%';
+            div.style.textAlign = 'center';
+            div.style.color = '#000000';
+            div.style.backgroundColor = 'transparent';
+            div.style.border = 'none';
+            div.style.outline = 'none';
+            div.style.padding = '0';
+            div.style.margin = '0 auto';
+            div.style.whiteSpace = 'nowrap';
+            div.textContent = resolvedText;
+            if (inp.parentElement && inp.parentElement.tagName === 'DIV') {
+              inp.parentElement.style.textAlign = 'center';
+            }
+            inp.replaceWith(div);
+          } else {
+            const span = clonedDoc.createElement('span');
+            span.className = inp.className;
+            if (info?.inlineStyle) {
+              span.setAttribute('style', info.inlineStyle);
+            }
+            span.style.display = 'inline-block';
+            if (info && info.offsetWidth > 0 && !info.inlineStyle.includes('width')) {
+              span.style.width = `${info.offsetWidth}px`;
+              span.style.minWidth = `${info.offsetWidth}px`;
+            }
+            span.style.textAlign = 'center';
+            span.style.color = '#000000';
+            span.style.backgroundColor = 'transparent';
+            span.style.border = 'none';
+            span.style.outline = 'none';
+            span.style.padding = '0';
+            span.style.margin = '0';
+            span.style.whiteSpace = 'nowrap';
+            span.style.verticalAlign = 'baseline';
+            span.textContent = resolvedText;
+            inp.replaceWith(span);
+          }
         }
 
         // 7. Swap <img> src with pre-cached data URLs for 0ms instant rendering

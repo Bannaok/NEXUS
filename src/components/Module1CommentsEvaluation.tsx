@@ -118,16 +118,71 @@ export const Module1CommentsEvaluation: React.FC<Module1CommentsEvaluationProps>
     return order.filter(g => gradesSet.has(g));
   }, [students, user.role, registeredHomeroomGrades]);
 
-  // Grade filter & Search
-  const [gradeFilter, setGradeFilter] = useState<string>(() => {
-    if (user.role === 'member' && user.assignedGrade) {
-      return user.assignedGrade;
+  const normalizeRoom = (r?: string) => (r || '').replace(/^ห้อง\s*/i, '').trim() || '1';
+
+  // รายการชั้นที่สมาชิกได้รับมอบหมายเป็นครูประจำชั้น (รองรับ 1 ชั้น หรือ 2-3 ชั้น)
+  const memberAssignedClasses = useMemo<Array<{ gradeLevel: GradeLevel; room: string }>>(() => {
+    if (user.role !== 'member') return [];
+    const members = StorageService.getMembers();
+    const matched = members.find(
+      m => m.id === user.id || (m.username && user.username && m.username.toLowerCase() === user.username.toLowerCase())
+    );
+
+    const rawClasses =
+      (user.assignedClasses && user.assignedClasses.length > 0 ? user.assignedClasses : undefined) ||
+      (matched?.assignedClasses && matched.assignedClasses.length > 0 ? matched.assignedClasses : undefined);
+
+    const result: Array<{ gradeLevel: GradeLevel; room: string }> = [];
+
+    if (rawClasses && rawClasses.length > 0) {
+      rawClasses.forEach(c => {
+        if (c.gradeLevel && c.gradeLevel !== 'ไม่ได้เป็นครูประจำชั้น') {
+          const g = (c.gradeLevel as GradeLevel) || 'ป.1';
+          const r = normalizeRoom(c.room);
+          if (!result.some(item => item.gradeLevel === g && item.room === r)) {
+            result.push({ gradeLevel: g, room: r });
+          }
+        }
+      });
     }
+
+    const rawGrade = (user.assignedGrade as string) || (matched?.gradeLevel as string) || '';
+    const rawRoom = normalizeRoom(user.assignedRoom || matched?.room);
+    if (rawGrade && rawGrade !== 'ไม่ได้เป็นครูประจำชั้น') {
+      if (rawGrade.includes(',')) {
+        rawGrade.split(',').forEach(part => {
+          const g = part.trim() as GradeLevel;
+          if (g && !result.some(item => item.gradeLevel === g && item.room === rawRoom)) {
+            result.push({ gradeLevel: g, room: rawRoom });
+          }
+        });
+      } else if (result.length === 0) {
+        result.push({ gradeLevel: rawGrade as GradeLevel, room: rawRoom });
+      }
+    }
+
+    return result;
+  }, [user]);
+
+  // Grade filter & Room state
+  const [gradeFilter, setGradeFilter] = useState<string>(() => {
     if (selectedGrade && selectedGrade !== 'ALL') {
       return selectedGrade;
     }
+    if (user.role === 'member') {
+      return memberAssignedClasses[0]?.gradeLevel || user.assignedGrade || 'ป.1';
+    }
     return availableGradeLevels[0] || 'ป.1';
   });
+
+  const [currentRoom, setCurrentRoom] = useState<string>(() => {
+    if (selectedRoom) return normalizeRoom(selectedRoom);
+    if (user.role === 'member') {
+      return memberAssignedClasses[0]?.room || normalizeRoom(user.assignedRoom);
+    }
+    return '1';
+  });
+
   const [searchQuery, setSearchQuery] = useState('');
 
   // Modal for evaluating a specific student
@@ -138,8 +193,28 @@ export const Module1CommentsEvaluation: React.FC<Module1CommentsEvaluationProps>
   });
 
   useEffect(() => {
-    if (user.role === 'member' && user.assignedGrade) {
-      setGradeFilter(user.assignedGrade);
+    if (selectedGrade && selectedGrade !== 'ALL') {
+      setGradeFilter(selectedGrade);
+    }
+    if (selectedRoom) {
+      setCurrentRoom(normalizeRoom(selectedRoom));
+    }
+  }, [selectedGrade, selectedRoom]);
+
+  useEffect(() => {
+    if (user.role === 'member') {
+      if (memberAssignedClasses.length > 0) {
+        const isValid = memberAssignedClasses.some(
+          c => c.gradeLevel === gradeFilter && c.room === currentRoom
+        );
+        if (!isValid) {
+          setGradeFilter(memberAssignedClasses[0].gradeLevel);
+          setCurrentRoom(memberAssignedClasses[0].room);
+        }
+      } else if (user.assignedGrade) {
+        setGradeFilter(user.assignedGrade);
+        if (user.assignedRoom) setCurrentRoom(normalizeRoom(user.assignedRoom));
+      }
     } else if (user.role === 'admin') {
       if (selectedGrade && selectedGrade !== 'ALL' && availableGradeLevels.includes(selectedGrade as GradeLevel)) {
         setGradeFilter(selectedGrade);
@@ -149,17 +224,16 @@ export const Module1CommentsEvaluation: React.FC<Module1CommentsEvaluationProps>
         onSelectGrade?.(nextGrade);
       }
     }
-  }, [user.role, user.assignedGrade, selectedGrade, availableGradeLevels]);
+  }, [user.role, user.assignedGrade, user.assignedRoom, memberAssignedClasses, availableGradeLevels]);
 
   const handleGradeChange = (val: string) => {
     setGradeFilter(val);
     onSelectGrade?.(val);
   };
 
-  const normalizeRoom = (r?: string) => (r || '').replace(/^ห้อง\s*/i, '').trim() || '1';
-  const effectiveRoom = user.role === 'member' && user.assignedRoom
-    ? normalizeRoom(user.assignedRoom)
-    : normalizeRoom(selectedRoom);
+  const effectiveRoom = user.role === 'member'
+    ? (currentRoom || normalizeRoom(user.assignedRoom))
+    : normalizeRoom(selectedRoom || currentRoom);
 
   // Filter students
   const filteredStudents = useMemo(() => {
@@ -266,14 +340,43 @@ export const Module1CommentsEvaluation: React.FC<Module1CommentsEvaluationProps>
       {!isReadOnly && (
         <div className="bg-white rounded-2xl p-2.5 sm:p-5 shadow-xs border border-slate-200">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 w-full">
-            {/* Grade Level Filter Display */}
-            <div className="flex items-center gap-3 w-full sm:w-auto">
-              {/* Grade Level Display */}
-              <div className="flex items-center justify-center sm:justify-start gap-1 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl text-xs font-bold text-slate-700 w-full sm:w-auto">
-                <Filter className="w-3.5 h-3.5 text-slate-400 shrink-0 hidden sm:block" />
-                <span className="shrink-0 font-bold">ชั้น:</span>
-                <span className="text-slate-900 font-bold truncate">{gradeFilter}</span>
-              </div>
+            {/* Grade Level Filter / Class Selector */}
+            <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
+              {user.role === 'member' && memberAssignedClasses.length > 1 ? (
+                <div className="flex items-center gap-1 bg-purple-50 p-1 rounded-xl border border-purple-200 shadow-2xs">
+                  {memberAssignedClasses.map((cls, idx) => {
+                    const isActive = gradeFilter === cls.gradeLevel && effectiveRoom === cls.room;
+                    return (
+                      <button
+                        key={`comment_eval_btn_${cls.gradeLevel}_${cls.room}_${idx}`}
+                        type="button"
+                        onClick={() => {
+                          setGradeFilter(cls.gradeLevel);
+                          setCurrentRoom(cls.room);
+                          onSelectGrade?.(cls.gradeLevel);
+                          onSelectRoom?.(cls.room);
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer border ${
+                          isActive
+                            ? 'bg-purple-600 text-white border-purple-600 shadow-2xs'
+                            : 'bg-white text-slate-700 border-purple-200 hover:bg-purple-100 hover:text-purple-900'
+                        }`}
+                        title={`สลับไปประเมินชั้น ${cls.gradeLevel} ห้อง ${cls.room}`}
+                      >
+                        {cls.gradeLevel}{cls.room !== '1' ? `/${cls.room}` : ''}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="flex items-center justify-center sm:justify-start gap-1 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl text-xs font-bold text-slate-700 w-full sm:w-auto">
+                  <Filter className="w-3.5 h-3.5 text-slate-400 shrink-0 hidden sm:block" />
+                  <span className="shrink-0 font-bold">ชั้น:</span>
+                  <span className="text-slate-900 font-bold truncate">
+                    {gradeFilter}{effectiveRoom && effectiveRoom !== '1' ? `/${effectiveRoom}` : ''}
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Search Input (Hidden on Mobile, Visible on Desktop) */}
