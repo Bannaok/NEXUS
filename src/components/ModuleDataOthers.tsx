@@ -3134,35 +3134,23 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
 
               </div>
 
-              {/* Room Filter Buttons when grade has multiple rooms */}
+              {/* Room Filter Dropdown when grade has multiple rooms */}
               {availableRoomsForSelectedGrade.length > 1 && (
-                <div className="w-full sm:w-auto flex items-center gap-1 bg-blue-50/80 px-2 py-1 rounded-xl border border-blue-200 overflow-x-auto scrollbar-none whitespace-nowrap">
-                  <span className="text-[11px] font-bold text-blue-900 px-1 shrink-0">ห้อง:</span>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedStudentRoom('ALL')}
-                    className={`px-2 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer shrink-0 ${
-                      selectedStudentRoom === 'ALL'
-                        ? 'bg-blue-600 text-white shadow-2xs'
-                        : 'bg-white text-blue-700 hover:bg-blue-100 border border-blue-200'
-                    }`}
+                <div className="w-full sm:w-auto flex items-center gap-1.5 bg-blue-50/80 px-2.5 py-1 rounded-xl border border-blue-200 shrink-0">
+                  <span className="text-[11px] font-bold text-blue-900 shrink-0">ห้อง:</span>
+                  <select
+                    value={selectedStudentRoom}
+                    onChange={(e) => setSelectedStudentRoom(e.target.value)}
+                    className="w-full sm:w-auto text-xs font-bold text-blue-800 bg-white border border-blue-200 rounded-lg px-2.5 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer shadow-2xs"
+                    title="เลือกห้องเรียน"
                   >
-                    ทุกห้อง
-                  </button>
-                  {availableRoomsForSelectedGrade.map(rm => (
-                    <button
-                      key={rm}
-                      type="button"
-                      onClick={() => setSelectedStudentRoom(rm)}
-                      className={`px-2 py-0.5 rounded-lg text-xs font-bold transition-all cursor-pointer shrink-0 ${
-                        selectedStudentRoom === rm
-                          ? 'bg-blue-600 text-white shadow-2xs'
-                          : 'bg-white text-blue-700 hover:bg-blue-100 border border-blue-200'
-                      }`}
-                    >
-                      ห้อง {rm}
-                    </button>
-                  ))}
+                    <option value="ALL">ทุกห้อง</option>
+                    {availableRoomsForSelectedGrade.map(rm => (
+                      <option key={rm} value={rm}>
+                        ห้อง {rm}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               )}
             </div>
@@ -5231,31 +5219,25 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">ห้อง</label>
-                    <div className="space-y-1.5">
-                      <div className="flex items-center gap-1">
-                        {['1', '2', '3'].map(rm => (
-                          <button
-                            key={rm}
-                            type="button"
-                            onClick={() => setStudentFormData(prev => ({ ...prev, room: rm }))}
-                            className={`flex-1 py-1.5 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
-                              normalizeRoom(studentFormData.room) === rm
-                                ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
-                                : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                            }`}
-                          >
+                    <select
+                      value={normalizeRoom(studentFormData.room || '1')}
+                      onChange={(e) => setStudentFormData(prev => ({ ...prev, room: e.target.value }))}
+                      className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 bg-white cursor-pointer"
+                    >
+                      {Array.from(
+                        new Set([
+                          '1', '2', '3', '4', '5', '6', '7', '8', '9', '10',
+                          ...availableRoomsForSelectedGrade,
+                          normalizeRoom(studentFormData.room || '1')
+                        ])
+                      )
+                        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+                        .map(rm => (
+                          <option key={rm} value={rm}>
                             ห้อง {rm}
-                          </button>
+                          </option>
                         ))}
-                      </div>
-                      <input
-                        type="text"
-                        value={studentFormData.room}
-                        onChange={(e) => setStudentFormData(prev => ({ ...prev, room: e.target.value }))}
-                        placeholder="ระบุเลขห้อง เช่น 1, 2, 3"
-                        className="w-full text-xs px-3 py-1.5 rounded-xl border border-slate-200"
-                      />
-                    </div>
+                    </select>
                   </div>
                 </div>
 
