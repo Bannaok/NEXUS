@@ -9,6 +9,7 @@ import {
   X, 
   ExternalLink
 } from 'lucide-react';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 interface Module6Props {
   user: UserSession;
@@ -39,6 +40,8 @@ export const Module6Websites: React.FC<Module6Props> = ({
 
   // Info modal state (กด "!" ตรงโลโก้)
   const [selectedSiteForInfo, setSelectedSiteForInfo] = useState<RecommendedWebsite | null>(null);
+  const [siteToDelete, setSiteToDelete] = useState<RecommendedWebsite | null>(null);
+  const [confirmDeleteLogo, setConfirmDeleteLogo] = useState(false);
 
   // Drag and drop / long press reorder state for Admin
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
@@ -419,11 +422,7 @@ export const Module6Websites: React.FC<Module6Props> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      if (confirm(`คุณต้องการลบเว็บไซต์ "${selectedSiteForInfo.title}" หรือไม่?`)) {
-                        onDeleteWebsite(selectedSiteForInfo.id);
-                        setSelectedSiteForInfo(null);
-                        onShowToast('info', 'ลบเว็บไซต์', 'ลบเว็บไซต์เรียบร้อยแล้ว');
-                      }
+                      setSiteToDelete(selectedSiteForInfo);
                     }}
                     className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg text-xs font-semibold flex items-center justify-center cursor-pointer"
                     title="ลบเว็บไซต์นี้"
@@ -490,7 +489,7 @@ export const Module6Websites: React.FC<Module6Props> = ({
                       </button>
                       <button
                         type="button"
-                        onClick={() => setLogoUrl('')}
+                        onClick={() => setConfirmDeleteLogo(true)}
                         className="text-[11px] text-rose-600 hover:text-rose-700 text-left font-medium cursor-pointer"
                       >
                         ลบรูปภาพออก
@@ -581,6 +580,39 @@ export const Module6Websites: React.FC<Module6Props> = ({
           </div>
         </div>
       )}
+
+      {/* MODAL: ยืนยันการลบเว็บไซต์ */}
+      <ConfirmDeleteModal
+        isOpen={Boolean(siteToDelete)}
+        title="ยืนยันการลบเว็บไซต์"
+        categoryLabel="เว็บไซต์แนะนำ"
+        itemTitle={siteToDelete?.title || ''}
+        itemSubtitle={siteToDelete?.url || ''}
+        onCancel={() => setSiteToDelete(null)}
+        onConfirm={() => {
+          if (!siteToDelete) return;
+          onDeleteWebsite(siteToDelete.id);
+          if (selectedSiteForInfo?.id === siteToDelete.id) {
+            setSelectedSiteForInfo(null);
+          }
+          onShowToast('info', 'ลบเว็บไซต์สำเร็จ', `ลบเว็บไซต์ "${siteToDelete.title}" เรียบร้อยแล้ว`);
+          setSiteToDelete(null);
+        }}
+      />
+
+      {/* MODAL: ยืนยันการลบรูปภาพโลโก้ */}
+      <ConfirmDeleteModal
+        isOpen={confirmDeleteLogo}
+        title="ยืนยันการลบรูปโลโก้"
+        categoryLabel="รูปภาพโลโก้"
+        itemTitle={title || 'รูปภาพโลโก้เว็บไซต์'}
+        itemSubtitle="ต้องการนำรูปภาพโลโก้นี้ออกใช่หรือไม่"
+        onCancel={() => setConfirmDeleteLogo(false)}
+        onConfirm={() => {
+          setLogoUrl('');
+          setConfirmDeleteLogo(false);
+        }}
+      />
     </div>
   );
 };

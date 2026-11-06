@@ -21,6 +21,7 @@ import {
   LogOut
 } from 'lucide-react';
 import { cleanTeacherName } from './ModuleDataOthers';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 interface SettingsProps {
   user: UserSession;
@@ -50,6 +51,14 @@ export const SettingsView: React.FC<SettingsProps> = ({
   onLogout
 }) => {
   const [activeTab, setActiveTab] = useState<'profile' | 'school'>(user.role === 'admin' ? 'school' : 'profile');
+  const [confirmDeleteSetting, setConfirmDeleteSetting] = useState<{
+    type: 'avatar' | 'homeroom_slot' | 'school_logo';
+    title: string;
+    categoryLabel: string;
+    itemTitle: string;
+    itemSubtitle?: string;
+    slotIndex?: number;
+  } | null>(null);
 
   // Profile Form States (Requirement 10.2) - Ensure prefix (e.g., นาย) and firstName (e.g., อีรฟัน) have no space between them
   const parsedPrefixMatch = (user.fullName || '').trim().match(/^(นางสาว|นาย|นาง|ดร\.|ครู|ว่าที่\s*ร\.ต\.|ว่าที่ร้อยตรี)/u);
@@ -581,7 +590,15 @@ export const SettingsView: React.FC<SettingsProps> = ({
                         {userAvatarUrl && (
                           <button
                             type="button"
-                            onClick={() => setUserAvatarUrl('')}
+                            onClick={() =>
+                              setConfirmDeleteSetting({
+                                type: 'avatar',
+                                title: 'ยืนยันการลบรูปโปรไฟล์',
+                                categoryLabel: 'ข้อมูลส่วนตัว',
+                                itemTitle: 'รูปภาพโปรไฟล์ของคุณ',
+                                itemSubtitle: `${userPrefix}${userFirstName} ${userLastName}`.trim()
+                              })
+                            }
                             className="px-3 py-1.5 bg-white border border-slate-200 hover:bg-rose-50 hover:text-rose-600 text-slate-600 text-xs font-medium rounded-xl transition-colors cursor-pointer"
                           >
                             ลบรูป
@@ -677,7 +694,15 @@ export const SettingsView: React.FC<SettingsProps> = ({
                             {!isFirst && (
                               <button
                                 type="button"
-                                onClick={() => handleRemoveHomeroomClassSlot(idx)}
+                                onClick={() =>
+                                  setConfirmDeleteSetting({
+                                    type: 'homeroom_slot',
+                                    title: 'ยืนยันการลบชั้นประจำชั้น',
+                                    categoryLabel: 'ครูประจำชั้น',
+                                    itemTitle: `ชั้นประจำชั้นที่ ${idx + 1}: ${clsItem.gradeLevel} ห้อง ${clsItem.room}`,
+                                    slotIndex: idx
+                                  })
+                                }
                                 className="w-5 h-5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 flex items-center justify-center transition-colors cursor-pointer shrink-0"
                                 title="ลบชั้นประจำชั้นนี้"
                               >
@@ -883,7 +908,15 @@ export const SettingsView: React.FC<SettingsProps> = ({
                         {schoolLogoUrl && (
                           <button
                             type="button"
-                            onClick={() => setSchoolLogoUrl('')}
+                            onClick={() =>
+                              setConfirmDeleteSetting({
+                                type: 'school_logo',
+                                title: 'ยืนยันการลบตราสัญลักษณ์',
+                                categoryLabel: 'ตั้งค่าโรงเรียน',
+                                itemTitle: 'ตราสัญลักษณ์ / โลโก้โรงเรียน',
+                                itemSubtitle: schoolInfo.schoolName
+                              })
+                            }
                             className="px-3 py-1.5 bg-white border border-slate-200 hover:bg-rose-50 hover:text-rose-600 text-slate-600 text-xs font-medium rounded-xl transition-colors cursor-pointer"
                           >
                             ลบรูป
@@ -1184,6 +1217,26 @@ export const SettingsView: React.FC<SettingsProps> = ({
           </div>
         </div>
       )}
+
+      <ConfirmDeleteModal
+        isOpen={Boolean(confirmDeleteSetting)}
+        title={confirmDeleteSetting?.title || 'ยืนยันการลบข้อมูล'}
+        categoryLabel={confirmDeleteSetting?.categoryLabel}
+        itemTitle={confirmDeleteSetting?.itemTitle || ''}
+        itemSubtitle={confirmDeleteSetting?.itemSubtitle}
+        onCancel={() => setConfirmDeleteSetting(null)}
+        onConfirm={() => {
+          if (!confirmDeleteSetting) return;
+          if (confirmDeleteSetting.type === 'avatar') {
+            setUserAvatarUrl('');
+          } else if (confirmDeleteSetting.type === 'homeroom_slot' && typeof confirmDeleteSetting.slotIndex === 'number') {
+            handleRemoveHomeroomClassSlot(confirmDeleteSetting.slotIndex);
+          } else if (confirmDeleteSetting.type === 'school_logo') {
+            setSchoolLogoUrl('');
+          }
+          setConfirmDeleteSetting(null);
+        }}
+      />
     </div>
   );
 };

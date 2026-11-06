@@ -2,7 +2,6 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createServer as createViteServer } from 'vite';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   getFirestore,
@@ -19,6 +18,15 @@ import {
 } from 'firebase/firestore';
 
 process.env.DISABLE_HMR = 'true';
+
+// Prevent transient background network or Firestore gRPC errors from crashing the Cloud Run container
+process.on('uncaughtException', (err) => {
+  console.warn('Uncaught exception (handled safely):', err?.message || err);
+});
+
+process.on('unhandledRejection', (reason: any) => {
+  console.warn('Unhandled rejection (handled safely):', reason?.message || reason);
+});
 
 try {
   setLogLevel('silent');
@@ -325,6 +333,8 @@ const deletedSubmissionKeysServer = new Set<string>();
 const deletedLeaveIdsServer = new Set<string>();
 const deletedDutyLogIdsServer = new Set<string>();
 const deletedSubjectIdsServer = new Set<string>();
+const deletedAdminIdsServer = new Set<string>();
+const deletedMemberIdsServer = new Set<string>();
 const recentServerMutationTs = new Map<string, number>();
 
 function makeSubTombstoneKeyServer(taskId: string, identifier?: string): string {
@@ -461,14 +471,26 @@ function isDutyLogKeyName(key: string): boolean {
   return key === 'ams_daily_duty_logs_v1' || key.startsWith('ams_daily_duty_logs_v1__');
 }
 
+function sortDutyLogsDescendingServer(list: any[]): any[] {
+  return [...list].sort(
+    (a, b) =>
+      String(b?.date || '').localeCompare(String(a?.date || '')) ||
+      String(b?.createdAt || '').localeCompare(String(a?.createdAt || ''))
+  );
+}
+
 function mergeDutyLogListsServer(existingList: any, incomingList: any): any[] {
   if (!Array.isArray(incomingList)) {
     return Array.isArray(existingList)
-      ? existingList.filter(d => d && d.id && !deletedDutyLogIdsServer.has(String(d.id)))
+      ? sortDutyLogsDescendingServer(
+          existingList.filter(d => d && d.id && !deletedDutyLogIdsServer.has(String(d.id)))
+        )
       : [];
   }
   if (!Array.isArray(existingList) || existingList.length === 0) {
-    return incomingList.filter(d => d && d.id && !deletedDutyLogIdsServer.has(String(d.id)));
+    return sortDutyLogsDescendingServer(
+      incomingList.filter(d => d && d.id && !deletedDutyLogIdsServer.has(String(d.id)))
+    );
   }
 
   const existingMap = new Map<string, any>();
@@ -504,7 +526,7 @@ function mergeDutyLogListsServer(existingList: any, incomingList: any): any[] {
     }
   }
 
-  return result;
+  return sortDutyLogsDescendingServer(result);
 }
 
 // Load initial state from disk
@@ -560,6 +582,16 @@ if (fs.existsSync(STORE_FILE)) {
           addSubjectTombstoneServer(id);
         }
       }
+      if (Array.isArray(state.store['ams_deleted_admin_ids'])) {
+        for (const id of state.store['ams_deleted_admin_ids']) {
+          if (id) deletedAdminIdsServer.add(String(id));
+        }
+      }
+      if (Array.isArray(state.store['ams_deleted_member_ids'])) {
+        for (const id of state.store['ams_deleted_member_ids']) {
+          if (id) deletedMemberIdsServer.add(String(id));
+        }
+      }
     }
   } catch (err) {
     console.warn('Failed to load persisted realtime store, starting fresh:', err);
@@ -604,8 +636,17 @@ function broadcastDelta(clientId: string, updates: Record<string, any>, timestam
 // FIREBASE FIRESTORE CLOUD SYNC (Primary Global Multi-Device / Multi-Email Store)
 // ============================================================================
 function sanitizeDocKey(rawKey: string): string {
-  const cleaned = String(rawKey || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
+  const cleaned = String(rawKey || '')
+    .replace(/[^a-zA-Z0-9_-]/g, ch => `-u${(ch.codePointAt(0) || 0).toString(36)}-`)
+    .slice(0, 120);
   return cleaned || 'default_key';
+}
+
+function unsanitizeDocKey(docId: string): string {
+  return String(docId || '').replace(/-u([0-9a-z]+)-/g, (_m, code) => {
+    const cp = parseInt(code, 36);
+    return Number.isFinite(cp) && cp > 0 ? String.fromCodePoint(cp) : _m;
+  });
 }
 
 async function pushKeyToFirestoreServer(rawKey: string, value: any, updatedAt: number): Promise<void> {
@@ -666,6 +707,7 @@ async function pushKeyToFirestoreServer(rawKey: string, value: any, updatedAt: n
 async function resolveFirestoreDocServer(data: any): Promise<{ key: string; value: any; updatedAt: number } | null> {
   if (!firestoreDb || serverFirestoreUnavailable || !data || typeof data.id !== 'string') return null;
   const docId = data.id;
+  const rawKey = unsanitizeDocKey(docId);
   const updatedAt = Number(data.updatedAt) || Date.now();
   const chunkCount = Number(data.chunkCount) || 0;
 
@@ -683,7 +725,7 @@ async function resolveFirestoreDocServer(data: any): Promise<{ key: string; valu
     }
     if (!fullJson) return null;
     lastServerFirestoreSerialized.set(docId, fullJson);
-    return { key: docId, value: JSON.parse(fullJson), updatedAt };
+    return { key: rawKey, value: JSON.parse(fullJson), updatedAt };
   } catch {
     return null;
   }
@@ -738,6 +780,14 @@ async function syncWithFirestoreServer(seedMissingLocalToFirestore = false): Pro
         for (const id of item.value) {
           addSubjectTombstoneServer(id);
         }
+      } else if (item.key === 'ams_deleted_admin_ids' && Array.isArray(item.value)) {
+        for (const id of item.value) {
+          if (id) deletedAdminIdsServer.add(String(id));
+        }
+      } else if (item.key === 'ams_deleted_member_ids' && Array.isArray(item.value)) {
+        for (const id of item.value) {
+          if (id) deletedMemberIdsServer.add(String(id));
+        }
       }
 
       if (pendingCloudPushKeys.has(item.key) || inFlightCloudPushKeys.has(item.key)) continue;
@@ -776,6 +826,10 @@ async function syncWithFirestoreServer(seedMissingLocalToFirestore = false): Pro
             : mergeSubjectListsServer(item.value, state.store[item.key])
           : isSub
           ? filterSubjectListServer(item.value)
+          : item.key === 'ams_school_admins' && Array.isArray(item.value)
+          ? item.value.filter((a: any) => a && a.id && !deletedAdminIdsServer.has(String(a.id)))
+          : item.key === 'ams_members' && Array.isArray(item.value)
+          ? item.value.filter((m: any) => m && m.id && !deletedMemberIdsServer.has(String(m.id)))
           : item.value;
       const localSerialized = item.key in state.store ? JSON.stringify(state.store[item.key]) : undefined;
       const remoteSerialized = JSON.stringify(item.value);
@@ -810,7 +864,7 @@ async function syncWithFirestoreServer(seedMissingLocalToFirestore = false): Pro
       for (const [key, val] of Object.entries(state.store)) {
         if (!key || key === 'ams_session' || serverFirestoreUnavailable) continue;
         const docId = sanitizeDocKey(key);
-        if (!remoteTimestamps.has(docId)) {
+        if (!remoteTimestamps.has(key) && !remoteTimestamps.has(docId)) {
           const localTs = Number(state.timestamps[key]) || Date.now();
           await pushKeyToFirestoreServer(key, val, localTs);
         }
@@ -871,6 +925,14 @@ function startServerFirestoreListener() {
               for (const id of resolved.value) {
                 addSubjectTombstoneServer(id);
               }
+            } else if (resolved.key === 'ams_deleted_admin_ids' && Array.isArray(resolved.value)) {
+              for (const id of resolved.value) {
+                if (id) deletedAdminIdsServer.add(String(id));
+              }
+            } else if (resolved.key === 'ams_deleted_member_ids' && Array.isArray(resolved.value)) {
+              for (const id of resolved.value) {
+                if (id) deletedMemberIdsServer.add(String(id));
+              }
             }
 
             if (pendingCloudPushKeys.has(resolved.key) || inFlightCloudPushKeys.has(resolved.key)) continue;
@@ -909,6 +971,10 @@ function startServerFirestoreListener() {
                   : mergeSubjectListsServer(resolved.value, state.store[resolved.key])
                 : isSub
                 ? filterSubjectListServer(resolved.value)
+                : resolved.key === 'ams_school_admins' && Array.isArray(resolved.value)
+                ? resolved.value.filter((a: any) => a && a.id && !deletedAdminIdsServer.has(String(a.id)))
+                : resolved.key === 'ams_members' && Array.isArray(resolved.value)
+                ? resolved.value.filter((m: any) => m && m.id && !deletedMemberIdsServer.has(String(m.id)))
                 : resolved.value;
             const prevSerialized =
               resolved.key in state.store ? JSON.stringify(state.store[resolved.key]) : undefined;
@@ -1695,6 +1761,14 @@ async function pullFromCloudKV(seedMissingToCloud = false): Promise<number> {
         for (const id of value) {
           addSubjectTombstoneServer(id);
         }
+      } else if (key === 'ams_deleted_admin_ids' && Array.isArray(value)) {
+        for (const id of value) {
+          if (id) deletedAdminIdsServer.add(String(id));
+        }
+      } else if (key === 'ams_deleted_member_ids' && Array.isArray(value)) {
+        for (const id of value) {
+          if (id) deletedMemberIdsServer.add(String(id));
+        }
       }
 
       if (pendingCloudPushKeys.has(key) || inFlightCloudPushKeys.has(key)) continue;
@@ -1733,6 +1807,10 @@ async function pullFromCloudKV(seedMissingToCloud = false): Promise<number> {
           : mergeSubjectListsServer(value, state.store[key])
         : isSub
         ? filterSubjectListServer(value)
+        : key === 'ams_school_admins' && Array.isArray(value)
+        ? value.filter((a: any) => a && a.id && !deletedAdminIdsServer.has(String(a.id)))
+        : key === 'ams_members' && Array.isArray(value)
+        ? value.filter((m: any) => m && m.id && !deletedMemberIdsServer.has(String(m.id)))
         : value;
       const localSerialized = key in state.store ? JSON.stringify(state.store[key]) : undefined;
       const remoteSerialized = JSON.stringify(value);
@@ -3177,6 +3255,24 @@ async function startServer() {
                 }
               }
             }
+          } else if (key === 'ams_deleted_admin_ids' && Array.isArray(value)) {
+            for (const aId of value) {
+              if (aId) deletedAdminIdsServer.add(String(aId));
+            }
+            if (Array.isArray(state.store['ams_school_admins'])) {
+              state.store['ams_school_admins'] = state.store['ams_school_admins'].filter(
+                (a: any) => a && a.id && !deletedAdminIdsServer.has(String(a.id))
+              );
+            }
+          } else if (key === 'ams_deleted_member_ids' && Array.isArray(value)) {
+            for (const mId of value) {
+              if (mId) deletedMemberIdsServer.add(String(mId));
+            }
+            if (Array.isArray(state.store['ams_members'])) {
+              state.store['ams_members'] = state.store['ams_members'].filter(
+                (m: any) => m && m.id && !deletedMemberIdsServer.has(String(m.id))
+              );
+            }
           } else if (isSubjectKeyName(key) && Array.isArray(value)) {
             if (key in state.store) {
               finalValue = mergeSubjectListsServer(state.store[key], value);
@@ -3190,8 +3286,15 @@ async function startServer() {
           } else if (isDutyLogKeyName(key)) {
             if (key in state.store) {
               finalValue = mergeDutyLogListsServer(state.store[key], value);
+            } else if (Array.isArray(value)) {
+              finalValue = sortDutyLogsDescendingServer(
+                value.filter(d => d && d.id && !deletedDutyLogIdsServer.has(String(d.id)))
+              );
             }
           } else if (key === 'ams_school_admins' && Array.isArray(value)) {
+            for (const adm of value) {
+              if (adm && adm.id) deletedAdminIdsServer.delete(String(adm.id));
+            }
             const existingAdmins: any[] = Array.isArray(state.store['ams_school_admins'])
               ? state.store['ams_school_admins']
               : [];
@@ -3220,6 +3323,10 @@ async function startServer() {
               }
               return merged;
             });
+          } else if (key === 'ams_members' && Array.isArray(value)) {
+            for (const mem of value) {
+              if (mem && mem.id) deletedMemberIdsServer.delete(String(mem.id));
+            }
           }
           state.store[key] = finalValue;
         }
@@ -3896,6 +4003,7 @@ self.addEventListener('activate', (event) => {
     if (fs.existsSync(path.join(distPath, 'assets'))) {
       app.use('/assets', express.static(path.join(distPath, 'assets')));
     }
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: {
         middlewareMode: true,
@@ -3914,21 +4022,28 @@ self.addEventListener('activate', (event) => {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
-    // Ensure any persisted task submissions with base64 data URLs are hosted & uploaded to Google Drive
-    for (const [k, v] of Object.entries(state.store)) {
-      if (isTaskKeyName(k)) {
-        state.store[k] = ensureTaskFilesHostedAndUploaded(k, v);
+    // Defer initial background file & cloud sync slightly so Cloud Run startup probe succeeds immediately
+    setTimeout(() => {
+      try {
+        for (const [k, v] of Object.entries(state.store)) {
+          if (isTaskKeyName(k)) {
+            state.store[k] = ensureTaskFilesHostedAndUploaded(k, v);
+          }
+        }
+        syncWithFirestoreServer(false).catch(() => {});
+        startServerFirestoreListener();
+        pullFromCloudKV(false).catch(() => {});
+        setInterval(() => {
+          pullFromCloudKV(false).catch(() => {});
+        }, 5000);
+      } catch {
+        // ignore background startup error
       }
-    }
-    // Initial global cloud sync
-    syncWithFirestoreServer(false).catch(() => {});
-    startServerFirestoreListener();
-    pullFromCloudKV(false).catch(() => {});
-    // Continuous background cloud KV reconciliation every 5 seconds
-    setInterval(() => {
-      pullFromCloudKV(false).catch(() => {});
-    }, 5000);
+    }, 1000);
   });
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error('Failed to start server:', err);
+});
+

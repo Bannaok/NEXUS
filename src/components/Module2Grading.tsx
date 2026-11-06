@@ -53,6 +53,7 @@ import {
   GripVertical
 } from 'lucide-react';
 import { Assessment3Booklets } from './Assessment3Booklets';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 interface Module2Props {
   user: UserSession;
@@ -149,9 +150,9 @@ export const Module2Grading: React.FC<Module2Props> = ({
     });
   }, [academicYear]);
 
-  const isCurrentSemLocked = Boolean(lockedSemesters[`${currentAcademicYear}_${currentSemester}`]);
-  const isSem1Locked = Boolean(lockedSemesters[`${currentAcademicYear}_1`]);
-  const isSem2Locked = Boolean(lockedSemesters[`${currentAcademicYear}_2`]);
+  const isCurrentSemLocked = false;
+  const isSem1Locked = false;
+  const isSem2Locked = false;
 
   // Toggle Lock/Unlock for current semester
   const handleToggleLockCurrentSemester = () => {
@@ -648,6 +649,12 @@ export const Module2Grading: React.FC<Module2Props> = ({
   const [editKindergartenColumnInput, setEditKindergartenColumnInput] = useState('');
   const [subtopicToDelete, setSubtopicToDelete] = useState<string | null>(null);
   const [kindergartenColumnToDelete, setKindergartenColumnToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [formItemToDelete, setFormItemToDelete] = useState<{
+    title: string;
+    categoryLabel: string;
+    itemTitle: string;
+    onConfirm: () => void;
+  } | null>(null);
   const [starMenuOpenSubtopic, setStarMenuOpenSubtopic] = useState<string | null>(null);
 
   const [gradingViewMode, setGradingViewMode] = useState<'score' | 'grade'>('score');
@@ -3533,30 +3540,24 @@ export const Module2Grading: React.FC<Module2Props> = ({
           )}
         </div>
 
-        {/* Mobile Extra Controls Row (รายวิชา / ลบAll / ล็อก - แสดงเมื่อเป็น Admin หรือ ล็อกภาคเรียน) */}
-        {(user.role === 'admin' || isCurrentSemLocked) && (
+        {/* Mobile Extra Controls Row (รายวิชา / ลบAll - แสดงเมื่อเป็น Admin) */}
+        {user.role === 'admin' && (
           <div className="flex sm:hidden items-center justify-between pt-2 mt-2 border-t border-amber-200/60 gap-2">
-            {user.role === 'admin' ? (
-              <button
-                type="button"
-                onClick={() => setActiveTab('subjects')}
-                className={`flex-1 h-9 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs ${
-                  activeTab === 'subjects'
-                    ? 'bg-amber-600 text-white'
-                    : 'text-slate-700 bg-white border border-amber-200/80'
-                }`}
-              >
-                <BookOpen className="w-3.5 h-3.5 shrink-0" />
-                <span>รายวิชา</span>
-              </button>
-            ) : (
-              <div className="hidden sm:block text-[11px] font-bold text-slate-600">
-                สถานะ: {user.fullName || 'สมาชิก'}
-              </div>
-            )}
+            <button
+              type="button"
+              onClick={() => setActiveTab('subjects')}
+              className={`flex-1 h-9 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-xs ${
+                activeTab === 'subjects'
+                  ? 'bg-amber-600 text-white'
+                  : 'text-slate-700 bg-white border border-amber-200/80'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5 shrink-0" />
+              <span>รายวิชา</span>
+            </button>
 
-            <div className="flex items-center gap-1.5 shrink-0">
-              {user.role === 'admin' && academicYears.length > 1 && (
+            {academicYears.length > 1 && (
+              <div className="flex items-center gap-1.5 shrink-0">
                 <button
                   type="button"
                   onClick={() => {
@@ -3568,29 +3569,8 @@ export const Module2Grading: React.FC<Module2Props> = ({
                   <Trash2 className="w-3.5 h-3.5 text-rose-600 shrink-0" />
                   <span>ลบAll</span>
                 </button>
-              )}
-
-              {user.role === 'admin' ? (
-                <button
-                  type="button"
-                  onClick={handleToggleLockCurrentSemester}
-                  className={`h-9 px-3 rounded-xl border transition-all cursor-pointer shadow-xs flex items-center gap-1 text-xs font-bold ${
-                    isCurrentSemLocked
-                      ? 'bg-rose-50 text-rose-700 border-rose-300'
-                      : 'bg-white text-slate-700 border-slate-200/90'
-                  }`}
-                >
-                  {isCurrentSemLocked ? null : <Unlock className="w-3.5 h-3.5 text-emerald-600" />}
-                  <span>{isCurrentSemLocked ? 'ล็อก' : 'ปกติ'}</span>
-                </button>
-              ) : (
-                isCurrentSemLocked && (
-                  <div className="h-9 px-2.5 rounded-xl bg-amber-50 text-amber-900 border border-amber-200 shadow-xs flex items-center gap-1 text-xs font-bold">
-                    <span>ล็อก</span>
-                  </div>
-                )
-              )}
-            </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -3681,9 +3661,9 @@ export const Module2Grading: React.FC<Module2Props> = ({
               </div>
             )}
 
-            <div className="flex items-center gap-1.5 shrink-0">
-              {/* ปุ่มลบปีการศึกษา (เปลี่ยนชื่อเป็น ลบAll) */}
-              {user.role === 'admin' && academicYears.length > 1 && (
+            {user.role === 'admin' && academicYears.length > 1 && (
+              <div className="flex items-center gap-1.5 shrink-0">
+                {/* ปุ่มลบปีการศึกษา (เปลี่ยนชื่อเป็น ลบAll) */}
                 <button
                   type="button"
                   onClick={() => {
@@ -3696,34 +3676,8 @@ export const Module2Grading: React.FC<Module2Props> = ({
                   <Trash2 className="w-3.5 h-3.5 text-rose-600 shrink-0" />
                   <span>ลบAll</span>
                 </button>
-              )}
-
-              {/* ปุ่มล็อกภาคเรียน */}
-              {user.role === 'admin' ? (
-                <button
-                  type="button"
-                  onClick={handleToggleLockCurrentSemester}
-                  className={`p-1.5 sm:p-2 rounded-xl border transition-all cursor-pointer shadow-2xs active:scale-95 shrink-0 flex items-center gap-1 ${
-                    isCurrentSemLocked
-                      ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-300 ring-2 ring-rose-200/60'
-                      : 'bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border-slate-200/90'
-                  }`}
-                  title={isCurrentSemLocked ? `ปลดล็อกภาคเรียนที่ ${currentSemester}` : `ล็อกภาคเรียนที่ ${currentSemester}`}
-                >
-                  {isCurrentSemLocked ? (
-                    <span className="text-[11px] font-bold text-rose-700 px-1">ล็อก</span>
-                  ) : (
-                    <Unlock className="w-4 h-4 text-emerald-600 shrink-0" />
-                  )}
-                </button>
-              ) : (
-                isCurrentSemLocked && (
-                  <div className="p-1.5 sm:p-2 rounded-xl bg-amber-50 text-amber-900 border border-amber-200 shadow-2xs shrink-0 text-xs font-bold" title="ภาคเรียนนี้ถูกล็อก (ปิดรับการกรอกคะแนน)">
-                    <span>ล็อก</span>
-                  </div>
-                )
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -3731,37 +3685,6 @@ export const Module2Grading: React.FC<Module2Props> = ({
       {/* TAB 1: GRADING MATRIX */}
       {activeTab === 'grading' && (
         <div className="space-y-4">
-          {/* Banner แจ้งเตือนเมื่อภาคเรียนถูกล็อกการกรอกคะแนน */}
-          {isCurrentSemLocked && (
-            <div className="bg-amber-50/90 border border-amber-200/90 text-amber-900 px-4 py-3 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-2xs">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 bg-amber-100 rounded-xl text-amber-700 shrink-0">
-                  <AlertCircle className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="font-bold text-amber-950 flex items-center gap-2">
-                    <span>ภาคเรียนที่ {currentSemester} ปีการศึกษา {currentAcademicYear} ถูกล็อกการกรอกคะแนน</span>
-                    <span className="px-2 py-0.5 rounded-md bg-amber-200/80 text-amber-900 font-bold text-[10px]">LOCKED</span>
-                  </div>
-                  <div className="text-amber-800 text-[11px] mt-0.5">
-                    {user.role === 'admin'
-                      ? 'ผู้ดูแลระบบได้ล็อกภาคเรียนนี้ไว้เพื่อป้องกันไม่ให้สมาชิกกรอกหรือแก้ไขคะแนนผิดภาคเรียน (Admin สามารถกดปลดล็อกได้ตลอดเวลา)'
-                      : 'ผู้ดูแลระบบ (Admin) ได้ล็อกภาคเรียนนี้ไว้เพื่อป้องกันการกรอกคะแนนผิดภาคเรียน (เปิดให้ดูคะแนนได้เท่านั้น ไม่สามารถแก้ไขหรือบันทึกได้)'}
-                  </div>
-                </div>
-              </div>
-              {user.role === 'admin' && (
-                <button
-                  type="button"
-                  onClick={handleToggleLockCurrentSemester}
-                  className="shrink-0 px-3 py-1.5 bg-white hover:bg-rose-50 text-rose-700 border border-rose-200 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-2xs transition-all cursor-pointer active:scale-95"
-                >
-                  <Unlock className="w-3.5 h-3.5 text-rose-600" />
-                  <span>ปลดล็อกภาค {currentSemester}</span>
-                </button>
-              )}
-            </div>
-          )}
           {/* Subject Selector Bar */}
           <div className="bg-white p-2.5 sm:p-3.5 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between gap-2">
             <div className="flex items-center gap-1.5 sm:gap-2 flex-1 min-w-0">
@@ -5327,7 +5250,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleDeleteAssignment(asg.id, asg.name);
+                                  setDeletingAssignmentConfirm(asg);
                                 }}
                                 className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-100/70 rounded-md transition-colors cursor-pointer"
                                 title="ลบช่องงานนี้"
@@ -6768,10 +6691,17 @@ export const Module2Grading: React.FC<Module2Props> = ({
                                 {kindergartenDirectElements.length > 1 && (
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      const next = kindergartenDirectElements.filter((_, idx) => idx !== eIdx);
-                                      setKindergartenDirectElements(next.length > 0 ? next : ['']);
-                                    }}
+                                    onClick={() =>
+                                      setFormItemToDelete({
+                                        title: 'ยืนยันการลบองค์ประกอบ/ประเด็น',
+                                        categoryLabel: 'โครงสร้างอนุบาล',
+                                        itemTitle: elVal || `องค์ประกอบ/ประเด็น ${eIdx + 1}`,
+                                        onConfirm: () => {
+                                          const next = kindergartenDirectElements.filter((_, idx) => idx !== eIdx);
+                                          setKindergartenDirectElements(next.length > 0 ? next : ['']);
+                                        }
+                                      })
+                                    }
                                     className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-all cursor-pointer shrink-0"
                                     title={`ลบองค์ประกอบ/ประเด็น ${eIdx + 1}`}
                                   >
@@ -6829,11 +6759,18 @@ export const Module2Grading: React.FC<Module2Props> = ({
                                     {kindergartenCompetencies.length > 1 && (
                                       <button
                                         type="button"
-                                        onClick={() => {
-                                          setKindergartenCompetencies(
-                                            kindergartenCompetencies.filter((_, i) => i !== cIdx)
-                                          );
-                                        }}
+                                        onClick={() =>
+                                          setFormItemToDelete({
+                                            title: 'ยืนยันการลบสมรรถนะ',
+                                            categoryLabel: 'โครงสร้างอนุบาล',
+                                            itemTitle: comp.title || `สมรรถนะ ${cIdx + 1}`,
+                                            onConfirm: () => {
+                                              setKindergartenCompetencies(
+                                                kindergartenCompetencies.filter((_, i) => i !== cIdx)
+                                              );
+                                            }
+                                          })
+                                        }
                                         className="px-2 py-0.5 text-[11px] font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-all cursor-pointer flex items-center gap-1 shrink-0"
                                         title={`ลบสมรรถนะ ${cIdx + 1}`}
                                       >
@@ -6901,12 +6838,19 @@ export const Module2Grading: React.FC<Module2Props> = ({
                                         {(comp.elements?.length || 1) > 1 && (
                                           <button
                                             type="button"
-                                            onClick={() => {
-                                              const next = [...kindergartenCompetencies];
-                                              const nextEls = (next[cIdx].elements || ['']).filter((_, idx) => idx !== eIdx);
-                                              next[cIdx] = { ...next[cIdx], elements: nextEls.length > 0 ? nextEls : [''] };
-                                              setKindergartenCompetencies(next);
-                                            }}
+                                            onClick={() =>
+                                              setFormItemToDelete({
+                                                title: 'ยืนยันการลบองค์ประกอบ/ประเด็น',
+                                                categoryLabel: `สมรรถนะ ${cIdx + 1}`,
+                                                itemTitle: elVal || `องค์ประกอบ/ประเด็น ${eIdx + 1}`,
+                                                onConfirm: () => {
+                                                  const next = [...kindergartenCompetencies];
+                                                  const nextEls = (next[cIdx].elements || ['']).filter((_, idx) => idx !== eIdx);
+                                                  next[cIdx] = { ...next[cIdx], elements: nextEls.length > 0 ? nextEls : [''] };
+                                                  setKindergartenCompetencies(next);
+                                                }
+                                              })
+                                            }
                                             className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition-all cursor-pointer shrink-0"
                                             title={`ลบองค์ประกอบ/ประเด็น ${eIdx + 1}`}
                                           >
@@ -7263,9 +7207,15 @@ export const Module2Grading: React.FC<Module2Props> = ({
                         <button
                           type="button"
                           onClick={() =>
-                            setNewKindergartenElementsInput(
-                              newKindergartenElementsInput.filter((_, i) => i !== eIdx)
-                            )
+                            setFormItemToDelete({
+                              title: 'ยืนยันการลบองค์ประกอบ/ประเด็น',
+                              categoryLabel: 'สมรรถนะใหม่',
+                              itemTitle: el || `องค์ประกอบ/ประเด็น ${eIdx + 1}`,
+                              onConfirm: () =>
+                                setNewKindergartenElementsInput(
+                                  newKindergartenElementsInput.filter((_, i) => i !== eIdx)
+                                )
+                            })
                           }
                           className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg cursor-pointer"
                         >
@@ -7434,57 +7384,7 @@ export const Module2Grading: React.FC<Module2Props> = ({
         </div>
       )}
 
-      {/* MODAL: ยืนยันการลบสมรรถนะสำหรับอนุบาล (อ.1 - อ.3) */}
-      {subtopicToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-in fade-in">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 space-y-4 animate-in zoom-in-95">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0 font-bold">
-                <Trash2 className="w-5 h-5" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <h3 className="text-sm font-bold text-slate-800 truncate">
-                  ยืนยันการลบสมรรถนะ
-                </h3>
-                <p className="text-xs text-rose-600 font-semibold truncate">
-                  {subtopicToDelete}
-                </p>
-              </div>
-            </div>
-
-            <div className="p-3 bg-rose-50/80 rounded-xl border border-rose-200/80 text-xs text-rose-900 space-y-1.5">
-              <p className="font-semibold">
-                คุณแน่ใจหรือไม่ว่าต้องการลบ "{subtopicToDelete}"?
-              </p>
-              <p className="text-[11px] text-rose-700 leading-relaxed">
-                ⚠️ องค์ประกอบ/ประเด็น และคะแนนพัฒนาการภายใต้สมรรถนะนี้จะถูกลบออกจากระบบ
-              </p>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setSubtopicToDelete(null)}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
-              >
-                ยกเลิก
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (subtopicToDelete) {
-                    confirmDeleteKindergartenSubtopic(subtopicToDelete);
-                  }
-                }}
-                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5 active:scale-95"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>ยืนยันการลบ</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* (สรุปผลการประเมินปฐมวัย อ.1 - อ.3 แสดงเป็นตารางเรียงลำดับโดยตรงบนหน้าเว็บ) */}
 
       {/* (สรุปผลการประเมินปฐมวัย อ.1 - อ.3 แสดงเป็นตารางเรียงลำดับโดยตรงบนหน้าเว็บ ไม่ใช้ Pop-up ตามข้อกำหนด) */}
 
@@ -7815,8 +7715,9 @@ export const Module2Grading: React.FC<Module2Props> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    handleDeleteAssignment(editingAssignment.id, editingAssignment.name);
+                    const target = editingAssignment;
                     setEditingAssignment(null);
+                    setDeletingAssignmentConfirm(target);
                   }}
                   className="px-3 py-1.5 text-xs font-bold text-rose-600 hover:bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
@@ -7902,62 +7803,35 @@ export const Module2Grading: React.FC<Module2Props> = ({
       )}
 
       {/* MODAL: ยืนยันการลบรายวิชา (ถามเพื่อยืนยันก่อน) */}
-      {subjectToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-in fade-in">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
-              <div className="w-10 h-10 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 flex items-center justify-center shrink-0">
-                <Trash2 className="w-5 h-5 text-rose-600" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-slate-800">
-                  ยืนยันการลบรายวิชา
-                </h3>
-                <p className="text-xs text-slate-500">
-                  ลบรายวิชานี้ออกจากระบบอย่างถาวร
-                </p>
-              </div>
-            </div>
-
-            <div className="p-3.5 bg-rose-50/80 rounded-xl border border-rose-200/80 text-xs text-rose-900 space-y-2">
-              <p>
-                คุณต้องการลบรายวิชา <strong>{subjectToDelete.name} {subjectToDelete.code ? `(${subjectToDelete.code})` : ''}</strong> ชั้น {subjectToDelete.gradeLevel} ภาคเรียนที่ {subjectToDelete.semester} ใช่หรือไม่?
-              </p>
-              <div className="text-[11px] text-rose-700 leading-relaxed space-y-1">
-                <p>• การลบนี้จะนำรายวิชาออกจากระบบปีการศึกษา {currentAcademicYear} ทันที</p>
-                <p>• หากมีสมาชิกได้ลงทะเบียนสอนวิชานี้ไว้ รายวิชานี้ในหน้าสมาชิกจะถูกลบออกด้วยทันที</p>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setSubjectToDelete(null)}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
-              >
-                ยกเลิก
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const deletingId = subjectToDelete.id;
-                  const deletingName = subjectToDelete.name;
-                  if (selectedSubjectId === deletingId) {
-                    setSelectedSubjectId('');
-                  }
-                  onDeleteSubject(deletingId);
-                  setSubjectToDelete(null);
-                  onShowToast('info', 'ลบรายวิชาแล้ว', `ลบรายวิชา ${deletingName} ออกจากระบบและหน้าสมาชิกที่ลงทะเบียนเรียบร้อยแล้ว`);
-                }}
-                className="px-5 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
-              >
-                <Trash2 className="w-4 h-4" />
-                <span>ยืนยันลบรายวิชา</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDeleteModal
+        isOpen={Boolean(subjectToDelete)}
+        title="ยืนยันการลบรายวิชา"
+        categoryLabel="รายวิชาเรียน"
+        itemTitle={
+          subjectToDelete
+            ? `${subjectToDelete.name}${subjectToDelete.code ? ` (${subjectToDelete.code})` : ''}`
+            : ''
+        }
+        itemSubtitle={
+          subjectToDelete
+            ? `ชั้น ${subjectToDelete.gradeLevel} • ภาคเรียนที่ ${subjectToDelete.semester}/${currentAcademicYear}`
+            : ''
+        }
+        warningText="รายวิชานี้และข้อมูลที่เชื่อมในหน้าสมาชิกจะถูกลบถาวร"
+        confirmLabel="ยืนยันลบรายวิชา"
+        onCancel={() => setSubjectToDelete(null)}
+        onConfirm={() => {
+          if (!subjectToDelete) return;
+          const deletingId = subjectToDelete.id;
+          const deletingName = subjectToDelete.name;
+          if (selectedSubjectId === deletingId) {
+            setSelectedSubjectId('');
+          }
+          onDeleteSubject(deletingId);
+          setSubjectToDelete(null);
+          onShowToast('info', 'ลบรายวิชาแล้ว', `ลบรายวิชา ${deletingName} ออกจากระบบและหน้าสมาชิกที่ลงทะเบียนเรียบร้อยแล้ว`);
+        }}
+      />
 
       {/* MODAL: เพิ่มปีการศึกษาถัดไป (สามารถคัดลอกรายวิชาปีการศึกษาก่อนหน้านี้ได้ โดยคะแนนห้ามตามเด็ดขาด) */}
       {isAddYearModalOpen && (
@@ -8070,41 +7944,42 @@ export const Module2Grading: React.FC<Module2Props> = ({
 
       {/* MODAL: ลบปีการศึกษา (ยืนยันด้วยรหัส Admin) */}
       {deletingYear && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-in fade-in">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center gap-3 pb-3 border-b border-slate-100">
-              <div className="w-10 h-10 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 flex items-center justify-center shrink-0">
-                <ShieldAlert className="w-5 h-5 text-rose-600" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-slate-800">
-                  ยืนยันการลบปีการศึกษา {deletingYear}
-                </h3>
-                <p className="text-xs text-rose-600 font-semibold">
-                  ต้องยืนยันด้วยรหัส Admin
-                </p>
-              </div>
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 space-y-4 text-center animate-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center mx-auto shadow-2xs">
+              <Trash2 className="w-5 h-5 text-rose-600" />
             </div>
 
-            <div className="p-3.5 bg-rose-50 rounded-xl border border-rose-200 text-xs text-rose-900 space-y-1.5">
-              <p className="font-bold flex items-center gap-1">
-                <AlertCircle className="w-4 h-4 text-rose-600" />
-                <span>คำเตือนความปลอดภัย:</span>
-              </p>
-              <p className="text-[11px] leading-relaxed">
-                การลบปีการศึกษา <strong>{deletingYear}</strong> จะลบรายวิชาทั้งหมดที่ผูกกับปีนี้ออกจากระบบ เพื่อความปลอดภัย กรุณากรอกรหัสผ่าน Admin เพื่อยืนยัน
+            <div className="space-y-1">
+              <h3 className="text-base font-extrabold text-slate-800">
+                ยืนยันการลบปีการศึกษา
+              </h3>
+              <p className="text-xs text-slate-500">
+                กรุณาตรวจสอบข้อมูลและกรอกรหัสผ่าน Admin เพื่อยืนยัน
               </p>
             </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                รหัสผ่าน Admin *
+            <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-3.5 text-left space-y-1">
+              <span className="inline-block text-[10px] font-bold text-rose-700 bg-rose-100/80 px-2 py-0.5 rounded-md">
+                ลบรายวิชาทั้งปีการศึกษา (ลบAll)
+              </span>
+              <div className="text-xs font-bold text-slate-900">
+                ปีการศึกษา {deletingYear}
+              </div>
+              <div className="text-[11px] text-slate-600">
+                ลบรายวิชาทั้งหมดที่ผูกกับปีการศึกษานี้ออกจากระบบ
+              </div>
+            </div>
+
+            <div className="text-left">
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                รหัสผ่าน Admin <span className="text-rose-500">*</span>
               </label>
               <input
                 type="password"
                 value={adminPasswordInput}
                 onChange={(e) => setAdminPasswordInput(e.target.value)}
-                placeholder="กรอกรหัสผ่าน Admin (เช่น 123456)"
+                placeholder="กรอกรหัสผ่าน Admin เพื่อยืนยัน"
                 autoFocus
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && adminPasswordInput.trim()) {
@@ -8115,14 +7990,14 @@ export const Module2Grading: React.FC<Module2Props> = ({
               />
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+            <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-slate-100">
               <button
                 type="button"
                 onClick={() => {
                   setDeletingYear(null);
                   setAdminPasswordInput('');
                 }}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
               >
                 ยกเลิก
               </button>
@@ -8130,10 +8005,10 @@ export const Module2Grading: React.FC<Module2Props> = ({
                 type="button"
                 disabled={!adminPasswordInput.trim()}
                 onClick={handleDeleteAcademicYearConfirm}
-                className="px-5 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                className="py-2.5 px-4 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center justify-center gap-1.5 active:scale-95"
               >
-                <Trash2 className="w-4 h-4" />
-                <span>ยืนยันลบปีการศึกษา</span>
+                <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                <span>ยืนยันการลบ</span>
               </button>
             </div>
           </div>
@@ -8834,125 +8709,58 @@ export const Module2Grading: React.FC<Module2Props> = ({
       )}
 
       {/* MODAL: ยืนยันการลบหน่วยการเรียนรู้ (จะถามยืนยันหรือว่ายกเลิก) */}
-      {unitToDelete !== null && (() => {
-        const detail = selectedSubject?.learningUnitDetails?.find(d => d.unitNumber === unitToDelete);
-        const uLabel = detail?.name ? `หน่วยที่ ${unitToDelete}: ${detail.name}` : `หน่วยที่ ${unitToDelete}`;
-        const asgsInUnit = (selectedSubject?.assignmentItems || []).filter(a => a.unitNumber === unitToDelete);
+      {(() => {
+        const detail = unitToDelete !== null ? selectedSubject?.learningUnitDetails?.find(d => d.unitNumber === unitToDelete) : undefined;
+        const uLabel = unitToDelete !== null ? (detail?.name ? `หน่วยที่ ${unitToDelete}: ${detail.name}` : `หน่วยที่ ${unitToDelete}`) : '';
+        const asgsInUnit = unitToDelete !== null ? (selectedSubject?.assignmentItems || []).filter(a => a.unitNumber === unitToDelete) : [];
 
         return (
-          <div className="fixed inset-0 z-[75] flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
-            <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 space-y-4 animate-in zoom-in-95">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0 font-bold">
-                  <Trash2 className="w-5 h-5" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <h3 className="text-sm font-bold text-slate-800 truncate">
-                    ยืนยันการลบหน่วยการเรียนรู้
-                  </h3>
-                  <p className="text-xs text-slate-500 truncate">
-                    {uLabel}
-                  </p>
-                </div>
-              </div>
-
-              <div className="p-3 bg-rose-50/80 rounded-xl border border-rose-200/80 text-xs text-rose-900 space-y-1.5">
-                <p className="font-semibold">
-                  คุณแน่ใจหรือไม่ว่าต้องการลบ {uLabel}?
-                </p>
-                {asgsInUnit.length > 0 ? (
-                  <p className="text-[11px] text-rose-700 leading-relaxed">
-                    ⚠️ มีช่องงานที่ผูกกับหน่วยนี้ {asgsInUnit.length} ช่อง (ข้อมูลงานและคะแนนในหน่วยนี้ทั้งหมดจะถูกลบ และคำนวณคะแนนเก็บใหม่อัตโนมัติ)
-                  </p>
-                ) : (
-                  <p className="text-[11px] text-rose-700 leading-relaxed">
-                    หน่วยการเรียนรู้นี้จะถูกนำออกจากวิชา {selectedSubject?.name}
-                  </p>
-                )}
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setUnitToDelete(null)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
-                >
-                  ยกเลิก
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const u = unitToDelete;
-                    setUnitToDelete(null);
-                    handleDeleteLearningUnit(u);
-                    if (mobileGradingUnitTab === u) {
-                      setMobileGradingUnitTab(1);
-                    }
-                  }}
-                  className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5 active:scale-95"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>ยืนยันการลบ</span>
-                </button>
-              </div>
-            </div>
-          </div>
+          <ConfirmDeleteModal
+            isOpen={unitToDelete !== null}
+            title="ยืนยันการลบหน่วยการเรียนรู้"
+            categoryLabel={selectedSubject?.name || 'หน่วยการเรียนรู้'}
+            itemTitle={uLabel}
+            itemSubtitle={
+              asgsInUnit.length > 0
+                ? `มีช่องงานที่ผูกกับหน่วยนี้ ${asgsInUnit.length} ช่อง`
+                : 'ยังไม่มีช่องงานในหน่วยนี้'
+            }
+            warningText="ข้อมูลงานและคะแนนในหน่วยนี้จะถูกลบและคำนวณคะแนนเก็บใหม่อัตโนมัติ"
+            onCancel={() => setUnitToDelete(null)}
+            onConfirm={() => {
+              if (unitToDelete === null) return;
+              const u = unitToDelete;
+              setUnitToDelete(null);
+              handleDeleteLearningUnit(u);
+              if (mobileGradingUnitTab === u) {
+                setMobileGradingUnitTab(1);
+              }
+            }}
+          />
         );
       })()}
 
       {/* MODAL: ยืนยันการลบชิ้นงาน (ถามเพื่อยืนยันก่อนลบเสมอ) */}
-      {deletingAssignmentConfirm && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-in fade-in">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 space-y-4 animate-in zoom-in-95">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0 font-bold">
-                <Trash2 className="w-5 h-5" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <h3 className="text-sm font-bold text-slate-800 truncate">
-                  ยืนยันการลบชิ้นงาน
-                </h3>
-                <p className="text-xs text-slate-500 truncate">
-                  {deletingAssignmentConfirm.name} (หน่วยที่ {deletingAssignmentConfirm.unitNumber || 1})
-                </p>
-              </div>
-            </div>
-
-            <div className="p-3 bg-rose-50/80 rounded-xl border border-rose-200/80 text-xs text-rose-900 space-y-1">
-              <p className="font-semibold">
-                คุณแน่ใจหรือไม่ว่าต้องการลบช่อง{deletingAssignmentConfirm.name}?
-              </p>
-              <p className="text-[11px] text-rose-700 leading-relaxed">
-                ⚠️ คะแนนของนักเรียนทุกคนในชิ้นงานนี้จะถูกลบ และคำนวณคะแนนเก็บใหม่อัตโนมัติ
-              </p>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setDeletingAssignmentConfirm(null)}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
-              >
-                ยกเลิก
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const target = deletingAssignmentConfirm;
-                  setDeletingAssignmentConfirm(null);
-                  if (target) {
-                    handleDeleteAssignment(target.id, target.name);
-                  }
-                }}
-                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5 active:scale-95"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>ยืนยีนลบ</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDeleteModal
+        isOpen={Boolean(deletingAssignmentConfirm)}
+        title="ยืนยันการลบช่องงาน"
+        categoryLabel="ช่องคะแนนระหว่างภาค"
+        itemTitle={deletingAssignmentConfirm?.name || ''}
+        itemSubtitle={
+          deletingAssignmentConfirm
+            ? `หน่วยการเรียนรู้ที่ ${deletingAssignmentConfirm.unitNumber || 1}`
+            : ''
+        }
+        warningText="คะแนนของนักเรียนในช่องงานนี้จะถูกลบและคำนวณคะแนนเก็บใหม่อัตโนมัติ"
+        onCancel={() => setDeletingAssignmentConfirm(null)}
+        onConfirm={() => {
+          const target = deletingAssignmentConfirm;
+          setDeletingAssignmentConfirm(null);
+          if (target) {
+            handleDeleteAssignment(target.id, target.name);
+          }
+        }}
+      />
 
       {/* MODAL: ลงคะแนนรายบุคคลแบบรวดเร็ว (สำหรับมุม Mobile หรือคลิกที่ชื่อนักเรียน) */}
       {mobileGradingStudentId && currentGradingStudent && (
@@ -9986,75 +9794,49 @@ export const Module2Grading: React.FC<Module2Props> = ({
       )}
 
       {/* Modal ยืนยันการลบองค์ประกอบ/ประเด็น */}
-      {kindergartenColumnToDelete && (
-        <div className="fixed inset-0 z-[80] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-100 scale-in-95 transition-transform duration-200 text-center">
-            <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-3">
-              <Trash2 className="w-6 h-6 stroke-[2]" />
-            </div>
-            <h3 className="font-bold text-slate-800 text-base mb-1">
-              ยืนยันการลบองค์ประกอบ/ประเด็น
-            </h3>
-            <p className="text-xs text-slate-600 mb-5 leading-relaxed">
-              คุณแน่ใจหรือว่าต้องการลบองค์ประกอบ/ประเด็น <strong className="text-rose-700 font-bold">&quot;{kindergartenColumnToDelete.name}&quot;</strong> ? <br/>
-              ข้อมูลคะแนนในช่องนี้จะถูกลบออก
-            </p>
-            <div className="flex items-center justify-center gap-2">
-              <button
-                type="button"
-                onClick={() => setKindergartenColumnToDelete(null)}
-                className="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all cursor-pointer flex-1"
-              >
-                ยกเลิก
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  handleDeleteKindergartenColumn(kindergartenColumnToDelete.id, kindergartenColumnToDelete.name);
-                  setKindergartenColumnToDelete(null);
-                }}
-                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition-all cursor-pointer active:scale-95 flex-1"
-              >
-                ยืนยันการลบ
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDeleteModal
+        isOpen={Boolean(kindergartenColumnToDelete)}
+        title="ยืนยันการลบองค์ประกอบ/ประเด็น"
+        categoryLabel="ประเมินพัฒนาการปฐมวัย"
+        itemTitle={kindergartenColumnToDelete?.name || ''}
+        itemSubtitle="ข้อมูลคะแนนในช่องนี้จะถูกลบออก"
+        onCancel={() => setKindergartenColumnToDelete(null)}
+        onConfirm={() => {
+          if (!kindergartenColumnToDelete) return;
+          handleDeleteKindergartenColumn(kindergartenColumnToDelete.id, kindergartenColumnToDelete.name);
+          setKindergartenColumnToDelete(null);
+        }}
+      />
 
       {/* Modal ยืนยันการลบสมรรถนะ */}
-      {subtopicToDelete && (
-        <div className="fixed inset-0 z-[80] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-100 scale-in-95 transition-transform duration-200 text-center">
-            <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-3">
-              <Trash2 className="w-6 h-6 stroke-[2]" />
-            </div>
-            <h3 className="font-bold text-slate-800 text-base mb-1">
-              ยืนยันการลบสมรรถนะ
-            </h3>
-            <p className="text-xs text-slate-600 mb-5 leading-relaxed">
-              คุณแน่ใจหรือว่าต้องการลบ <strong className="text-rose-700 font-bold">&quot;{subtopicToDelete}&quot;</strong> ? <br/>
-              องค์ประกอบ/ประเด็นและคะแนนทั้งหมดภายใต้สมรรถนะนี้จะถูกลบออก
-            </p>
-            <div className="flex items-center justify-center gap-2">
-              <button
-                type="button"
-                onClick={() => setSubtopicToDelete(null)}
-                className="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all cursor-pointer flex-1"
-              >
-                ยกเลิก
-              </button>
-              <button
-                type="button"
-                onClick={() => confirmDeleteKindergartenSubtopic(subtopicToDelete)}
-                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition-all cursor-pointer active:scale-95 flex-1"
-              >
-                ยืนยันการลบ
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDeleteModal
+        isOpen={Boolean(subtopicToDelete)}
+        title="ยืนยันการลบสมรรถนะ"
+        categoryLabel="ประเมินพัฒนาการปฐมวัย"
+        itemTitle={subtopicToDelete || ''}
+        itemSubtitle="องค์ประกอบ/ประเด็นและคะแนนภายใต้สมรรถนะนี้จะถูกลบออก"
+        onCancel={() => setSubtopicToDelete(null)}
+        onConfirm={() => {
+          if (subtopicToDelete) {
+            confirmDeleteKindergartenSubtopic(subtopicToDelete);
+          }
+        }}
+      />
+
+      {/* Modal ยืนยันการลบรายการในฟอร์มโครงสร้าง */}
+      <ConfirmDeleteModal
+        isOpen={Boolean(formItemToDelete)}
+        title={formItemToDelete?.title || 'ยืนยันการลบข้อมูล'}
+        categoryLabel={formItemToDelete?.categoryLabel}
+        itemTitle={formItemToDelete?.itemTitle || ''}
+        onCancel={() => setFormItemToDelete(null)}
+        onConfirm={() => {
+          if (formItemToDelete) {
+            formItemToDelete.onConfirm();
+          }
+          setFormItemToDelete(null);
+        }}
+      />
     </div>
   );
 };

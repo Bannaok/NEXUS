@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { StorageService } from '../services/storage';
 import { downloadRealFile, isWordFile, isPdfFile, isExcelFile, isImageFile, getFileExtension, extractDriveFileId, resolveDriveIdByFileNameFromGas } from '../services/fileDownloadHelper';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 interface Module5Props {
   user: UserSession;
@@ -1297,56 +1298,36 @@ export const Module5Documents: React.FC<Module5Props> = ({
       )}
 
       {/* MODAL: ยืนยันการลบเอกสาร (ถามยืนยันทุกครั้งเมื่อกดลบ) */}
-      {confirmDeleteDoc && (
-        <div className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
-          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-sm p-6 space-y-4 animate-in zoom-in-95 text-center">
-            <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center mx-auto">
-              <Trash2 className="w-6 h-6" />
-            </div>
-
-            <div className="space-y-1.5">
-              <h3 className="text-base font-bold text-slate-800">
-                {isOrderDoc(confirmDeleteDoc) ? 'ยืนยันการลบหนังสือคำสั่ง' : 'ยืนยันการลบเอกสาร'}
-              </h3>
-              <p className="text-xs text-slate-600 leading-relaxed break-words">
-                คุณต้องการลบ <span className="font-bold text-slate-800">"{confirmDeleteDoc.title}"</span> ใช่หรือไม่?
-              </p>
-              <p className="text-[11px] text-rose-600 font-medium">
-                เมื่อลบแล้วจะไม่สามารถกู้คืนข้อมูลได้
-              </p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2.5 pt-2">
-              <button
-                type="button"
-                onClick={() => setConfirmDeleteDoc(null)}
-                className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-              >
-                ยกเลิก
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  onDeleteDocument(confirmDeleteDoc.id);
-                  if (selectedDocDetailModal?.id === confirmDeleteDoc.id) {
-                    setSelectedDocDetailModal(null);
-                  }
-                  onShowToast(
-                    'info',
-                    'ลบสำเร็จ',
-                    `ลบ "${confirmDeleteDoc.title}" เรียบร้อยแล้ว`
-                  );
-                  setConfirmDeleteDoc(null);
-                }}
-                className="py-2.5 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-colors shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>ยืนยันการลบ</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDeleteModal
+        isOpen={Boolean(confirmDeleteDoc)}
+        title={confirmDeleteDoc && isOrderDoc(confirmDeleteDoc) ? 'ยืนยันการลบหนังสือคำสั่ง' : 'ยืนยันการลบเอกสาร'}
+        categoryLabel={confirmDeleteDoc && isOrderDoc(confirmDeleteDoc) ? 'หนังสือคำสั่ง' : 'ศูนย์เอกสาร'}
+        itemTitle={confirmDeleteDoc?.title || ''}
+        itemSubtitle={
+          confirmDeleteDoc
+            ? [
+                confirmDeleteDoc.docNumber ? `เลขที่: ${confirmDeleteDoc.docNumber}` : '',
+                confirmDeleteDoc.fileName ? `ไฟล์: ${confirmDeleteDoc.fileName}` : ''
+              ]
+                .filter(Boolean)
+                .join(' • ')
+            : ''
+        }
+        onCancel={() => setConfirmDeleteDoc(null)}
+        onConfirm={() => {
+          if (!confirmDeleteDoc) return;
+          onDeleteDocument(confirmDeleteDoc.id);
+          if (selectedDocDetailModal?.id === confirmDeleteDoc.id) {
+            setSelectedDocDetailModal(null);
+          }
+          onShowToast(
+            'info',
+            'ลบสำเร็จ',
+            `ลบ "${confirmDeleteDoc.title}" เรียบร้อยแล้ว`
+          );
+          setConfirmDeleteDoc(null);
+        }}
+      />
     </div>
   );
 };

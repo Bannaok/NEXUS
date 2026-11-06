@@ -2426,52 +2426,47 @@ pages_build_output_dir = "dist"`}
       {/* MODAL 3: Danger Delete Academic Year & Purge All Data */}
       {isDeleteYearModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 animate-in fade-in">
-          <div className="bg-slate-900 border-2 border-rose-600/80 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center gap-3 text-rose-400">
-              <div className="w-10 h-10 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center font-bold shrink-0">
-                <AlertTriangle className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-white">ยืนยันการลบปีการศึกษา {yearToDelete}</h3>
-                <p className="text-xs text-rose-400 font-medium">ข้อมูลทั้งหมดในปีการศึกษานี้จะหายหมดอย่างถาวร!</p>
-              </div>
+          <div className="bg-slate-900 border border-rose-500/60 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-center">
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto shrink-0">
+              <Trash2 className="w-5 h-5" />
             </div>
 
-            <div className="p-3.5 bg-rose-950/30 border border-rose-800/60 rounded-xl space-y-2 text-xs text-slate-300">
-              <p className="font-semibold text-rose-200">
-                ระบบจะลบข้อมูลทุกอย่างในเว็บรวมถึงไฟล์ที่อัปโหลดในปีการศึกษา {yearToDelete} ใน Google Drive และ Google Sheets อัตโนมัติ ได้แก่:
+            <div className="space-y-1">
+              <h3 className="text-base font-bold text-white">ยืนยันการลบปีการศึกษา {yearToDelete}</h3>
+              <p className="text-xs text-rose-400 font-medium">ลบข้อมูลทั้งหมดในปีการศึกษานี้ถาวร</p>
+            </div>
+
+            <div className="p-3.5 bg-slate-950/80 border border-slate-800 rounded-2xl text-left space-y-1 text-xs">
+              <span className="inline-block text-[10px] font-bold text-rose-300 bg-rose-950/80 px-2 py-0.5 rounded-md border border-rose-800/60">
+                ล้างข้อมูลทั้งระบบ
+              </span>
+              <div className="text-white font-bold">ปีการศึกษา {yearToDelete}</div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                ลบคะแนน เวลาเรียน เงินออม สุขภาพ งานมอบหมาย เอกสาร รวมถึงไฟล์ใน Google Drive และ Google Sheets
               </p>
-              <ul className="list-disc list-inside space-y-1 text-slate-400 text-[11px]">
-                <li>คะแนนและผลการเรียนทั้งหมด (Grades) และรายวิชาเรียน (Subjects)</li>
-                <li>สถิติการเช็กชื่อเวลาเรียน (Attendance) และข้อมูลเงินออมทรัพย์ (Savings)</li>
-                <li>บันทึกสุขภาพ การดื่มนม แปรงฟัน น้ำหนักส่วนสูง และสมุดประเมิน</li>
-                <li>งานมอบหมาย ประกาศ และไฟล์งานที่สมาชิกอัปโหลดส่งทั้งหมด</li>
-                <li>หนังสือคำสั่ง เอกสาร และการยื่นลาในปีการศึกษานี้ทั้งหมด</li>
-                <li>ไฟล์แนบทั้งหมดในปีการศึกษานี้ที่อยู่ใน Google Drive และแถวข้อมูลใน Google Sheets</li>
-              </ul>
             </div>
 
-            <div className="space-y-2 text-xs">
+            <div className="space-y-1.5 text-xs text-left">
               <label className="block text-slate-300">
-                พิมพ์เลขปีการศึกษา <strong className="text-rose-400 font-mono text-sm">{yearToDelete}</strong> เพื่อยืนยัน:
+                พิมพ์เลขปีการศึกษา <strong className="text-rose-400 font-mono">{yearToDelete}</strong> เพื่อยืนยัน:
               </label>
               <input
                 type="text"
                 value={confirmYearInput}
                 onChange={(e) => setConfirmYearInput(e.target.value)}
                 placeholder={`พิมพ์ ${yearToDelete}`}
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono font-bold text-center tracking-widest text-base"
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono font-bold text-center tracking-widest text-sm"
               />
             </div>
 
-            <div className="pt-2 flex justify-end gap-2">
+            <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-slate-800">
               <button
                 type="button"
                 onClick={() => {
                   setIsDeleteYearModalOpen(false);
                   setConfirmYearInput('');
                 }}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-colors cursor-pointer"
+                className="py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-colors cursor-pointer text-xs"
               >
                 ยกเลิก
               </button>
@@ -2480,10 +2475,10 @@ pages_build_output_dir = "dist"`}
                 type="button"
                 disabled={confirmYearInput.trim() !== yearToDelete || isDeletingYear}
                 onClick={handlePurgeAcademicYear}
-                className="px-5 py-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl transition-all shadow-md active:scale-95 cursor-pointer flex items-center gap-1.5"
+                className="py-2.5 px-4 bg-rose-600 hover:bg-rose-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl transition-all shadow-md active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 text-xs"
               >
-                <Trash2 className="w-4 h-4" />
-                <span>{isDeletingYear ? 'กำลังล้างข้อมูล...' : 'ลบปีและล้างข้อมูลถาวร'}</span>
+                <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                <span>{isDeletingYear ? 'กำลังลบ...' : 'ยืนยันการลบ'}</span>
               </button>
             </div>
           </div>
@@ -2647,58 +2642,48 @@ pages_build_output_dir = "dist"`}
       {/* MODAL 7: Confirm Delete Admin (School) & Google Sheets */}
       {adminToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4 animate-in fade-in">
-          <div className="bg-slate-900 border-2 border-rose-600/80 rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center gap-3 text-rose-400">
-              <div className="w-10 h-10 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center font-bold shrink-0">
-                <Trash2 className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-white">ยืนยันการลบ ID Admin (โรงเรียน)</h3>
-                <p className="text-xs text-rose-400 font-medium">ลบทั้งในระบบและใน Google Sheets อัตโนมัติ</p>
-              </div>
+          <div className="bg-slate-900 border border-rose-500/60 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-center">
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto shrink-0">
+              <Trash2 className="w-5 h-5" />
             </div>
 
-            <div className="p-3.5 bg-slate-950/80 border border-slate-800 rounded-xl space-y-1.5 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-400">ชื่อโรงเรียน:</span>
-                <strong className="text-white">{adminToDelete.schoolName}</strong>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">ID Admin:</span>
-                <strong className="text-indigo-300 font-mono">{adminToDelete.username}</strong>
-              </div>
+            <div className="space-y-1">
+              <h3 className="text-base font-bold text-white">ยืนยันการลบ ID Admin</h3>
+              <p className="text-xs text-slate-400">กรุณาตรวจสอบข้อมูลก่อนยืนยันการลบ</p>
+            </div>
+
+            <div className="p-3.5 bg-slate-950/80 border border-slate-800 rounded-2xl text-left space-y-1 text-xs">
+              <span className="inline-block text-[10px] font-bold text-rose-300 bg-rose-950/80 px-2 py-0.5 rounded-md border border-rose-800/60">
+                บัญชีผู้ดูแลโรงเรียน
+              </span>
+              <div className="text-white font-bold">{adminToDelete.schoolName}</div>
+              <div className="text-indigo-300 font-mono text-[11px]">ID: {adminToDelete.username}</div>
               {adminToDelete.googleSheetId && (
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Google Sheet ID:</span>
-                  <span className="text-emerald-400 font-mono truncate max-w-[180px]">{adminToDelete.googleSheetId}</span>
+                <div className="text-emerald-400 font-mono text-[10px] truncate">
+                  Sheet: {adminToDelete.googleSheetId}
                 </div>
               )}
             </div>
 
-            <div className="p-3 bg-rose-950/30 border border-rose-800/60 rounded-xl text-[11px] text-rose-200/90 space-y-1">
-              <p className="font-bold text-rose-300">รายการที่จะถูกลบพร้อมกันทันที:</p>
-              <ul className="list-disc list-inside space-y-0.5 text-slate-300">
-                <li>บัญชี ID Admin ของโรงเรียนนี้ในระบบและใน Google Sheets</li>
-                <li>ไฟล์ Google Sheet ประจำโรงเรียนนี้ใน Google Drive</li>
-                <li>ข้อมูลนักเรียน คะแนน เวลาเรียน และสมาชิกครูในสังกัดโรงเรียนนี้ทั้งหมด</li>
-              </ul>
-            </div>
+            <p className="text-[11px] text-rose-400 font-medium">
+              * ลบบัญชี ข้อมูลโรงเรียน และ Google Sheets อัตโนมัติ
+            </p>
 
-            <div className="pt-2 flex justify-end gap-2">
+            <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-slate-800">
               <button
                 type="button"
                 onClick={() => setAdminToDelete(null)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-colors cursor-pointer text-xs"
+                className="py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-colors cursor-pointer text-xs"
               >
                 ยกเลิก
               </button>
               <button
                 type="button"
                 onClick={confirmDeleteAdminNow}
-                className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl transition-all shadow-md active:scale-95 cursor-pointer flex items-center gap-1.5 text-xs"
+                className="py-2.5 px-4 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl transition-all shadow-md active:scale-95 cursor-pointer flex items-center justify-center gap-1.5 text-xs"
               >
-                <Trash2 className="w-4 h-4" />
-                <span>ยืนยันลบ Admin และ Google Sheets</span>
+                <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                <span>ยืนยันการลบ</span>
               </button>
             </div>
           </div>
@@ -2708,37 +2693,44 @@ pages_build_output_dir = "dist"`}
       {/* MODAL 8: Confirm Delete Member */}
       {memberToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4 animate-in fade-in">
-          <div className="bg-slate-900 border border-rose-500/60 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center gap-3 text-rose-400">
-              <div className="w-9 h-9 rounded-xl bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0">
-                <Trash2 className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-white">ยืนยันการลบสมาชิกบุคลากร</h3>
-                <p className="text-[11px] text-slate-400">ลบออกจากระบบและ Google Sheets</p>
-              </div>
+          <div className="bg-slate-900 border border-rose-500/60 rounded-3xl max-w-sm w-full p-6 space-y-4 shadow-2xl text-center">
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center mx-auto shrink-0">
+              <Trash2 className="w-5 h-5" />
             </div>
 
-            <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-xl text-xs space-y-1">
+            <div className="space-y-1">
+              <h3 className="text-base font-bold text-white">ยืนยันการลบสมาชิก</h3>
+              <p className="text-xs text-slate-400">กรุณาตรวจสอบข้อมูลก่อนยืนยันการลบ</p>
+            </div>
+
+            <div className="p-3.5 bg-slate-950/80 border border-slate-800 rounded-2xl text-left text-xs space-y-1">
+              <span className="inline-block text-[10px] font-bold text-rose-300 bg-rose-950/80 px-2 py-0.5 rounded-md border border-rose-800/60">
+                บัญชีสมาชิกบุคลากร
+              </span>
               <p className="text-white font-bold">{memberToDelete.fullName}</p>
-              <p className="text-slate-400 font-mono">ID: {memberToDelete.username}</p>
+              <p className="text-slate-400 font-mono text-[11px]">ID: {memberToDelete.username}</p>
               <p className="text-indigo-300 text-[11px]">{memberToDelete.schoolName}</p>
             </div>
 
-            <div className="flex justify-end gap-2 pt-1">
+            <p className="text-[11px] text-rose-400 font-medium">
+              * ลบออกจากระบบและ Google Sheets ถาวร
+            </p>
+
+            <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-slate-800">
               <button
                 type="button"
                 onClick={() => setMemberToDelete(null)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-colors cursor-pointer text-xs"
+                className="py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-colors cursor-pointer text-xs"
               >
                 ยกเลิก
               </button>
               <button
                 type="button"
                 onClick={confirmDeleteMemberNow}
-                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl transition-all shadow-md cursor-pointer text-xs"
+                className="py-2.5 px-4 bg-rose-600 hover:bg-rose-500 text-white font-bold rounded-xl transition-all shadow-md cursor-pointer flex items-center justify-center gap-1.5 text-xs"
               >
-                ยืนยันลบสมาชิก
+                <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                <span>ยืนยันการลบ</span>
               </button>
             </div>
           </div>

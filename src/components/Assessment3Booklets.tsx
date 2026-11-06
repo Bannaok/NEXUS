@@ -32,6 +32,7 @@ import {
   Minimize2,
   User
 } from 'lucide-react';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 // ==========================================
 // CONFIGURATION INTERFACES FOR DYNAMIC TABLES
@@ -2856,66 +2857,36 @@ export const Assessment3Booklets: React.FC<Assessment3BookletsProps> = ({
       )}
 
       {/* 4. Modal: Delete Table Confirmation */}
-      {tableToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-in fade-in">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center gap-2.5 text-rose-600">
-              <Trash2 className="w-5 h-5" />
-              <h3 className="text-sm font-bold">ยืนยันการลบตาราง</h3>
-            </div>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              คุณต้องการลบ <strong>{tableToDelete.title}</strong> ออกจากระบบใช่หรือไม่?
-            </p>
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setTableToDelete(null)}
-                className="px-3.5 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-xl"
-              >
-                ยกเลิก
-              </button>
-              <button
-                type="button"
-                onClick={() => handleDeleteTableConfirm(tableToDelete.id)}
-                className="px-4 py-1.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl"
-              >
-                ยืนยันลบตาราง
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDeleteModal
+        isOpen={Boolean(tableToDelete)}
+        title="ยืนยันการลบตารางประเมิน"
+        categoryLabel="ประเมิน 3 เล่ม"
+        itemTitle={tableToDelete?.title || ''}
+        itemSubtitle="ข้อมูลตารางและคะแนนในตารางนี้จะถูกลบออก"
+        confirmLabel="ยืนยันลบตาราง"
+        onCancel={() => setTableToDelete(null)}
+        onConfirm={() => {
+          if (tableToDelete) {
+            handleDeleteTableConfirm(tableToDelete.id);
+          }
+        }}
+      />
 
       {/* 5. Modal: Delete Column Confirmation */}
-      {columnToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4 animate-in fade-in">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center gap-2.5 text-rose-600">
-              <Trash2 className="w-5 h-5" />
-              <h3 className="text-sm font-bold">ยืนยันการลบช่องคะแนน</h3>
-            </div>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              คุณต้องการลบช่อง <strong>{columnToDelete.indicator.name}</strong> ออกใช่หรือไม่?
-            </p>
-            <div className="flex justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setColumnToDelete(null)}
-                className="px-3.5 py-1.5 text-xs text-slate-600 hover:bg-slate-100 rounded-xl"
-              >
-                ยกเลิก
-              </button>
-              <button
-                type="button"
-                onClick={() => handleDeleteColumnConfirm(columnToDelete.tableId, columnToDelete.indicator.id)}
-                className="px-4 py-1.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl"
-              >
-                ยืนยันลบช่อง
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDeleteModal
+        isOpen={Boolean(columnToDelete)}
+        title="ยืนยันการลบช่องคะแนน"
+        categoryLabel="ช่องคะแนนประเมิน"
+        itemTitle={columnToDelete?.indicator.name || ''}
+        itemSubtitle="ระบบจะคำนวณเฉลี่ยคะแนนช่องที่เหลือใหม่อัตโนมัติ"
+        confirmLabel="ยืนยันลบช่อง"
+        onCancel={() => setColumnToDelete(null)}
+        onConfirm={() => {
+          if (columnToDelete) {
+            handleDeleteColumnConfirm(columnToDelete.tableId, columnToDelete.indicator.id);
+          }
+        }}
+      />
 
       {/* 6. Modal: Edit Grading Thresholds (Admin) */}
       {isThresholdModalOpen && (

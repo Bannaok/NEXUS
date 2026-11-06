@@ -2380,58 +2380,53 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
           : students.length;
 
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-            <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-md w-full p-6 space-y-4 animate-in zoom-in-95 duration-150">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                <div className="flex items-center gap-2 text-rose-600 font-bold text-sm">
-                  <Trash2 className="w-5 h-5" />
-                  <h3>ยืนยันการลบข้อมูลน้ำหนัก/ส่วนสูง</h3>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setSessionToDelete(null)}
-                  className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
-                >
-                  <X className="w-5 h-5" />
-                </button>
+          <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+            <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-sm w-full p-6 space-y-4 text-center animate-in zoom-in-95 duration-150">
+              <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center mx-auto shadow-2xs">
+                <Trash2 className="w-5 h-5 text-rose-600" />
               </div>
 
-              <div className="bg-rose-50/70 border border-rose-100 p-3 rounded-2xl space-y-1">
-                <p className="text-xs font-bold text-rose-950">
-                  รายการวันที่: <span className="font-black text-rose-700">{formatThaiDate(sessDate)}</span>
+              <div className="space-y-1">
+                <h3 className="text-base font-extrabold text-slate-800">ยืนยันการลบข้อมูลน้ำหนัก/ส่วนสูง</h3>
+                <p className="text-xs text-slate-500">กรุณาตรวจสอบข้อมูลก่อนยืนยันการลบ</p>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200/90 p-3.5 rounded-2xl text-left space-y-1">
+                <span className="inline-block text-[10px] font-bold text-rose-700 bg-rose-100/80 px-2 py-0.5 rounded-md">
+                  บันทึกน้ำหนักและส่วนสูง
+                </span>
+                <p className="text-xs font-bold text-slate-900">
+                  วันที่ {formatThaiDate(sessDate)}
                 </p>
-                <p className="text-[11px] text-rose-800">
+                <p className="text-[11px] text-slate-600">
                   {currentTargetGrade 
-                    ? `ระดับชั้น: ชั้น ${currentTargetGrade} (${targetStudentsCount} คน)` 
-                    : `ระดับชั้นที่เลือก: ทุกระดับชั้น (${students.length} คน)`}
+                    ? `ชั้น ${currentTargetGrade} (${targetStudentsCount} คน)` 
+                    : `ทุกระดับชั้น (${students.length} คน)`}
                 </p>
               </div>
 
               {isMember ? (() => {
                 const activeGrade = currentTargetGrade || memberGrade;
                 return (
-                  /* Member UI: Strictly delete only homeroom class, no option to delete all grade levels */
                   <div className="space-y-3">
-                    <p className="text-xs font-semibold text-slate-700 leading-relaxed">
-                      คุณต้องการลบข้อมูลน้ำหนักและส่วนสูงของนักเรียน <strong className="text-rose-700">ชั้น {activeGrade}</strong> ในรายการวันที่ <strong>{formatThaiDate(sessDate)}</strong> ใช่หรือไม่?
+                    <p className="text-[11px] text-rose-600 font-semibold leading-relaxed">
+                      * ล้างข้อมูลเฉพาะชั้น {activeGrade} ของคุณ (ระดับชั้นอื่นยังคงเดิม)
                     </p>
-                    <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl text-[11px] text-amber-800 font-medium">
-                      ⚠️ การลบนี้จะล้างข้อมูลน้ำหนักและส่วนสูงเฉพาะนักเรียนชั้น {activeGrade} ของคุณเท่านั้น (ข้อมูลระดับชั้นอื่นยังคงเดิม)
-                    </div>
-                    <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                    <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-slate-100">
                       <button
                         type="button"
                         onClick={() => setSessionToDelete(null)}
-                        className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+                        className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
                       >
                         ยกเลิก
                       </button>
                       <button
                         type="button"
                         onClick={() => handleDeleteGradeRecords(sessDate, activeGrade)}
-                        className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs cursor-pointer active:scale-95"
+                        className="py-2.5 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer flex items-center justify-center gap-1.5 active:scale-95"
                       >
-                        ยืนยันลบข้อมูลชั้น {activeGrade}
+                        <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                        <span>ยืนยันการลบ</span>
                       </button>
                     </div>
                   </div>
@@ -2439,45 +2434,44 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
               })() : currentTargetGrade ? (() => {
                 const activeGrade = currentTargetGrade;
                 return (
-                  /* Admin UI with specific grade selected */
-                  <div className="space-y-3">
-                    <p className="text-xs text-slate-600 leading-relaxed">
-                      คุณกำลังเลือกชั้น <strong>{activeGrade}</strong> กรุณาเลือกว่าต้องการลบข้อมูลเฉพาะชั้นนี้ หรือต้องการลบรายการออกทั้งรายการ:
+                  <div className="space-y-2.5 text-left">
+                    <p className="text-[11px] text-slate-600 font-semibold text-center">
+                      เลือกรูปแบบการลบข้อมูล:
                     </p>
                     <div className="space-y-2">
                       <button
                         type="button"
                         onClick={() => handleDeleteGradeRecords(sessDate, activeGrade)}
-                        className="w-full text-left p-3 rounded-xl border border-amber-200 bg-amber-50/70 hover:bg-amber-100 transition-all cursor-pointer group"
+                        className="w-full text-left p-3 rounded-xl border border-amber-200 bg-amber-50/70 hover:bg-amber-100 transition-all cursor-pointer"
                       >
-                        <div className="text-xs font-bold text-amber-950 group-hover:text-amber-900 flex items-center justify-between">
-                          <span>1. ลบข้อมูลเฉพาะชั้น {activeGrade}</span>
+                        <div className="text-xs font-bold text-amber-950 flex items-center justify-between">
+                          <span>1. ลบเฉพาะชั้น {activeGrade}</span>
                           <span className="text-[10px] bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded font-black">เฉพาะชั้น</span>
                         </div>
-                        <p className="text-[11px] text-amber-800 mt-1">
-                          ล้างค่าน้ำหนักและส่วนสูงของนักเรียนชั้น {activeGrade} ในวันที่นี้ (ข้อมูลระดับชั้นอื่นยังคงอยู่)
+                        <p className="text-[11px] text-amber-800 mt-0.5">
+                          ล้างค่าเฉพาะชั้น {activeGrade} (ชั้นอื่นคงเดิม)
                         </p>
                       </button>
 
                       <button
                         type="button"
                         onClick={() => handleDeleteSessionConfirm(sessionToDelete.id)}
-                        className="w-full text-left p-3 rounded-xl border border-rose-200 bg-rose-50/70 hover:bg-rose-100 transition-all cursor-pointer group"
+                        className="w-full text-left p-3 rounded-xl border border-rose-200 bg-rose-50/70 hover:bg-rose-100 transition-all cursor-pointer"
                       >
-                        <div className="text-xs font-bold text-rose-950 group-hover:text-rose-900 flex items-center justify-between">
+                        <div className="text-xs font-bold text-rose-950 flex items-center justify-between">
                           <span>2. ลบทั้งรายการ (ทุกระดับชั้น)</span>
                           <span className="text-[10px] bg-rose-200 text-rose-900 px-1.5 py-0.5 rounded font-black">ทั้งรายการ</span>
                         </div>
-                        <p className="text-[11px] text-rose-800 mt-1">
-                          ลบรายการวันที่ {formatThaiDate(sessDate)} ออกจากระบบทั้งหมด
+                        <p className="text-[11px] text-rose-800 mt-0.5">
+                          ลบรายการวันที่ {formatThaiDate(sessDate)} ทั้งหมด
                         </p>
                       </button>
                     </div>
-                    <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                    <div className="pt-2 border-t border-slate-100">
                       <button
                         type="button"
                         onClick={() => setSessionToDelete(null)}
-                        className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+                        className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
                       >
                         ยกเลิก
                       </button>
@@ -2485,25 +2479,25 @@ export const Module1ClassroomAdmin: React.FC<Module1Props> = ({
                   </div>
                 );
               })() : (
-                /* Admin UI with ALL grades selected */
                 <div className="space-y-3">
-                  <p className="text-xs text-slate-600 leading-relaxed">
-                    คุณต้องการลบรายการบันทึกวันที่ <strong>{formatThaiDate(sessDate)}</strong> ออกจากระบบทั้งหมด (ทุกระดับชั้น) ใช่หรือไม่?
+                  <p className="text-[11px] text-rose-600 font-semibold leading-relaxed">
+                    * เมื่อลบแล้วจะไม่สามารถกู้คืนข้อมูลของวันนี้ได้
                   </p>
-                  <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                  <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-slate-100">
                     <button
                       type="button"
                       onClick={() => setSessionToDelete(null)}
-                      className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+                      className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
                     >
                       ยกเลิก
                     </button>
                     <button
                       type="button"
                       onClick={() => handleDeleteSessionConfirm(sessionToDelete.id)}
-                      className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs cursor-pointer active:scale-95"
+                      className="py-2.5 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold shadow-xs cursor-pointer flex items-center justify-center gap-1.5 active:scale-95"
                     >
-                      ยืนยันลบรายการ (ทุกระดับชั้น)
+                      <Trash2 className="w-3.5 h-3.5 shrink-0" />
+                      <span>ยืนยันการลบ</span>
                     </button>
                   </div>
                 </div>

@@ -36,6 +36,7 @@ import {
   isPdfFile
 } from '../services/fileDownloadHelper';
 import { StorageService } from '../services/storage';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 interface Module4Props {
   user: UserSession;
@@ -71,7 +72,7 @@ export const Module4Assignments: React.FC<Module4Props> = ({
 
   // Confirmation modal state for deleting tasks/announcements/submissions
   const [confirmDeleteModal, setConfirmDeleteModal] = useState<{
-    type: 'task' | 'submission';
+    type: 'task' | 'submission' | 'member_file';
     id: string;
     title: string;
     isAnnouncement?: boolean;
@@ -2364,7 +2365,13 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                       </span>
                       <button
                         type="button"
-                        onClick={() => handleMemberRemoveOldFile(currentTask!.id)}
+                        onClick={() =>
+                          setConfirmDeleteModal({
+                            type: 'member_file',
+                            id: currentTask!.id,
+                            title: `ไฟล์ที่ส่งทั้งหมด (${mySubs.length} ไฟล์) ของงาน "${currentTask!.title}"`
+                          })
+                        }
                         className="text-[11px] font-bold text-rose-600 hover:text-rose-800 inline-flex items-center gap-1 cursor-pointer"
                         title="ลบไฟล์ที่ส่งไว้แล้วทั้งหมด"
                       >
@@ -2429,7 +2436,14 @@ export const Module4Assignments: React.FC<Module4Props> = ({
                               {/* ลบเฉพาะไฟล์นี้ */}
                               <button
                                 type="button"
-                                onClick={() => handleMemberRemoveOldFile(currentTask!.id, sub.fileName)}
+                                onClick={() =>
+                                  setConfirmDeleteModal({
+                                    type: 'member_file',
+                                    id: currentTask!.id,
+                                    title: sub.fileName,
+                                    fileName: sub.fileName
+                                  })
+                                }
                                 className="p-1 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 rounded-lg transition-colors cursor-pointer"
                                 title="ลบเฉพาะไฟล์นี้"
                               >
@@ -2867,69 +2881,57 @@ export const Module4Assignments: React.FC<Module4Props> = ({
       )}
 
       {/* MODAL: ยืนยันการลบ (ถามยืนยันทุกครั้งเมื่อกดลบ) */}
-      {confirmDeleteModal && (
-        <div className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">
-          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-sm p-6 space-y-4 animate-in zoom-in-95 text-center">
-            <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center mx-auto">
-              <Trash2 className="w-6 h-6" />
-            </div>
-
-            <div className="space-y-1.5">
-              <h3 className="text-base font-bold text-slate-800">
-                {confirmDeleteModal.type === 'submission'
-                  ? 'ยืนยันการลบงานที่ส่ง'
-                  : confirmDeleteModal.isAnnouncement
-                  ? 'ยืนยันการลบประกาศ'
-                  : 'ยืนยันการลบงานมอบหมาย'}
-              </h3>
-              <p className="text-xs text-slate-600 leading-relaxed break-words">
-                คุณต้องการลบ <span className="font-bold text-slate-800">"{confirmDeleteModal.title}"</span> ใช่หรือไม่?
-              </p>
-              <p className="text-[11px] text-rose-600 font-medium">
-                เมื่อลบแล้วจะไม่สามารถกู้คืนข้อมูลได้
-              </p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2.5 pt-2">
-              <button
-                type="button"
-                onClick={() => setConfirmDeleteModal(null)}
-                className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-              >
-                ยกเลิก
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (confirmDeleteModal.type === 'submission' && (confirmDeleteModal.memberId || confirmDeleteModal.memberName)) {
-                    handleDeleteMemberSubmission(
-                      confirmDeleteModal.id,
-                      confirmDeleteModal.memberId || '',
-                      confirmDeleteModal.memberName,
-                      confirmDeleteModal.fileName
-                    );
-                  } else {
-                    onDeleteTask(confirmDeleteModal.id);
-                    if (selectedTaskDetailModal?.id === confirmDeleteModal.id) {
-                      setSelectedTaskDetailModal(null);
-                    }
-                    onShowToast(
-                      'info',
-                      confirmDeleteModal.isAnnouncement ? 'ลบประกาศสำเร็จ' : 'ลบรายการสำเร็จ',
-                      `ลบ "${confirmDeleteModal.title}" เรียบร้อยแล้ว`
-                    );
-                  }
-                  setConfirmDeleteModal(null);
-                }}
-                className="py-2.5 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-colors shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>ยืนยันการลบ</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDeleteModal
+        isOpen={Boolean(confirmDeleteModal)}
+        title={
+          confirmDeleteModal?.type === 'submission' || confirmDeleteModal?.type === 'member_file'
+            ? 'ยืนยันการลบไฟล์งานที่ส่ง'
+            : confirmDeleteModal?.isAnnouncement
+            ? 'ยืนยันการลบประกาศ'
+            : 'ยืนยันการลบงานมอบหมาย'
+        }
+        categoryLabel={
+          confirmDeleteModal?.type === 'submission' || confirmDeleteModal?.type === 'member_file'
+            ? 'ไฟล์งานที่ส่ง'
+            : confirmDeleteModal?.isAnnouncement
+            ? 'ประกาศแจ้ง'
+            : 'งานมอบหมาย'
+        }
+        itemTitle={confirmDeleteModal?.title || ''}
+        itemSubtitle={
+          confirmDeleteModal?.memberName
+            ? `ผู้ส่ง: ${confirmDeleteModal.memberName}`
+            : undefined
+        }
+        onCancel={() => setConfirmDeleteModal(null)}
+        onConfirm={() => {
+          if (!confirmDeleteModal) return;
+          if (confirmDeleteModal.type === 'member_file') {
+            handleMemberRemoveOldFile(confirmDeleteModal.id, confirmDeleteModal.fileName);
+          } else if (
+            confirmDeleteModal.type === 'submission' &&
+            (confirmDeleteModal.memberId || confirmDeleteModal.memberName)
+          ) {
+            handleDeleteMemberSubmission(
+              confirmDeleteModal.id,
+              confirmDeleteModal.memberId || '',
+              confirmDeleteModal.memberName,
+              confirmDeleteModal.fileName
+            );
+          } else {
+            onDeleteTask(confirmDeleteModal.id);
+            if (selectedTaskDetailModal?.id === confirmDeleteModal.id) {
+              setSelectedTaskDetailModal(null);
+            }
+            onShowToast(
+              'info',
+              confirmDeleteModal.isAnnouncement ? 'ลบประกาศสำเร็จ' : 'ลบรายการสำเร็จ',
+              `ลบ "${confirmDeleteModal.title}" เรียบร้อยแล้ว`
+            );
+          }
+          setConfirmDeleteModal(null);
+        }}
+      />
     </div>
   );
 };

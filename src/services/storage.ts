@@ -95,7 +95,9 @@ const GLOBAL_KEYS = new Set<string>([
   'ams_deleted_submission_keys',
   'ams_deleted_doc_ids',
   'ams_deleted_leave_ids',
-  'ams_deleted_duty_log_ids'
+  'ams_deleted_duty_log_ids',
+  'ams_deleted_admin_ids',
+  'ams_deleted_member_ids'
 ]);
 
 // Keys that must be strictly isolated per School (Multi-Tenant Data Isolation)
@@ -371,6 +373,10 @@ const nativeSetItem: ((key: string, value: string) => void) | null =
 const nativeGetItem: ((key: string) => string | null) | null =
   typeof window !== 'undefined' && window.localStorage
     ? window.localStorage.getItem.bind(window.localStorage)
+    : null;
+const nativeRemoveItem: ((key: string) => void) | null =
+  typeof window !== 'undefined' && window.localStorage
+    ? window.localStorage.removeItem.bind(window.localStorage)
     : null;
 
 function notifySubscribers(changedKeys: string[]) {
@@ -789,6 +795,8 @@ const deletedDocIdsSet = new Set<string>();
 const deletedLeaveIdsSet = new Set<string>();
 const deletedDutyLogIdsSet = new Set<string>();
 const deletedSubjectIdsSet = new Set<string>();
+const deletedAdminIdsSet = new Set<string>();
+const deletedMemberIdsSet = new Set<string>();
 
 if (typeof window !== 'undefined') {
   try {
@@ -866,6 +874,32 @@ if (typeof window !== 'undefined') {
           if (strId && !strId.startsWith('subkey:') && !strId.startsWith('subcode:')) {
             deletedSubjectIdsSet.add(strId);
           }
+        });
+      }
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    const rawAdmins = localStorage.getItem('ams_deleted_admin_ids');
+    if (rawAdmins) {
+      const arr = JSON.parse(rawAdmins);
+      if (Array.isArray(arr)) {
+        arr.forEach(id => {
+          if (id) deletedAdminIdsSet.add(String(id));
+        });
+      }
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    const rawMembers = localStorage.getItem('ams_deleted_member_ids');
+    if (rawMembers) {
+      const arr = JSON.parse(rawMembers);
+      if (Array.isArray(arr)) {
+        arr.forEach(id => {
+          if (id) deletedMemberIdsSet.add(String(id));
         });
       }
     }
@@ -992,10 +1026,10 @@ function mergeAdminListsClient(
 ): SchoolAdminAccount[] {
   const cleanLocal = (Array.isArray(localList) ? localList : [])
     .map(normalizeAdminAccountClient)
-    .filter((a): a is SchoolAdminAccount => Boolean(a));
+    .filter((a): a is SchoolAdminAccount => Boolean(a) && !deletedAdminIdsSet.has(String(a!.id)));
   const cleanIncoming = (Array.isArray(incomingList) ? incomingList : [])
     .map(normalizeAdminAccountClient)
-    .filter((a): a is SchoolAdminAccount => Boolean(a));
+    .filter((a): a is SchoolAdminAccount => Boolean(a) && !deletedAdminIdsSet.has(String(a!.id)));
 
   if (cleanIncoming.length === 0) return cleanLocal;
   if (cleanLocal.length === 0) return cleanIncoming;
@@ -1057,10 +1091,22 @@ function mergeMemberListsClient(
 ): MemberAccount[] {
   const cleanLocal = (Array.isArray(localList) ? localList : [])
     .map(normalizeMemberAccountClient)
-    .filter((m): m is MemberAccount => Boolean(m) && m!.username.toLowerCase() !== 'admin');
+    .filter(
+      (m): m is MemberAccount =>
+        Boolean(m) &&
+        m!.username.toLowerCase() !== 'admin' &&
+        !deletedMemberIdsSet.has(String(m!.id)) &&
+        (!m!.schoolId || !deletedAdminIdsSet.has(String(m!.schoolId)))
+    );
   const cleanIncoming = (Array.isArray(incomingList) ? incomingList : [])
     .map(normalizeMemberAccountClient)
-    .filter((m): m is MemberAccount => Boolean(m) && m!.username.toLowerCase() !== 'admin');
+    .filter(
+      (m): m is MemberAccount =>
+        Boolean(m) &&
+        m!.username.toLowerCase() !== 'admin' &&
+        !deletedMemberIdsSet.has(String(m!.id)) &&
+        (!m!.schoolId || !deletedAdminIdsSet.has(String(m!.schoolId)))
+    );
 
   if (cleanIncoming.length === 0) return cleanLocal;
   if (cleanLocal.length === 0) return cleanIncoming;
@@ -1486,14 +1532,26 @@ function isDutyLogStorageKey(key: string): boolean {
   return key === KEYS.DUTY_LOGS || key.startsWith(`${KEYS.DUTY_LOGS}__`);
 }
 
+function sortDutyLogsDescendingClient(list: any[]): any[] {
+  return [...list].sort(
+    (a, b) =>
+      String(b?.date || '').localeCompare(String(a?.date || '')) ||
+      String(b?.createdAt || '').localeCompare(String(a?.createdAt || ''))
+  );
+}
+
 function mergeDutyLogListsClient(localList: any[], incomingList: any[], preferIncoming = true): any[] {
   if (!Array.isArray(incomingList)) {
     return Array.isArray(localList)
-      ? localList.filter(d => d && d.id && !deletedDutyLogIdsSet.has(String(d.id)))
+      ? sortDutyLogsDescendingClient(
+          localList.filter(d => d && d.id && !deletedDutyLogIdsSet.has(String(d.id)))
+        )
       : [];
   }
   if (!Array.isArray(localList) || localList.length === 0) {
-    return incomingList.filter(d => d && d.id && !deletedDutyLogIdsSet.has(String(d.id)));
+    return sortDutyLogsDescendingClient(
+      incomingList.filter(d => d && d.id && !deletedDutyLogIdsSet.has(String(d.id)))
+    );
   }
 
   const localMap = new Map<string, any>();
@@ -1544,7 +1602,7 @@ function mergeDutyLogListsClient(localList: any[], incomingList: any[], preferIn
     }
   }
 
-  return result;
+  return sortDutyLogsDescendingClient(result);
 }
 
 let lastDirectCloudPullTime = 0;
@@ -1784,6 +1842,40 @@ function applyIncomingUpdates(
           }
         }
       }
+    } else if (resolvedKey === 'ams_deleted_admin_ids' && Array.isArray(value)) {
+      let changedAdminTombstones = false;
+      for (const aId of value) {
+        if (aId && !deletedAdminIdsSet.has(String(aId))) {
+          deletedAdminIdsSet.add(String(aId));
+          changedAdminTombstones = true;
+        }
+      }
+      if (changedAdminTombstones && typeof window !== 'undefined') {
+        try {
+          if (nativeSetItem) {
+            nativeSetItem('ams_deleted_admin_ids', JSON.stringify(Array.from(deletedAdminIdsSet).slice(-1000)));
+          }
+        } catch {
+          // ignore
+        }
+      }
+    } else if (resolvedKey === 'ams_deleted_member_ids' && Array.isArray(value)) {
+      let changedMemberTombstones = false;
+      for (const mId of value) {
+        if (mId && !deletedMemberIdsSet.has(String(mId))) {
+          deletedMemberIdsSet.add(String(mId));
+          changedMemberTombstones = true;
+        }
+      }
+      if (changedMemberTombstones && typeof window !== 'undefined') {
+        try {
+          if (nativeSetItem) {
+            nativeSetItem('ams_deleted_member_ids', JSON.stringify(Array.from(deletedMemberIdsSet).slice(-2000)));
+          }
+        } catch {
+          // ignore
+        }
+      }
     } else if (isTaskStorageKey(resolvedKey) && Array.isArray(value)) {
       // Protect recent local task saves from stale background polls unless incomingTs is strictly newer
       if (!fromStorageEvent && now - lastLocalWrite < 12000 && incomingTs <= localTs) {
@@ -1838,7 +1930,9 @@ function applyIncomingUpdates(
         if (Array.isArray(currentCachedDutyLogs)) {
           value = mergeDutyLogListsClient(currentCachedDutyLogs, value, incomingTs >= localTs && localTs > 0 ? true : localTs === 0);
         } else {
-          value = value.filter(d => d && d.id && !deletedDutyLogIdsSet.has(String(d.id)));
+          value = sortDutyLogsDescendingClient(
+            value.filter(d => d && d.id && !deletedDutyLogIdsSet.has(String(d.id)))
+          );
         }
       }
     } else if (isSubjectStorageKey(resolvedKey) && Array.isArray(value)) {
@@ -1861,7 +1955,9 @@ function applyIncomingUpdates(
       if (Array.isArray(currentCachedAdmins)) {
         value = mergeAdminListsClient(currentCachedAdmins, value, preferInc);
       } else {
-        value = value.map(normalizeAdminAccountClient).filter(Boolean);
+        value = value
+          .map(normalizeAdminAccountClient)
+          .filter((a): a is SchoolAdminAccount => Boolean(a) && !deletedAdminIdsSet.has(String(a!.id)));
       }
     } else if (resolvedKey === KEYS.MEMBERS && Array.isArray(value)) {
       const currentCachedMembers = memoryCache.get(resolvedKey);
@@ -1871,7 +1967,13 @@ function applyIncomingUpdates(
       } else {
         value = value
           .map(normalizeMemberAccountClient)
-          .filter((m): m is MemberAccount => Boolean(m) && m!.username.toLowerCase() !== 'admin');
+          .filter(
+            (m): m is MemberAccount =>
+              Boolean(m) &&
+              m!.username.toLowerCase() !== 'admin' &&
+              !deletedMemberIdsSet.has(String(m!.id)) &&
+              (!m!.schoolId || !deletedAdminIdsSet.has(String(m!.schoolId)))
+          );
       }
     } else if (resolvedKey === KEYS.DEVELOPER_ACCOUNT && value && typeof value === 'object') {
       if (!forceAcceptAccounts && !fromStorageEvent && now - lastLocalWrite < 12000 && incomingTs <= localTs) {
@@ -2134,6 +2236,27 @@ function installLocalStorageSyncHook() {
         nativeSetItem(resolvedKey, value);
       }
     };
+
+    if (nativeRemoveItem) {
+      window.localStorage.removeItem = function (key: string) {
+        if (!key) return;
+        const resolvedKey = resolveTenantKey(key);
+        memoryCache.delete(key);
+        memoryCache.delete(resolvedKey);
+        serializedMemoryCache.delete(key);
+        serializedMemoryCache.delete(resolvedKey);
+        pendingDiskWrites.delete(key);
+        pendingDiskWrites.delete(resolvedKey);
+        try {
+          nativeRemoveItem(key);
+          if (resolvedKey !== key) {
+            nativeRemoveItem(resolvedKey);
+          }
+        } catch {
+          // ignore
+        }
+      };
+    }
   } catch {
     // ignore if localStorage methods are non-writable in restricted webviews
   }
@@ -2730,10 +2853,21 @@ export const StorageService = {
 
   // School Admins (Level 2: Multiple Admins for Multi-Schools)
   getAdmins(): SchoolAdminAccount[] {
-    return getLocal<SchoolAdminAccount[]>(KEYS.ADMINS, INITIAL_ADMINS);
+    const list = getLocal<SchoolAdminAccount[]>(KEYS.ADMINS, INITIAL_ADMINS);
+    if (!Array.isArray(list)) return [];
+    if (deletedAdminIdsSet.size === 0) return list;
+    return list.filter(a => a && a.id && !deletedAdminIdsSet.has(String(a.id)));
   },
 
   saveAdmin(admin: SchoolAdminAccount): SchoolAdminAccount[] {
+    if (admin && admin.id && deletedAdminIdsSet.has(String(admin.id))) {
+      deletedAdminIdsSet.delete(String(admin.id));
+      if (typeof window !== 'undefined' && nativeSetItem) {
+        try {
+          nativeSetItem('ams_deleted_admin_ids', JSON.stringify(Array.from(deletedAdminIdsSet).slice(-1000)));
+        } catch {}
+      }
+    }
     const list = this.getAdmins();
     const idx = list.findIndex(a => a.id === admin.id || a.username.toLowerCase() === admin.username.toLowerCase());
     let mergedAdmin = admin;
@@ -2784,6 +2918,16 @@ export const StorageService = {
   },
 
   deleteAdmin(id: string): SchoolAdminAccount[] {
+    const cleanAdminId = String(id || '').trim();
+    if (cleanAdminId) {
+      deletedAdminIdsSet.add(cleanAdminId);
+      if (typeof window !== 'undefined' && nativeSetItem) {
+        try {
+          nativeSetItem('ams_deleted_admin_ids', JSON.stringify(Array.from(deletedAdminIdsSet).slice(-1000)));
+        } catch {}
+      }
+      pushToRemoteServer('ams_deleted_admin_ids', Array.from(deletedAdminIdsSet).slice(-1000), Date.now());
+    }
     const currentAdmins = this.getAdmins();
     const targetAdmin = currentAdmins.find(a => a.id === id);
     const updated = currentAdmins.filter(a => a.id !== id);
@@ -2794,6 +2938,17 @@ export const StorageService = {
     const deletedMembers = currentMembers.filter(
       m => m.schoolId === id || (targetAdmin && m.schoolName === targetAdmin.schoolName)
     );
+    if (deletedMembers.length > 0) {
+      deletedMembers.forEach(dm => {
+        if (dm && dm.id) deletedMemberIdsSet.add(String(dm.id));
+      });
+      if (typeof window !== 'undefined' && nativeSetItem) {
+        try {
+          nativeSetItem('ams_deleted_member_ids', JSON.stringify(Array.from(deletedMemberIdsSet).slice(-2000)));
+        } catch {}
+      }
+      pushToRemoteServer('ams_deleted_member_ids', Array.from(deletedMemberIdsSet).slice(-2000), Date.now());
+    }
     const remainingMembers = currentMembers.filter(
       m => m.schoolId !== id && (!targetAdmin || m.schoolName !== targetAdmin.schoolName)
     );
@@ -2829,6 +2984,8 @@ export const StorageService = {
 
       for (const tKey of deletedTenantKeys) {
         memoryCache.delete(tKey);
+        serializedMemoryCache.delete(tKey);
+        pendingDiskWrites.delete(tKey);
         keyTimestamps.set(tKey, now);
         try {
           window.localStorage.removeItem(tKey);
@@ -3155,7 +3312,16 @@ export const StorageService = {
 
   // Members
   getMembers(): MemberAccount[] {
-    const list = getLocal<MemberAccount[]>(KEYS.MEMBERS, INITIAL_MEMBERS);
+    const rawList = getLocal<MemberAccount[]>(KEYS.MEMBERS, INITIAL_MEMBERS);
+    const list = Array.isArray(rawList)
+      ? rawList.filter(
+          m =>
+            m &&
+            m.id &&
+            !deletedMemberIdsSet.has(String(m.id)) &&
+            (!m.schoolId || !deletedAdminIdsSet.has(String(m.schoolId)))
+        )
+      : [];
     const admins = this.getAdmins();
     return list.map(m => {
       const normId = normalizeSchoolId(m.schoolId, m.schoolName, admins);
@@ -3169,6 +3335,14 @@ export const StorageService = {
   },
 
   saveMember(member: MemberAccount): MemberAccount[] {
+    if (member && member.id && deletedMemberIdsSet.has(String(member.id))) {
+      deletedMemberIdsSet.delete(String(member.id));
+      if (typeof window !== 'undefined' && nativeSetItem) {
+        try {
+          nativeSetItem('ams_deleted_member_ids', JSON.stringify(Array.from(deletedMemberIdsSet).slice(-2000)));
+        } catch {}
+      }
+    }
     const admins = this.getAdmins();
     const normSchoolId = normalizeSchoolId(member.schoolId, member.schoolName, admins);
     const matchedAdmin = admins.find(a => a.id === normSchoolId);
@@ -3217,6 +3391,16 @@ export const StorageService = {
   },
 
   deleteMember(id: string): MemberAccount[] {
+    const cleanMemId = String(id || '').trim();
+    if (cleanMemId) {
+      deletedMemberIdsSet.add(cleanMemId);
+      if (typeof window !== 'undefined' && nativeSetItem) {
+        try {
+          nativeSetItem('ams_deleted_member_ids', JSON.stringify(Array.from(deletedMemberIdsSet).slice(-2000)));
+        } catch {}
+      }
+      pushToRemoteServer('ams_deleted_member_ids', Array.from(deletedMemberIdsSet).slice(-2000), Date.now());
+    }
     const currentList = this.getMembers();
     const targetMember = currentList.find(m => m.id === id);
     const updated = currentList.filter(m => m.id !== id);
@@ -5110,6 +5294,8 @@ export const StorageService = {
         // Delete keys whose name explicitly embeds the deleted academic year (e.g. pp6_2568, ams_cleared_1_2568)
         if (storageKey.includes(targetYear)) {
           memoryCache.delete(storageKey);
+          serializedMemoryCache.delete(storageKey);
+          pendingDiskWrites.delete(storageKey);
           keyTimestamps.set(storageKey, now);
           try {
             window.localStorage.removeItem(storageKey);
@@ -5128,10 +5314,12 @@ export const StorageService = {
 
           if (baseKey === KEYS.SCHOOL_INFO && typeof cachedVal === 'object' && cachedVal.academicYear === targetYear) {
             const updatedInfo = { ...cachedVal, academicYear: fallbackYear };
+            const updatedInfoStr = JSON.stringify(updatedInfo);
             memoryCache.set(storageKey, updatedInfo);
+            serializedMemoryCache.set(storageKey, updatedInfoStr);
             keyTimestamps.set(storageKey, now);
             try {
-              if (nativeSetItem) nativeSetItem(storageKey, JSON.stringify(updatedInfo));
+              if (nativeSetItem) nativeSetItem(storageKey, updatedInfoStr);
             } catch {}
             pushToRemoteServer(storageKey, updatedInfo, now);
             continue;
@@ -5141,10 +5329,12 @@ export const StorageService = {
             cachedVal.filter(isItemInYear).forEach(collectFilesFromItem);
             const filtered = cachedVal.filter(item => !isItemInYear(item));
             if (filtered.length !== cachedVal.length) {
+              const filteredStr = JSON.stringify(filtered);
               memoryCache.set(storageKey, filtered);
+              serializedMemoryCache.set(storageKey, filteredStr);
               keyTimestamps.set(storageKey, now);
               try {
-                if (nativeSetItem) nativeSetItem(storageKey, JSON.stringify(filtered));
+                if (nativeSetItem) nativeSetItem(storageKey, filteredStr);
               } catch {}
               pushToRemoteServer(storageKey, filtered, now);
             }
@@ -5159,10 +5349,12 @@ export const StorageService = {
               }
             }
             if (objChanged) {
+              const nextObjStr = JSON.stringify(nextObj);
               memoryCache.set(storageKey, nextObj);
+              serializedMemoryCache.set(storageKey, nextObjStr);
               keyTimestamps.set(storageKey, now);
               try {
-                if (nativeSetItem) nativeSetItem(storageKey, JSON.stringify(nextObj));
+                if (nativeSetItem) nativeSetItem(storageKey, nextObjStr);
               } catch {}
               pushToRemoteServer(storageKey, nextObj, now);
             }
@@ -5310,6 +5502,8 @@ export const StorageService = {
   resetAllData(): void {
     localStorage.clear();
     memoryCache.clear();
+    serializedMemoryCache.clear();
+    pendingDiskWrites.clear();
     keyTimestamps.clear();
     setLocal(KEYS.ADMINS, INITIAL_ADMINS);
     setLocal(KEYS.SCHOOL_INFO, INITIAL_SCHOOL_INFO);
@@ -5850,13 +6044,18 @@ export const StorageService = {
   getDailyDutyLogs(fallback: any[] = []): any[] {
     const list = getLocal<any[]>(KEYS.DUTY_LOGS, fallback);
     if (!Array.isArray(list)) return [];
-    if (deletedDutyLogIdsSet.size === 0) return list;
-    return list.filter(r => r && r.id && !deletedDutyLogIdsSet.has(String(r.id)));
+    const filtered =
+      deletedDutyLogIdsSet.size === 0
+        ? list
+        : list.filter(r => r && r.id && !deletedDutyLogIdsSet.has(String(r.id)));
+    return sortDutyLogsDescendingClient(filtered);
   },
 
   setDailyDutyLogs(records: any[]): any[] {
     const cleaned = Array.isArray(records)
-      ? records.filter(r => r && r.id && !deletedDutyLogIdsSet.has(String(r.id)))
+      ? sortDutyLogsDescendingClient(
+          records.filter(r => r && r.id && !deletedDutyLogIdsSet.has(String(r.id)))
+        )
       : [];
     setLocal(KEYS.DUTY_LOGS, cleaned);
     return cleaned;
@@ -5875,7 +6074,9 @@ export const StorageService = {
     }
     const list = this.getDailyDutyLogs();
     const idx = list.findIndex(r => String(r.id) === cleanId);
-    const updated = idx >= 0 ? list.map(r => String(r.id) === cleanId ? record : r) : [record, ...list];
+    const updated = sortDutyLogsDescendingClient(
+      idx >= 0 ? list.map(r => (String(r.id) === cleanId ? record : r)) : [record, ...list]
+    );
     setLocal(KEYS.DUTY_LOGS, updated);
     this.syncPostToGoogle('saveDutyLog', { record });
     return updated;

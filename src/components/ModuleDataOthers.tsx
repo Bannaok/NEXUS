@@ -9,6 +9,7 @@ import {
   AttendanceRecord
 } from '../types';
 import { StorageService } from '../services/storage';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { 
   Users, 
   User,
@@ -240,6 +241,8 @@ export interface DutyTimeSlot {
 
 export interface DailyDutyLog {
   id: string;
+  userId?: string;
+  username?: string;
   date: string; // YYYY-MM-DD
   dutyTeacherName: string;
   dutyType: string;
@@ -473,41 +476,107 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
 
   const [dutyLogSubView, setDutyLogSubView] = useState<'fill' | 'history'>('fill');
 
-  // Helper to retrieve the latest duty log history for pre-filling "รายละเอียดการบรรยายการปฏิบัติหน้าที่"
+  const currentMemberDutyStorageId = useMemo(() => {
+    return String(user.id || user.username || '').trim();
+  }, [user.id, user.username]);
+
+  // Helper to retrieve the latest duty log history strictly for the current member/user ID only
   const getLatestDutyLogHistory = useCallback(() => {
     let latestSlots: DutyTimeSlot[] = DEFAULT_DUTY_SLOTS.map(s => ({ ...s, id: `slot-${Date.now()}-${Math.random().toString(36).substring(2, 6)}` }));
     let latestWeather = 'แจ่มใส เหตุการณ์ทั่วไปปกติ';
     let latestOverall = 'การปฏิบัติหน้าที่เรียบร้อยดี นักเรียนปฏิบัติตามระเบียบวินัย';
 
+    const currentUserId = String(user.id || '').trim();
+    const currentUsername = String(user.username || '').trim().toLowerCase();
+    const currentFullNameNorm = cleanTeacherName(user.fullName || '');
+
+    const isLogOwnedByCurrentMember = (log: DailyDutyLog): boolean => {
+      if (!log || log.id === 'dlog-1') return false;
+      const logUserId = String(log.userId || '').trim();
+      const logUsername = String(log.username || '').trim().toLowerCase();
+
+      // If log has userId or username recorded, match strictly against current member's ID or username
+      if (logUserId || logUsername) {
+        const idMatched = Boolean(logUserId && currentUserId && logUserId === currentUserId);
+        const usernameMatched = Boolean(logUsername && currentUsername && logUsername === currentUsername);
+        return idMatched || usernameMatched;
+      }
+      // Legacy logs without userId/username: match strictly against current user's normalized full name
+      const logTeacherNorm = cleanTeacherName(log.dutyTeacherName || '');
+      return Boolean(currentFullNameNorm) && Boolean(logTeacherNorm) && logTeacherNorm === currentFullNameNorm;
+    };
+
     const currentDutyLogs = StorageService.getDailyDutyLogs(dutyLogs);
     if (currentDutyLogs && currentDutyLogs.length > 0) {
-      const sorted = [...currentDutyLogs].sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt || '').localeCompare(a.createdAt || ''));
-      const latest = sorted[0];
-      if (latest && Array.isArray(latest.timeSlots) && latest.timeSlots.length > 0) {
-        latestSlots = latest.timeSlots.map((s: DutyTimeSlot, idx: number) => ({ ...s, id: `slot-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 5)}` }));
-        if (latest.weatherCondition) latestWeather = latest.weatherCondition;
-        if (latest.overallStatus) latestOverall = latest.overallStatus;
-        return { latestSlots, latestWeather, latestOverall, sourceDate: latest.date, sourceTeacher: latest.dutyTeacherName };
+      const ownLogs = currentDutyLogs.filter(isLogOwnedByCurrentMember);
+      if (ownLogs.length > 0) {
+        const sortedOwn = [...ownLogs].sort(
+          (a, b) =>
+            (b.createdAt || '').localeCompare(a.createdAt || '') ||
+            (b.date || '').localeCompare(a.date || '')
+        );
+        const latest = sortedOwn[0];
+        if (latest && Array.isArray(latest.timeSlots) && latest.timeSlots.length > 0) {
+          latestSlots = latest.timeSlots.map((s: DutyTimeSlot, idx: number) => ({
+            ...s,
+            id: `slot-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 5)}`
+          }));
+          if (latest.weatherCondition) latestWeather = latest.weatherCondition;
+          if (latest.overallStatus) latestOverall = latest.overallStatus;
+          return {
+            latestSlots,
+            latestWeather,
+            latestOverall,
+            sourceDate: latest.date,
+            sourceTeacher: latest.dutyTeacherName,
+            hasHistory: true
+          };
+        }
       }
     }
 
-    try {
-      const savedTemplate = localStorage.getItem('ams_saved_duty_template_v1');
-      const savedSummary = localStorage.getItem('ams_latest_duty_summary_v1');
-      if (savedTemplate) {
-        const parsed = JSON.parse(savedTemplate);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          latestSlots = parsed.map((s: DutyTimeSlot, idx: number) => ({ ...s, id: `slot-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 5)}` }));
+    if (currentMemberDutyStorageId) {
+      try {
+        const savedTemplate = localStorage.getItem(`ams_saved_duty_template_v2_${currentMemberDutyStorageId}`);
+        const savedSummary = localStorage.getItem(`ams_latest_duty_summary_v2_${currentMemberDutyStorageId}`);
+        let foundLocal = false;
+        if (savedTemplate) {
+          const parsed = JSON.parse(savedTemplate);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            latestSlots = parsed.map((s: DutyTimeSlot, idx: number) => ({
+              ...s,
+              id: `slot-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 5)}`
+            }));
+            foundLocal = true;
+          }
         }
-      }
-      if (savedSummary) {
-        latestWeather = savedSummary;
-        latestOverall = savedSummary;
-      }
-    } catch (e) {}
+        if (savedSummary) {
+          latestWeather = savedSummary;
+          latestOverall = savedSummary;
+          foundLocal = true;
+        }
+        if (foundLocal) {
+          return {
+            latestSlots,
+            latestWeather,
+            latestOverall,
+            sourceDate: undefined,
+            sourceTeacher: user.fullName,
+            hasHistory: true
+          };
+        }
+      } catch (e) {}
+    }
 
-    return { latestSlots, latestWeather, latestOverall, sourceDate: undefined, sourceTeacher: undefined };
-  }, [dutyLogs]);
+    return {
+      latestSlots,
+      latestWeather,
+      latestOverall,
+      sourceDate: undefined,
+      sourceTeacher: undefined,
+      hasHistory: false
+    };
+  }, [dutyLogs, user.id, user.username, user.fullName, currentMemberDutyStorageId]);
 
   // Duty Log Fill Form State
   const [dutyLogForm, setDutyLogForm] = useState<{
@@ -678,9 +747,11 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
         ...updatedSlots[index],
         [field]: value
       };
-      try {
-        localStorage.setItem('ams_saved_duty_template_v1', JSON.stringify(updatedSlots));
-      } catch (e) {}
+      if (currentMemberDutyStorageId) {
+        try {
+          localStorage.setItem(`ams_saved_duty_template_v2_${currentMemberDutyStorageId}`, JSON.stringify(updatedSlots));
+        } catch (e) {}
+      }
       return { ...prev, timeSlots: updatedSlots };
     });
   };
@@ -694,9 +765,11 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
     setDutyLogForm(prev => {
       const nextSlots = [...prev.timeSlots];
       nextSlots.splice(insertIndex, 0, newSlot);
-      try {
-        localStorage.setItem('ams_saved_duty_template_v1', JSON.stringify(nextSlots));
-      } catch (e) {}
+      if (currentMemberDutyStorageId) {
+        try {
+          localStorage.setItem(`ams_saved_duty_template_v2_${currentMemberDutyStorageId}`, JSON.stringify(nextSlots));
+        } catch (e) {}
+      }
       return { ...prev, timeSlots: nextSlots };
     });
   };
@@ -708,9 +781,11 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
     }
     setDutyLogForm(prev => {
       const nextSlots = prev.timeSlots.filter((_, idx) => idx !== index);
-      try {
-        localStorage.setItem('ams_saved_duty_template_v1', JSON.stringify(nextSlots));
-      } catch (e) {}
+      if (currentMemberDutyStorageId) {
+        try {
+          localStorage.setItem(`ams_saved_duty_template_v2_${currentMemberDutyStorageId}`, JSON.stringify(nextSlots));
+        } catch (e) {}
+      }
       return { ...prev, timeSlots: nextSlots };
     });
   };
@@ -732,6 +807,8 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
     const summaryText = (dutyLogForm.weatherCondition || dutyLogForm.overallStatus || 'การปฏิบัติหน้าที่เรียบร้อยดี').trim();
     const newLogItem: DailyDutyLog = {
       id: logId,
+      userId: existingMatch?.userId || user.id || '',
+      username: existingMatch?.username || user.username || '',
       date: dutyLogForm.date,
       dutyTeacherName: dutyLogForm.dutyTeacherName.trim(),
       dutyType: dutyLogForm.dutyType,
@@ -746,19 +823,22 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
     };
 
     const existingIdx = currentLogs.findIndex(l => l.id === logId);
-    const nextLogs = existingIdx >= 0
+    const nextLogs = (existingIdx >= 0
       ? currentLogs.map((l, idx) => (idx === existingIdx ? newLogItem : l))
-      : [newLogItem, ...currentLogs];
+      : [newLogItem, ...currentLogs]
+    ).sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt || '').localeCompare(a.createdAt || ''));
 
     StorageService.setDailyDutyLogs(nextLogs);
     const savedLogs = StorageService.saveDailyDutyLog(newLogItem);
     setDutyLogs(savedLogs);
 
-    // Save latest descriptions and summary to localStorage so future entries pre-fill with latest history
-    try {
-      localStorage.setItem('ams_saved_duty_template_v1', JSON.stringify(dutyLogForm.timeSlots));
-      localStorage.setItem('ams_latest_duty_summary_v1', summaryText);
-    } catch (e) {}
+    // Save latest descriptions and summary strictly per member ID so it never leaks across members
+    if (currentMemberDutyStorageId) {
+      try {
+        localStorage.setItem(`ams_saved_duty_template_v2_${currentMemberDutyStorageId}`, JSON.stringify(dutyLogForm.timeSlots));
+        localStorage.setItem(`ams_latest_duty_summary_v2_${currentMemberDutyStorageId}`, summaryText);
+      } catch (e) {}
+    }
 
     setDutyLogForm(prev => ({ ...prev, id: undefined }));
 
@@ -2012,44 +2092,77 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
     return new Set(dutyActiveSchoolDays.map(d => d.date));
   }, [dutyActiveSchoolDays]);
 
-  // Filter duty logs by activeDutyYr & activeDutySem
+  // Filter duty logs by activeDutyYr & activeDutySem and sort strictly by duty date (YYYY-MM-DD) descending
   const filteredDutyLogs = useMemo(() => {
-    return dutyLogs.filter(log => {
-      if (log.academicYear && log.semester) {
-        return String(log.academicYear) === String(activeDutyYr) && String(log.semester) === String(activeDutySem);
+    const toComparableDateKey = (dateStr?: string): string => {
+      const raw = (dateStr || '').trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+        const [yStr, mStr, dStr] = raw.split('-');
+        let y = parseInt(yStr, 10);
+        if (y > 2400) y -= 543;
+        return `${String(y).padStart(4, '0')}-${mStr}-${dStr}`;
       }
-      if (dutyActiveSchoolDayDatesSet.has(log.date)) {
-        return true;
-      }
-      for (const [termKey, cfg] of Object.entries(attendanceConfigsByTerm)) {
-        if (cfg?.schoolDays?.some(d => !d.isHoliday && d.date === log.date)) {
-          const [tSem, tYr] = termKey.split('_');
-          return String(tSem) === String(activeDutySem) && String(tYr) === String(activeDutyYr);
-        }
-      }
-      const parts = (log.date || '').split('-');
+      const parts = raw.split(/[/-]/);
       if (parts.length === 3) {
-        const y = parseInt(parts[0], 10);
-        const m = parseInt(parts[1], 10);
-        if (!isNaN(y) && !isNaN(m)) {
-          const beYr = y > 2400 ? y : y + 543;
-          let inferredSem = '1';
-          let inferredYear = String(beYr);
-          if (m >= 5 && m <= 10) {
-            inferredSem = '1';
-            inferredYear = String(beYr);
-          } else if (m >= 11) {
-            inferredSem = '2';
-            inferredYear = String(beYr);
-          } else {
-            inferredSem = '2';
-            inferredYear = String(beYr - 1);
-          }
-          return inferredYear === String(activeDutyYr) && inferredSem === String(activeDutySem);
+        if (parts[0].length === 4) {
+          let y = parseInt(parts[0], 10);
+          if (y > 2400) y -= 543;
+          return `${String(y).padStart(4, '0')}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+        }
+        if (parts[2].length === 4) {
+          let y = parseInt(parts[2], 10);
+          if (y > 2400) y -= 543;
+          return `${String(y).padStart(4, '0')}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
         }
       }
-      return true;
-    });
+      return raw;
+    };
+
+    return dutyLogs
+      .filter(log => {
+        if (log.academicYear && log.semester) {
+          return String(log.academicYear) === String(activeDutyYr) && String(log.semester) === String(activeDutySem);
+        }
+        if (dutyActiveSchoolDayDatesSet.has(log.date)) {
+          return true;
+        }
+        for (const [termKey, cfg] of Object.entries(attendanceConfigsByTerm)) {
+          if (cfg?.schoolDays?.some(d => !d.isHoliday && d.date === log.date)) {
+            const [tSem, tYr] = termKey.split('_');
+            return String(tSem) === String(activeDutySem) && String(tYr) === String(activeDutyYr);
+          }
+        }
+        const parts = (log.date || '').split('-');
+        if (parts.length === 3) {
+          const y = parseInt(parts[0], 10);
+          const m = parseInt(parts[1], 10);
+          if (!isNaN(y) && !isNaN(m)) {
+            const beYr = y > 2400 ? y : y + 543;
+            let inferredSem = '1';
+            let inferredYear = String(beYr);
+            if (m >= 5 && m <= 10) {
+              inferredSem = '1';
+              inferredYear = String(beYr);
+            } else if (m >= 11) {
+              inferredSem = '2';
+              inferredYear = String(beYr);
+            } else {
+              inferredSem = '2';
+              inferredYear = String(beYr - 1);
+            }
+            return inferredYear === String(activeDutyYr) && inferredSem === String(activeDutySem);
+          }
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const keyA = toComparableDateKey(a.date);
+        const keyB = toComparableDateKey(b.date);
+        if (keyA !== keyB) {
+          return keyB.localeCompare(keyA); // Latest duty date on top, descending by day/month/year
+        }
+        return (b.createdAt || '').localeCompare(a.createdAt || '');
+      });
   }, [dutyLogs, dutyActiveSchoolDayDatesSet, attendanceConfigsByTerm, activeDutyYr, activeDutySem]);
 
   // Ensure dutyLogForm.date is always restricted to a valid 100-day date
@@ -2460,9 +2573,18 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
   const [viewingStudent, setViewingStudent] = useState<Student | null>(null);
   const [viewingPersonnel, setViewingPersonnel] = useState<Personnel | null>(null);
   const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<{
-    type: 'student' | 'personnel';
+    type:
+      | 'student'
+      | 'personnel'
+      | 'custom_field'
+      | 'student_photo'
+      | 'personnel_photo'
+      | 'personnel_signature'
+      | 'duty_time_slot';
     id: string;
     name: string;
+    subtitle?: string;
+    index?: number;
   } | null>(null);
 
   // State & handler for downloading official government student profile PDF
@@ -4098,7 +4220,15 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                     {user.role === 'admin' && (
                       <button
                         type="button"
-                        onClick={() => handleRemoveCustomField(idx)}
+                        onClick={() =>
+                          setDeleteConfirmTarget({
+                            type: 'custom_field',
+                            id: `cf-${idx}`,
+                            name: field.label || `หัวข้อข้อมูลที่ ${idx + 1}`,
+                            subtitle: field.value || 'ข้อมูลเพิ่มเติมของโรงเรียน',
+                            index: idx
+                          })
+                        }
                         className="p-2 text-slate-400 hover:text-rose-600 rounded-lg cursor-pointer"
                         title="ลบฟิลด์นี้"
                       >
@@ -4992,54 +5122,63 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
       )}
 
       {/* MODAL: Confirmation for Deletion */}
-      {deleteConfirmTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 text-center">
-            <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto shadow-2xs">
-              <Trash2 className="w-6 h-6" />
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-slate-800">
-                {deleteConfirmTarget.type === 'student' ? 'ยืนยันการลบข้อมูลนักเรียน' : 'ยืนยันการลบข้อมูลบุคลากร'}
-              </h3>
-              <p className="text-xs text-slate-600 mt-1">
-                คุณแน่ใจหรือไม่ว่าต้องการลบข้อมูล <strong className="text-slate-900 font-bold">{deleteConfirmTarget.name}</strong> ออกจากระบบอย่างถาวร?
-              </p>
-            </div>
-            <div className="flex items-center justify-center gap-2 pt-2 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setDeleteConfirmTarget(null)}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
-              >
-                ยกเลิก
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (deleteConfirmTarget.type === 'student') {
-                    onDeleteStudent(deleteConfirmTarget.id);
-                    if (viewingStudent?.id === deleteConfirmTarget.id) {
-                      setViewingStudent(null);
-                    }
-                    onShowToast('success', 'ลบข้อมูลสำเร็จ', `ลบข้อมูลนักเรียน ${deleteConfirmTarget.name} เรียบร้อยแล้ว`);
-                  } else {
-                    onDeletePersonnel(deleteConfirmTarget.id);
-                    if (editingPersonnel?.id === deleteConfirmTarget.id) {
-                      setEditingPersonnel(null);
-                    }
-                    onShowToast('success', 'ลบข้อมูลสำเร็จ', `ลบข้อมูลบุคลากร ${deleteConfirmTarget.name} เรียบร้อยแล้ว`);
-                  }
-                  setDeleteConfirmTarget(null);
-                }}
-                className="px-5 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 active:scale-95 rounded-xl shadow-xs transition-all cursor-pointer"
-              >
-                ยืนยันลบข้อมูล
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDeleteModal
+        isOpen={Boolean(deleteConfirmTarget)}
+        title={
+          deleteConfirmTarget?.type === 'student'
+            ? 'ยืนยันการลบข้อมูลนักเรียน'
+            : deleteConfirmTarget?.type === 'personnel'
+            ? 'ยืนยันการลบข้อมูลบุคลากร'
+            : deleteConfirmTarget?.type === 'custom_field'
+            ? 'ยืนยันการลบหัวข้อข้อมูล'
+            : deleteConfirmTarget?.type === 'duty_time_slot'
+            ? 'ยืนยันการลบช่วงเวลาปฏิบัติหน้าที่'
+            : deleteConfirmTarget?.type === 'personnel_signature'
+            ? 'ยืนยันการลบลายเซ็น'
+            : 'ยืนยันการลบรูปภาพ'
+        }
+        categoryLabel={
+          deleteConfirmTarget?.type === 'student'
+            ? 'ข้อมูลนักเรียน'
+            : deleteConfirmTarget?.type === 'personnel'
+            ? 'ข้อมูลบุคลากร'
+            : deleteConfirmTarget?.type === 'custom_field'
+            ? 'ข้อมูลโรงเรียน'
+            : deleteConfirmTarget?.type === 'duty_time_slot'
+            ? 'ตารางเวลาครูเวร'
+            : 'ไฟล์รูปภาพ'
+        }
+        itemTitle={deleteConfirmTarget?.name || ''}
+        itemSubtitle={deleteConfirmTarget?.subtitle}
+        onCancel={() => setDeleteConfirmTarget(null)}
+        onConfirm={() => {
+          if (!deleteConfirmTarget) return;
+          if (deleteConfirmTarget.type === 'student') {
+            onDeleteStudent(deleteConfirmTarget.id);
+            if (viewingStudent?.id === deleteConfirmTarget.id) {
+              setViewingStudent(null);
+            }
+            onShowToast('success', 'ลบข้อมูลสำเร็จ', `ลบข้อมูลนักเรียน ${deleteConfirmTarget.name} เรียบร้อยแล้ว`);
+          } else if (deleteConfirmTarget.type === 'personnel') {
+            onDeletePersonnel(deleteConfirmTarget.id);
+            if (editingPersonnel?.id === deleteConfirmTarget.id) {
+              setEditingPersonnel(null);
+            }
+            onShowToast('success', 'ลบข้อมูลสำเร็จ', `ลบข้อมูลบุคลากร ${deleteConfirmTarget.name} เรียบร้อยแล้ว`);
+          } else if (deleteConfirmTarget.type === 'custom_field' && typeof deleteConfirmTarget.index === 'number') {
+            handleRemoveCustomField(deleteConfirmTarget.index);
+          } else if (deleteConfirmTarget.type === 'student_photo') {
+            setStudentFormData(prev => ({ ...prev, photoUrl: '' }));
+          } else if (deleteConfirmTarget.type === 'personnel_photo') {
+            setPersonnelAvatarUrl('');
+          } else if (deleteConfirmTarget.type === 'personnel_signature') {
+            setPersonnelSignatureUrl('');
+          } else if (deleteConfirmTarget.type === 'duty_time_slot' && typeof deleteConfirmTarget.index === 'number') {
+            handleRemoveTimeSlot(deleteConfirmTarget.index);
+          }
+          setDeleteConfirmTarget(null);
+        }}
+      />
 
       {/* MODAL: Add/Edit Complete Student */}
       {isStudentModalOpen && (
@@ -5116,7 +5255,14 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                     {studentFormData.photoUrl && (
                       <button
                         type="button"
-                        onClick={() => setStudentFormData(prev => ({ ...prev, photoUrl: '' }))}
+                        onClick={() =>
+                          setDeleteConfirmTarget({
+                            type: 'student_photo',
+                            id: 'student-photo',
+                            name: 'รูปถ่ายนักเรียน',
+                            subtitle: `${studentFormData.prefix || ''}${studentFormData.firstName || ''} ${studentFormData.lastName || ''}`.trim() || undefined
+                          })
+                        }
                         className="px-3.5 py-1.5 bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-600 text-xs font-medium rounded-xl transition-colors cursor-pointer"
                       >
                         ลบรูป
@@ -6365,7 +6511,14 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                     {personnelAvatarUrl && (
                       <button
                         type="button"
-                        onClick={() => setPersonnelAvatarUrl('')}
+                        onClick={() =>
+                          setDeleteConfirmTarget({
+                            type: 'personnel_photo',
+                            id: 'personnel-photo',
+                            name: 'รูปภาพบุคลากร',
+                            subtitle: editingPersonnel ? `${editingPersonnel.prefix || ''}${editingPersonnel.firstName} ${editingPersonnel.lastName}`.trim() : undefined
+                          })
+                        }
                         className="px-2.5 py-1 bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-600 text-xs font-medium rounded-xl transition-colors cursor-pointer block"
                       >
                         ลบรูป
@@ -6417,7 +6570,14 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                     {personnelSignatureUrl && (
                       <button
                         type="button"
-                        onClick={() => setPersonnelSignatureUrl('')}
+                        onClick={() =>
+                          setDeleteConfirmTarget({
+                            type: 'personnel_signature',
+                            id: 'personnel-signature',
+                            name: 'ภาพลายเซ็นบุคลากร',
+                            subtitle: editingPersonnel ? `${editingPersonnel.prefix || ''}${editingPersonnel.firstName} ${editingPersonnel.lastName}`.trim() : undefined
+                          })
+                        }
                         className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-medium rounded-xl transition-colors cursor-pointer block"
                       >
                         ลบลายเซ็น
@@ -7293,6 +7453,10 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                     type="button"
                     onClick={() => {
                       const history = getLatestDutyLogHistory();
+                      if (!history.hasHistory) {
+                        onShowToast('warning', 'ยังไม่มีประวัติของคุณ', 'ยังไม่มีประวัติการกรอกรายงานเวรของบัญชีนี้ในระบบ');
+                        return;
+                      }
                       setDutyLogForm(prev => ({
                         ...prev,
                         timeSlots: history.latestSlots,
@@ -7379,7 +7543,19 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
                                 <div className="flex items-center justify-center">
                                   <button
                                     type="button"
-                                    onClick={() => handleRemoveTimeSlot(idx)}
+                                    onClick={() => {
+                                      if (dutyLogForm.timeSlots.length <= 1) {
+                                        onShowToast('warning', 'ต้องมีอย่างน้อย 1 ช่วงเวลา', 'ต้องคงเหลือช่วงเวลาสำหรับกรอกอย่างน้อย 1 รายการ');
+                                        return;
+                                      }
+                                      setDeleteConfirmTarget({
+                                        type: 'duty_time_slot',
+                                        id: `slot-${idx}`,
+                                        name: `ช่วงเวลา ${slot.time || `#${idx + 1}`}`,
+                                        subtitle: slot.description || 'รายการบันทึกกิจกรรมตามช่วงเวลา',
+                                        index: idx
+                                      });
+                                    }}
                                     className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg cursor-pointer transition-colors"
                                     title="ลบช่วงเวลานี้"
                                   >
@@ -9671,108 +9847,54 @@ export const ModuleDataOthers: React.FC<ModuleDataOthersProps> = ({
       })()}
 
       {/* MODAL: CONFIRM DELETE DUTY LOG (ถามยืนยันทุกครั้งเสมอ - Admin เท่านั้น) */}
-      {confirmDeleteDutyLog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
-          <div className="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 space-y-4 text-center">
-            <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center mx-auto shadow-2xs">
-              <Trash2 className="w-6 h-6" />
-            </div>
-            <div className="space-y-1.5">
-              <h3 className="text-base font-bold text-slate-800">
-                ยืนยันการลบรายงานครูเวร
-              </h3>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                คุณต้องการลบรายงานการปฏิบัติหน้าที่ครูเวรประจำวันที่{' '}
-                <span className="font-bold text-slate-900">{formatThaiDate(confirmDeleteDutyLog.date)}</span> ของ{' '}
-                <span className="font-bold text-slate-900">{confirmDeleteDutyLog.dutyTeacherName}</span> ใช่หรือไม่?
-              </p>
-              <p className="text-[11px] text-rose-600 font-medium">
-                เมื่อลบแล้วจะไม่สามารถกู้คืนข้อมูลได้
-              </p>
-            </div>
-            <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setConfirmDeleteDutyLog(null)}
-                className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-              >
-                ยกเลิก
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const targetId = confirmDeleteDutyLog.id;
-                  const targetDate = confirmDeleteDutyLog.date;
-                  const remaining = dutyLogs.filter(l => l.id !== targetId);
-                  StorageService.setDailyDutyLogs(remaining);
-                  const updated = StorageService.deleteDailyDutyLog(targetId);
-                  setDutyLogs(updated);
-                  if (previewDutyLog && previewDutyLog.id === targetId) {
-                    setPreviewDutyLog(null);
-                  }
-                  setConfirmDeleteDutyLog(null);
-                  onShowToast('info', 'ลบสำเร็จ', `ลบรายงานครูเวรประจำวันที่ ${targetDate} เรียบร้อยแล้ว`);
-                }}
-                className="py-2.5 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-colors shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>ยืนยันการลบ</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDeleteModal
+        isOpen={Boolean(confirmDeleteDutyLog)}
+        title="ยืนยันการลบรายงานครูเวร"
+        categoryLabel="รายงานครูเวร"
+        itemTitle={confirmDeleteDutyLog ? `ครูเวร: ${confirmDeleteDutyLog.dutyTeacherName}` : ''}
+        itemSubtitle={confirmDeleteDutyLog ? `ประจำวันที่ ${formatThaiDate(confirmDeleteDutyLog.date)}` : ''}
+        onCancel={() => setConfirmDeleteDutyLog(null)}
+        onConfirm={() => {
+          if (!confirmDeleteDutyLog) return;
+          const targetId = confirmDeleteDutyLog.id;
+          const targetDate = confirmDeleteDutyLog.date;
+          const remaining = dutyLogs.filter(l => l.id !== targetId);
+          StorageService.setDailyDutyLogs(remaining);
+          const updated = StorageService.deleteDailyDutyLog(targetId);
+          setDutyLogs(updated);
+          if (previewDutyLog && previewDutyLog.id === targetId) {
+            setPreviewDutyLog(null);
+          }
+          setConfirmDeleteDutyLog(null);
+          onShowToast('info', 'ลบสำเร็จ', `ลบรายงานครูเวรประจำวันที่ ${targetDate} เรียบร้อยแล้ว`);
+        }}
+      />
 
       {/* MODAL: Confirmation for Leave Deletion (Admin Only, asks confirmation every time) */}
-      {confirmDeleteLeave && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-md w-full p-6 space-y-4 text-center animate-in zoom-in-95 duration-150">
-            <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center mx-auto shadow-2xs">
-              <Trash2 className="w-6 h-6" />
-            </div>
-            <div className="space-y-1">
-              <h3 className="text-base font-bold text-slate-800">
-                ยืนยันการลบรายการคำขอลา
-              </h3>
-              <p className="text-xs text-slate-600 leading-relaxed">
-                คุณต้องการลบรายการ{confirmDeleteLeave.leaveType} ของ{' '}
-                <span className="font-bold text-slate-900">{confirmDeleteLeave.teacherName}</span>{' '}
-                (ตั้งแต่วันที่ {formatIsoToThaiDisplay(confirmDeleteLeave.startDate, 'short')} ถึง {formatIsoToThaiDisplay(confirmDeleteLeave.endDate, 'short')}) ใช่หรือไม่?
-              </p>
-              <p className="text-[11px] text-rose-600 font-medium">
-                เมื่อลบแล้วจะไม่สามารถกู้คืนข้อมูลได้
-              </p>
-            </div>
-            <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setConfirmDeleteLeave(null)}
-                className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-              >
-                ยกเลิก
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  const targetId = confirmDeleteLeave.id;
-                  const targetTeacher = confirmDeleteLeave.teacherName;
-                  const next = StorageService.deleteLeaveRequest(targetId);
-                  setLeaveRequests(next);
-                  if (previewLeave && previewLeave.id === targetId) {
-                    setPreviewLeave(null);
-                  }
-                  setConfirmDeleteLeave(null);
-                  onShowToast('info', 'ลบสำเร็จ', `ลบรายการคำขอลาของ ${targetTeacher} เรียบร้อยแล้ว`);
-                }}
-                className="py-2.5 px-4 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition-colors shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>ยืนยันการลบ</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDeleteModal
+        isOpen={Boolean(confirmDeleteLeave)}
+        title="ยืนยันการลบรายการคำขอลา"
+        categoryLabel={confirmDeleteLeave?.leaveType || 'รายการลา'}
+        itemTitle={confirmDeleteLeave ? `${confirmDeleteLeave.teacherName}` : ''}
+        itemSubtitle={
+          confirmDeleteLeave
+            ? `วันที่ ${formatIsoToThaiDisplay(confirmDeleteLeave.startDate, 'short')} ถึง ${formatIsoToThaiDisplay(confirmDeleteLeave.endDate, 'short')}`
+            : ''
+        }
+        onCancel={() => setConfirmDeleteLeave(null)}
+        onConfirm={() => {
+          if (!confirmDeleteLeave) return;
+          const targetId = confirmDeleteLeave.id;
+          const targetTeacher = confirmDeleteLeave.teacherName;
+          const next = StorageService.deleteLeaveRequest(targetId);
+          setLeaveRequests(next);
+          if (previewLeave && previewLeave.id === targetId) {
+            setPreviewLeave(null);
+          }
+          setConfirmDeleteLeave(null);
+          onShowToast('info', 'ลบสำเร็จ', `ลบรายการคำขอลาของ ${targetTeacher} เรียบร้อยแล้ว`);
+        }}
+      />
       {isDutyModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
           <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-md w-full p-6 space-y-4 animate-in zoom-in-95 duration-150">

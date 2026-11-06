@@ -135,8 +135,17 @@ const SINGLE_DOC_MAX_CHARS = 650000;
 const MAX_CHUNKS = 25;
 
 export function sanitizeFirestoreKey(rawKey: string): string {
-  const cleaned = String(rawKey || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
+  const cleaned = String(rawKey || '')
+    .replace(/[^a-zA-Z0-9_-]/g, ch => `-u${(ch.codePointAt(0) || 0).toString(36)}-`)
+    .slice(0, 120);
   return cleaned || 'default_key';
+}
+
+export function unsanitizeFirestoreKey(docId: string): string {
+  return String(docId || '').replace(/-u([0-9a-z]+)-/g, (_m, code) => {
+    const cp = parseInt(code, 36);
+    return Number.isFinite(cp) && cp > 0 ? String.fromCodePoint(cp) : _m;
+  });
 }
 
 export async function saveKeyToFirestore(
@@ -229,6 +238,7 @@ async function resolveEntryValue(
 ): Promise<{ key: string; value: any; updatedAt: number; clientId: string } | null> {
   if (firestoreUnavailable || !data || typeof data.id !== 'string') return null;
   const docId = data.id;
+  const rawKey = unsanitizeFirestoreKey(docId);
   const updatedAt = Number(data.updatedAt) || Date.now();
   const chunkCount = Number(data.chunkCount) || 0;
   const clientId = String(data.clientId || '');
@@ -256,7 +266,7 @@ async function resolveEntryValue(
     if (!fullJson) return null;
     lastSyncedSerialized.set(docId, fullJson);
     const parsed = JSON.parse(fullJson);
-    return { key: docId, value: parsed, updatedAt, clientId };
+    return { key: rawKey, value: parsed, updatedAt, clientId };
   } catch {
     return null;
   }
